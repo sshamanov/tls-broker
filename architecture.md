@@ -531,6 +531,37 @@ When downstream creates a replacement order using `replaces`, preserve that rela
 
 For Let's Encrypt, ARI-qualified renewals are especially important because they are exempt from normal issuance rate limits.
 
+## ARI rules the broker follows
+
+Verified against Let's Encrypt (Boulder) and Google Trust Services, October 2026:
+
+- Let's Encrypt exempts a `replaces` order from rate limits only when the
+  request falls **inside the predecessor's suggested window**, comes from the
+  **same upstream account**, and shares at least one identifier. Outside the
+  window the order is accepted but counted normally.
+- A certificate can have only one live replacement order. A second `replaces`
+  is refused with `alreadyReplaced` until the first order is invalid or expired.
+- Google Trust Services serves ARI but documents no quota exemption; the broker
+  assumes none. Whether a provider exempts ARI renewals is a per-provider flag.
+
+Consequences:
+
+- Most clients never send `replaces` (Certbot only reads `renewalInfo`). When a
+  downstream order has none, the broker infers it: the newest unreplaced
+  certificate of the same identifier set from the same provider.
+- A downstream `replaces` that does not match a certificate the broker issued
+  is ignored, not rejected.
+- An order is classed "ARI-qualified" only when the provider exempts ARI and
+  the current time is inside the suggested window. Otherwise it is an ordinary
+  renewal and uses ordinary budget.
+- If the upstream answers `alreadyReplaced`, the broker retries once without
+  `replaces` as an ordinary renewal.
+- An upstream order that was prepared but never finalized (the client vanished)
+  is **adopted** by the next downstream order for the same identifier set and
+  provider instead of creating another. This keeps an abandoned order from
+  blocking the replacement slot and saves order budget. An upstream order still
+  serves at most one downstream order at a time.
+
 ## Provider switching during renewal
 
 Provider switch is emergency behavior only.
