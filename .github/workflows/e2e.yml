@@ -1,0 +1,30 @@
+# Slow suites that need extra containers (Pebble, certbot, acme.sh).
+# Run by hand from the Actions tab.
+name: e2e
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .cache
+          key: go-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-${{ runner.os }}-
+      - name: make e2e-pebble
+        run: make e2e-pebble
+      - name: make compat
+        run: make compat

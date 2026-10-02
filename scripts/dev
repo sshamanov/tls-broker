@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Run a command inside the Go development container.
+#
+#   scripts/dev go test ./internal/names/...
+#   scripts/dev sh            (interactive shell)
+#
+# Go is not installed on the host. The repository is mounted at /src, the
+# container runs as the calling user so files it creates are owned by you, and
+# the Go build and module caches live in .cache/ inside the repository.
+#
+# Environment:
+#   GO_IMAGE   container image to use (default golang:1.27)
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+image="${GO_IMAGE:-golang:1.27}"
+
+mkdir -p "$root/.cache/go-build" "$root/.cache/go-mod" "$root/.cache/home"
+
+tty=()
+if [ -t 0 ] && [ -t 1 ]; then
+  tty=(-it)
+fi
+
+if [ "$#" -eq 0 ]; then
+  set -- sh
+fi
+
+exec docker run --rm "${tty[@]}" \
+  --network host \
+  --user "$(id -u):$(id -g)" \
+  -v "$root:/src" \
+  -w /src \
+  -e HOME=/src/.cache/home \
+  -e GOCACHE=/src/.cache/go-build \
+  -e GOMODCACHE=/src/.cache/go-mod \
+  -e GOFLAGS="${GOFLAGS:--buildvcs=false}" \
+  -e GOTOOLCHAIN=local \
+  -e CGO_ENABLED \
+  -e VERSION \
+  "$image" "$@"

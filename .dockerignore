@@ -1,0 +1,12 @@
+.git
+.github
+.claude
+.cache
+bin
+data
+deploy/data
+docs
+test/compat
+**/.env
+*.db
+*.md

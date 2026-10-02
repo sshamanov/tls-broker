@@ -3,3 +3,15 @@
 .claude/memory.md
 .claude/memory/
 .claude/settings.local.json
+
+# Build output and repo-local Go caches
+/bin/
+.cache/
+
+# Runtime state and secrets (never commit)
+.env
+/data/
+deploy/data/
+*.db
+*.db-wal
+*.db-shm

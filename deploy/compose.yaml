@@ -1,0 +1,12 @@
+# Copy .env.example to .env next to this file, adjust, then:
+#   docker compose up -d
+services:
+  tls-broker:
+    image: ghcr.io/sshamanov/tls-broker:latest
+    restart: unless-stopped
+    network_mode: host
+    env_file: .env
+    user: "${PUID:-1000}:${PGID:-1000}"
+    volumes:
+      - ./data:/data
+    stop_grace_period: 30s
