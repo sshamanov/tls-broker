@@ -638,7 +638,16 @@ Potential additional fallback:
 ZeroSSL
 ```
 
-CAA for managed zones must allow every configured fallback provider.
+CAA policy for managed zones (decided October 2026):
+
+- `issue` allows every configured provider, so ordinary names can fall back.
+- `issuewild` allows **Let's Encrypt only**, pinned with `accounturi` to the
+  broker's own account. Wildcards therefore never fall back to another CA, and
+  the DNS-proxy wildcard protection (section 3.2) holds even for providers
+  whose `accounturi` support is unconfirmed.
+
+Revisit when every configured provider demonstrably honours `accounturi`
+(mandatory for all CAs from 2027-03-15).
 
 Do not load-balance routinely between CAs.
 
