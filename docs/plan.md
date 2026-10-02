@@ -10,8 +10,9 @@ same commit.
 - Go (latest stable), module `tls-broker`, one binary `cmd/tls-broker`.
 - SQLite through `modernc.org/sqlite` (no cgo in the shipped binary).
 - Downstream ACME server: own handlers on `net/http` + `go-jose/v4` for JWS.
-- Upstream ACME client: `go-acme/lego/v4` low-level `acme/api` package (step
-  control over order, challenge, finalize; ARI and EAB support).
+- Upstream ACME client: `go-acme/lego/v5` low-level `acme/api` package (step
+  control over order with `replaces` and profile, authorization, challenge,
+  finalize, certificate, renewal info; EAB support).
 - Route53: `aws-sdk-go-v2`. LDAP: `go-ldap/ldap/v3`. DNS wire format:
   `miekg/dns`. Metrics: `prometheus/client_golang`. Config: `gopkg.in/yaml.v3`.
 - UI: server-rendered `html/template`, embedded assets, no JS build step.
@@ -22,8 +23,9 @@ same commit.
 ```text
 cmd/tls-broker/        main: flags/env, start app
 internal/core/         domain types, ports (interfaces), errors, clock
-internal/core/coretest fakes for every port: clock, resolver, provider (fake CA),
-                       DNS engine, LDAP, auditor
+internal/core/coretest fakes for every non-store port: clock, resolver, provider
+                       (fake CA), DNS engine, LDAP, auditor, gate, scheduler,
+                       provider registry, config source, secrets; key/CSR helpers
 internal/names/        identifier normalization, identifier sets, zone matching
 internal/config/       YAML model, validation, generations, secrets, env settings
 internal/store/        SQLite: migrations and repositories (implements core stores)
@@ -44,6 +46,8 @@ internal/httpx/        real source IP, middleware, problem responses
 internal/metrics/      Prometheus collectors
 internal/app/          wiring, lifecycle, config reload, startup reconciliation
 internal/version/      build info set by ldflags
+internal/deps/         temporary blank imports that keep go.mod complete; removed
+                       by the app-wiring step once everything is imported
 test/e2e/              in-process end-to-end tests on fakes; Pebble-backed tests
 test/compat/           scripts running real certbot / acme.sh against the broker
 deploy/                Dockerfile, compose.yaml, .env.example, nginx example
@@ -57,97 +61,226 @@ concrete types). No package imports `app`.
 
 ## Contracts (`internal/core`)
 
-`core` holds the vocabulary every package shares. The skeleton step writes it
-in full; the sketch below fixes the shape.
+`core` holds the vocabulary every package shares. The Go doc comments in
+`internal/core` are the precise contract (idempotency, errors, time, state
+preconditions); this section is the map. Files: `doc.go` (conventions),
+`types.go`, `ports.go`, `stores.go`, `config.go`, `errors.go`, `problem.go`,
+`clock.go`.
+
+Conventions (from `core/doc.go`):
+
+- Stores never read the clock; time-dependent methods take `now`. Everything
+  else takes time from `core.Clock`.
+- "Not found" is an error matching `core.ErrNotFound`; a broken uniqueness or
+  state precondition is `core.ErrConflict` and changes nothing.
+- Each store method is one transaction. There is no cross-method transaction;
+  flows are ordered so a crash between two methods leaves a state recovery
+  understands.
+- Orders, certificates, accounts and challenges have caller-chosen string IDs
+  (`core.NewID()`); users and grants have store-assigned `int64` IDs.
 
 Domain types:
 
-- `User{ID, Username, Role, Blocked, Local}`; `Role` = normal | wildcard_allowed | admin.
-- `Grant{ID, OwnerUserID, Prefix netip.Prefix, Enabled, Wildcard, CreatedAt, Note}`.
-- `Session`, `ACMEAccount{ID, JWK, Thumbprint, Status, Contact}`.
-- `Order` (downstream): ID, AccountID, `names.Set`, Replaces, SourceIP,
-  State (`ready`, `processing`, `valid`, `invalid`), prep state
-  (`intent`, `preparing`, `prepared`, `failed`), Provider, UpstreamOrderURL,
-  CSRHash, CertificateID, Class, ExpiresAt, Error.
-- `Certificate{ID, names.Set, Provider, AccountURL, Serial, ARICertID, NotBefore,
-  NotAfter, ChainPEM, ReplacesID, ReplacedByID, Mode}` — ACME-mode chains are
-  stored here; direct-mode key material lives on disk only.
-- `Lineage{Key, LastRequestAt, ObservedInterval, Samples}` keyed by `names.Set`.
-- `Challenge{ID, ZoneID, RecordName, Value, Owner, State, CreatedAt}`.
-- `DirectEntry{Identifier, Generation, NotAfter, RenewAt, LastFetchAt, ...}`.
-- `ProviderState{Name, RetryAfter, Circuit, LastError}`; budget events.
-- `Decision{Allowed, Reason, GrantID}` with the reason strings of architecture §14.
-- `AuditEvent` with the fields of architecture §14.
+- `User{ID, Username, Role, Blocked, Local, CreatedAt, LastLoginAt}`; `Role` =
+  normal | wildcard_allowed | admin (`AtLeast`, `User.Can`). `(Username, Local)`
+  is unique.
+- `Grant{ID, OwnerUserID, Prefix netip.Prefix, Enabled, Wildcard, Note, CreatedAt}`.
+- `Session{TokenHash, UserID, CSRFToken, SourceIP, CreatedAt, ExpiresAt,
+  LastSeenAt}`; cookie token from `NewToken()`, stored as `HashToken(token)`.
+- `ACMEAccount{ID, Thumbprint, JWK, Status, Contact, CreatedAt}`.
+- `Order`: one issuance attempt, used for both downstream ACME orders
+  (`Mode` acme) and direct-mode jobs (`Mode` direct). Fields: ID, Mode,
+  AccountID, `names.Set`, Replaces (as sent by the client), SourceIP, GrantID,
+  `Status` (`ready`, `processing`, `valid`, `invalid`), `Prep` (`intent`,
+  `preparing`, `prepared`, `failed`), Class, ARIQualified, Provider,
+  UpstreamOrderURL, UpstreamReplaces, UpstreamExpiresAt, AdoptedByOrderID,
+  CSRHash, CSRDER (kept until terminal, for restart), CertificateID,
+  `Error *Problem`, CreatedAt, ExpiresAt, UpdatedAt.
+- `Certificate{ID, OrderID, Mode, names.Set, Provider, AccountURL, Serial,
+  ARICertID, NotBefore, NotAfter, IssuedAt, ChainPEM, ReplacesID, ReplacedByID}`
+  — ACME-mode chains are stored; direct-mode key material and chain live on
+  disk only. `core.ARICertID(leaf)` computes the RFC 9773 identifier.
+- `Lineage{Key, LastRequestAt, ObservedInterval, Samples}` keyed by
+  `names.Set.Key()`. `Lineage.Observe(at)` is the one definition of interval
+  tracking (requests closer than `MinLineageGap` = 1 h are one visit; later
+  gaps move the interval by a quarter). `core.EmergencyWindow(cfg, lifetime,
+  interval)` is the formula of architecture §8.
+- `Challenge{ID, ZoneID, RecordName, Value, Owner, State, Error, CreatedAt,
+  UpdatedAt}`; states of architecture §17 with `Terminal()` and
+  `WantsRecord()`; owners built with `OrderOwner(id)` / `DNSProxyOwner(ip)`.
+- `DirectEntry{Identifier, Generation, CertificateID, Provider, NotBefore,
+  NotAfter, RenewAt, NextARICheckAt, LastFetchAt, LastFetchIP, LastAttemptAt,
+  LastError, Failures, CreatedAt, UpdatedAt}`.
+- `ProviderState{Name, Health (healthy | rate_limited | down), RetryAfter,
+  LastError, Failures, UpdatedAt}`; `BudgetEvent{ID, Ref, Provider, Kind
+  (new_order | cert_domain | cert_set), Key, At, State (reserved | committed),
+  Renewal}`.
+- `Decision{Allowed, Reason, GrantID, Name, Detail}` with the `Reason*`
+  constants (architecture §14 plus `wildcard_unprotected`, `dns_mismatch`,
+  `dns_failure`, `invalid_identifier`, `not_ipv4`).
+- `AuditEvent` with the fields of architecture §14, `Audit*` type constants and
+  a `Visibility` (public | admin).
+- `PriorityClass` 1–6 as in architecture §10.
 
-Ports:
+Errors:
+
+- Sentinels: `ErrNotFound`, `ErrConflict`, `ErrExpired`, `ErrCSRMismatch`,
+  `ErrInvalidCredentials`, `ErrDirectoryUnavailable`, `ErrOutsideManagedZones`,
+  `ErrDNSPropagation`, `ErrResolver`.
+- `*ProviderError{Provider, Kind, RetryAfter, Problem, Err}`; kinds
+  `rate_limited`, `busy`, `down`, `rejected`, `already_replaced`.
+- `*AdmissionError{Kind, Provider, RetryAfter, Reason}`; kinds `rate_limited`,
+  `provider_busy`, `provider_down`.
+- `*Problem` (RFC 7807 + ACME): `Problem*` type constants, `NewProblem`,
+  `ProblemStatus`, and `ProblemFromError(err)` which maps every error above to
+  what an ACME client should see without leaking internal text.
+
+Ports (signatures abridged; `ctx` is `context.Context`):
 
 ```go
 type Clock interface { Now() time.Time; After(d time.Duration) <-chan time.Time }
+// SystemClock; Sleep(ctx, clock, d)
 
-type Resolver interface {            // public DNS view (DoH)
+type Resolver interface {            // public DNS view (DoH); NXDOMAIN = empty, nil
     LookupA(ctx, name string) ([]netip.Addr, error)   // follows CNAMEs
     LookupTXT(ctx, name string) ([]string, error)
     LookupCAA(ctx, name string) ([]CAA, error)        // RRset at that node only
 }
 
 type Gate interface {
-    // Mode is acme | direct | dnsproxy. Returns one decision for the whole set.
+    // Mode is acme | direct | dnsproxy. One decision for the whole set. A denial
+    // (including DNS failure) is a Decision, not an error.
     Authorize(ctx, mode Mode, src netip.Addr, set names.Set) (Decision, error)
 }
+type CAAChecker interface { CheckCAA(ctx, name string) (CAAStatus, error) } // gate, for the UI
 
 type Provider interface {            // one upstream CA account
     Name() string
-    Caps() ProviderCaps              // ARI, ARI exemption, CAA issuer, accounturi honoured
+    Caps() ProviderCaps              // ARI, ARIExempt, CAAIssuers, AccountURIHonoured
     AccountURL(ctx) (string, error)  // registers on first use
     NewOrder(ctx, names []string, replaces string) (UpstreamOrder, error)
-    GetOrder(ctx, url string) (UpstreamOrder, error)
-    DNSChallenges(ctx, order UpstreamOrder) ([]UpstreamChallenge, error)
+    GetOrder(ctx, orderURL string) (UpstreamOrder, error)
+    DNSChallenges(ctx, order UpstreamOrder) ([]UpstreamChallenge, error) // pending authzs only
     Accept(ctx, ch UpstreamChallenge) error
     WaitReady(ctx, orderURL string) (UpstreamOrder, error)
-    Finalize(ctx, order UpstreamOrder, csrDER []byte) (UpstreamOrder, error)
+    Finalize(ctx, orderURL string, csrDER []byte) (UpstreamOrder, error) // same CSR again is safe
     WaitCertificate(ctx, orderURL string) (chainPEM []byte, err error)
-    RenewalInfo(ctx, ariCertID string) (RenewalInfo, error)
+    RenewalInfo(ctx, ariCertID string) (RenewalInfo, error) // WindowStart/End, ExplanationURL, RetryAfter
 }
-// Provider errors are *ProviderError{Kind: RateLimited|Busy|Down|Rejected, RetryAfter, Problem}.
+type Providers interface { Get(name string) (Provider, bool); Enabled() []Provider }
 
-type DNSEngine interface {           // Route53 DNS-01
-    Present(ctx, owner, fqdn, value string) (challengeID string, err error) // returns once publicly visible
-    Cleanup(ctx, challengeID string) error                                  // idempotent
-    Reconcile(ctx) error                                                    // after restart
+type DNSEngine interface {           // Route53 DNS-01; record = "_acme-challenge.<name>"
+    Present(ctx, owner, record, value string) (challengeID string, err error) // idempotent per triple; returns once visible
+    Cleanup(ctx, challengeID string) error                                    // idempotent
+    CleanupOwner(ctx, owner string) error
+    Reconcile(ctx) error                                                      // after restart
 }
 
 type Scheduler interface {
-    // Blocks until admitted, ctx done, or refused (*AdmissionError{Kind, RetryAfter}).
+    // Blocks until admitted, ctx done, or refused (*AdmissionError).
     Acquire(ctx, req AdmissionRequest) (Ticket, error)
-    ReportProvider(provider string, err error)     // feeds circuits from provider errors
-    Snapshot() SchedulerSnapshot                   // for UI and metrics
+    Reattach(ctx, ref string) (Ticket, error)      // reservation that survived a restart
+    OpenRefs(ctx) ([]string, error)
+    ReportProvider(ctx, provider string, err error) // feeds circuits; nil = success
+    Snapshot() SchedulerSnapshot                    // for UI and metrics
 }
+// AdmissionRequest{Ref (= Order.ID), Provider, Names, Class, Renewal,
+//                  ARIQualified, ReuseUpstreamOrder, MaxWait}
 type Ticket interface {
+    Ref() string
+    OrderCreated()    // call before Provider.NewOrder: new-order budget is spent for good
     PrepDone()        // releases the concurrency slot
-    Commit()          // certificate issued: budgets consumed
-    Refund()          // nothing issued: reservation returned
+    Commit()          // certificate issued: certificate budgets consumed
+    Refund()          // nothing issued: certificate budgets returned
 }
 
 type Issuer interface {              // implemented by internal/issuance
-    // ACME proxy path.
-    Admit(ctx, AdmitRequest) (*Order, error)            // slot + persisted order + starts preparation
-    Finalize(ctx, orderID string, csrDER []byte, src netip.Addr) (*Order, error)
-    // Direct path: admission, order, DNS-01, finalize in one call.
-    Issue(ctx, IssueRequest) (*Certificate, chainPEM []byte, err error)
-    RenewalInfo(ctx, ariCertID string) (RenewalInfo, error)
-    Recover(ctx) error
+    Admit(ctx, AdmitRequest) (*Order, error)        // reuse open order, or slot + persisted order + background prep
+    Finalize(ctx, FinalizeRequest) (*Order, error)  // idempotent by CSR hash; holds up to FinalizeWait
+    Issue(ctx, IssueRequest) (*Certificate, error)  // direct path, synchronous; ChainPEM set
+    RenewalInfo(ctx, ariCertID string) (RenewalInfo, error) // also records a lineage observation
+    Recover(ctx) error                              // architecture §20, once at startup
+    Sweep(ctx) error                                // expire unfinalized orders, compact
 }
 
 type Auditor interface { Record(ctx, AuditEvent) }
-type Authenticator interface { Login(ctx, username, password string) (*User, error) }
+type AuditReader interface { Query(ctx, AuditQuery) ([]AuditEvent, error) }
 type Directory interface { Authenticate(ctx, username, password string) error } // LDAP
+type LDAPTester interface { TestLDAP(ctx, LDAPConfig) error }
+type Authenticator interface {       // implemented by internal/auth, used by ui
+    Login(ctx, username, password string, src netip.Addr) (*Login, error)
+    Session(ctx, token string) (*Session, *User, error)
+    Logout(ctx, token string) error
+}
+
+type ConfigSource interface { Current() *Config; Subscribe() (<-chan struct{}, func()) }
+type ConfigAdmin interface { Generations; Read; Validate; Activate; Rollback } // config, used by ui
+type SecretStore interface { Get; Put; Delete; List }                          // <data>/secrets
 ```
 
-Stores are small per-entity interfaces in `core` (`UserStore`, `GrantStore`,
-`SessionStore`, `AccountStore`, `OrderStore`, `CertificateStore`,
-`LineageStore`, `ChallengeStore`, `DirectStore`, `ProviderStateStore`,
-`BudgetStore`), all implemented by `internal/store`. Front-end and engine tests
-use the real SQLite store on a temp file, not a fake.
+Front ends call `Gate.Authorize` themselves and pass the `Decision` to the
+`Issuer`; the gate does not write audit records, its callers do.
+
+Configuration view (`core/config.go`): `Config{Generation, DataDir, Server,
+Bootstrap, Zones, Route53, Providers, LDAP, Sessions, Scheduler, Emergency,
+Direct, DNSProxy, Upstream, Resolver, Audit}` as plain structs, built only by
+`internal/config`. `ProviderConfig{Name, Disabled, DirectoryURL, Contact,
+EABKeyID, EABSecretName, Profile, CAAIssuers, AccountURIHonoured, ARI,
+ARIExempt, Limits{NewOrders, CertsPerDomain, CertsPerSet, Concurrency,
+RenewalReservePercent}}`. `core.DefaultConfig()` and
+`core.DefaultProviderLimits()` are the single source of defaults. Helpers:
+`ManagedZones()`, `ZoneFor(name)`, `Provider(name)`, `EnabledProviders()`,
+`TrustsProxy(peer)`.
+
+Stores (all implemented by `internal/store`; front-end and engine tests use the
+real SQLite store on a temp file, not a fake):
+
+| Store | Methods |
+|---|---|
+| `UserStore` | `Ensure`, `Get`, `GetByUsername`, `List`, `SetRole`, `SetBlocked`, `TouchLogin` |
+| `GrantStore` | `Create`, `Get`, `List`, `Update`, `Delete`, `Match(addr)` (enabled grants covering the address; wildcard first, then longest prefix) |
+| `SessionStore` | `Create`, `Get`, `Touch`, `Delete`, `DeleteByUser`, `DeleteExpired` |
+| `AccountStore` | `Create`, `Get`, `GetByThumbprint`, `Update`, `UpdateKey` |
+| `OrderStore` | `Create`, `CreateAdopting`, `Get`, `FindOpen`, `FindAdoptable`, `SetUpstream`, `SetPrepared`, `BeginFinalize`, `Complete`, `Fail`, `ExpireDue`, `ListActive`, `List`, `Prune` |
+| `CertificateStore` | `Get`, `GetByARICertID`, `Newest`, `NewestUnreplaced`, `MarkReplaced`, `List`, `DropChains` |
+| `LineageStore` | `Get`, `Observe` |
+| `ChallengeStore` | `Create`, `Get`, `SetState`, `FindActive`, `ListActive`, `ListByRecord`, `ListByOwner`, `CountCreatedSince`, `ListStale`, `Prune` |
+| `DirectStore` | `Get`, `Put`, `TouchFetch`, `List`, `Delete` |
+| `ProviderStateStore` | `Get`, `Put`, `List` |
+| `BudgetStore` | `Reserve`, `Commit`, `Release`, `ListByRef`, `ListSince`, `ListReserved`, `Prune` |
+
+How the order methods carry the flows:
+
+- **newOrder.** `FindOpen` (reuse) → `ExpireDue` + `FindAdoptable` →
+  `Scheduler.Acquire` → `Create` (Prep `intent`) or `CreateAdopting` (Prep
+  `prepared`, donor marked `AdoptedByOrderID`). Then, in the background:
+  `Ticket.OrderCreated` → `Provider.NewOrder` → `SetUpstream` (Prep
+  `preparing`) → DNS-01 → `SetPrepared` → `Ticket.PrepDone`.
+- **finalize.** `BeginFinalize` records the CSR exactly once (same hash: returns
+  existing state; other hash: `ErrCSRMismatch`; expired: `ErrExpired`) and
+  moves Status to `processing`, possibly before preparation has finished. Then
+  `Provider.Finalize` → `WaitCertificate` → `Complete` (inserts the
+  certificate, marks the predecessor replaced, Status `valid`) →
+  `Ticket.Commit`. Failures go through `Fail` → `Ticket.Refund`.
+- **Certificates are created only by `OrderStore.Complete`**, for both modes.
+- **Expiry.** `ExpireDue` invalidates orders that never got a CSR; a prepared
+  one stays adoptable (`Fail` and `ExpireDue` keep Prep `prepared`).
+- **Recovery** reads `ListActive` and `Scheduler.OpenRefs`.
+
+Fakes (`internal/core/coretest`): `FakeClock`, `FakeResolver`, `FakeCA`
+(`core.Provider`: real X.509 chain, order/authorization state, dns-01 checked
+through a pluggable TXT lookup, Boulder's `replaces` rules, ARI windows,
+counters, fault injection by operation), `FakeDNSEngine`, `FakeDirectory`,
+`FakeAuditor`, `FakeGate`, `FakeScheduler`, `FakeProviders`, `FakeConfig`
+(with the `NewConfig()` fixture), `FakeSecrets`, and `GenKey` / `GenRSAKey` /
+`MakeCSR` / `ParseChain`.
+
+`internal/names`: `Normalize`, `IsWildcard`, `Base`, `Wildcard`,
+`ChallengeRecord`, `IdentifierFromChallengeRecord`, `RegisteredDomain`,
+`InZone`; `Set` (`NewSet`, `MustSet`, `ParseKey`, `Key`, `Hash`, `Names`,
+`Contains`, `Overlaps`, `HasWildcard`, `Wildcards`, `NonWildcards`,
+`ChallengeRecords`, `RegisteredDomains`, text and JSON marshalling); `Zones`
+(`NewZones`, `Match`, `Contains`, `FirstOutside`, `List`).
 
 ## Behaviour notes that are easy to get wrong
 
@@ -159,9 +292,25 @@ use the real SQLite store on a temp file, not a fake.
   architecture §20 exactly.
 - **Same-CSR retry** returns existing state; a different CSR is rejected with
   `orderNotReady`/`malformed` and never reaches upstream.
-- **`replaces`.** Taken from the downstream order when present; otherwise the
-  engine infers it from the newest unreplaced certificate of the same lineage
-  and provider. The exemption rules per provider live in `ProviderCaps`.
+- **`replaces`.** Taken from the downstream order when it matches a certificate
+  the broker issued; otherwise the engine infers it from the newest unreplaced
+  certificate of the same lineage and provider. ARI-qualified (priority 1,
+  budget-exempt) only when `ProviderCaps` says the provider exempts ARI and now
+  is inside the suggested window. `alreadyReplaced` from upstream: retry once
+  without `replaces`. See architecture §8 "ARI rules".
+- **Upstream order adoption.** A prepared, unfinalized upstream order whose
+  downstream order expired is reused by the next downstream order for the same
+  identifier set and provider.
+- **Provider facts (Oct 2026).** Let's Encrypt: new orders 300/3h per account,
+  50 certs/7d per registered domain, 5/7d per exact set, all token buckets;
+  unfinalized orders cost only the new-order limit; honours CAA `accounturi`;
+  profiles `classic`/`tlsserver`/`shortlived` selected by `profile` in newOrder.
+  Google Trust Services: directory `https://dv.acme-v02.api.pki.goog/directory`,
+  EAB required and single-use (keep the account key), 100 newOrder/hour per
+  project, no challenge retry (confirm propagation before accepting), CAA
+  `accounturi` support unconfirmed (default off).
+- **Client limits.** Certbot: 45 s HTTP timeout, 90 s wait after finalize.
+  acme.sh: 30 polls after finalize at `Retry-After` (2 s default).
 - **Emergency window** is computed in `issuance` from the lineage's observed
   interval (architecture §8) and decides provider switching and priority class.
 - **DNS proxy wildcard protection** is the CAA check of architecture §3.2 and

@@ -41,7 +41,8 @@ for shipping (`deploy/compose.yaml`).
 - `internal/core` — shared domain types, port interfaces, store interfaces,
   errors, configuration view. Every other package compiles against it.
 - `internal/core/coretest` — fakes for the ports: clock, resolver, fake CA,
-  DNS engine, LDAP directory, auditor, config source; key and CSR helpers.
+  DNS engine, LDAP directory, auditor, gate, scheduler, provider registry,
+  config source, secrets; key and CSR helpers.
 - `internal/names` — identifier normalization, identifier sets, zone matching.
 - `internal/<pkg>` — one package per subsystem, depending on `core` and
   `names` rather than on each other.
