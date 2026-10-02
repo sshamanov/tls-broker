@@ -119,11 +119,25 @@ The broker uses the **same CSR** when finalizing the upstream order. Therefore:
 - the broker never sees the downstream private key;
 - the returned certificate is the actual upstream-issued certificate.
 
-Do not create the upstream order at downstream `newOrder`.
+### Admission before upstream work
 
-Create it only when downstream calls `finalize`.
+Downstream clients have short patience (Certbot polls a finalized order for
+roughly 90 seconds), so the slow part must not sit behind `finalize`.
 
-This avoids wasting upstream order capacity on abandoned downstream orders.
+- Downstream `newOrder` is the waiting point. The broker holds that request
+  until the scheduler grants a slot, or answers `429` with `Retry-After`. A
+  client lost here has cost nothing upstream.
+- Once the slot is granted the broker creates the upstream order and runs
+  DNS-01 immediately, while the client is still generating its key and CSR.
+- Downstream `finalize` then only has to send the CSR upstream.
+
+A client lost after the slot was granted but before `finalize` leaves behind an
+upstream order with validated authorizations and no certificate. That consumes
+no certificate rate limit; the scheduler bounds how many such orders can exist.
+
+Authorization objects returned downstream are `valid` and carry one synthetic
+`valid` `dns-01` challenge entry, because real clients expect a `challenges`
+array even on a valid authorization.
 
 ---
 
@@ -138,9 +152,29 @@ Use this for:
 - unusual ACME clients;
 - compatibility/debug fallback if the clean ACME proxy has an interoperability issue.
 
-This mode requires an explicit IP/CIDR grant.
+This mode uses the same gate as the other modes:
 
-Do not use automatic DNS-to-source-IP authorization here.
+- ordinary identifier: explicit IP/CIDR grant, or the name resolves to the
+  source IPv4;
+- wildcard identifier (`*.example.com`): explicit grant with `wildcard=true`.
+
+### Closing the implicit wildcard
+
+A TXT record at `_acme-challenge.N` validates `*.N` as well as `N`, and the
+broker cannot see which one the client's CA order asks for. So a requester
+without a wildcard grant may `present` for `N` only when public CAA policy
+already prevents a foreign ACME account from obtaining `*.N`:
+
+- look up the effective CAA RRset for `N` over DoH (climb the tree, RFC 8659);
+- every `issuewild` value must be either `;` or name a configured provider that
+  honours RFC 8657 `accounturi`, with `accounturi` equal to the broker's own
+  upstream account at that provider;
+- if there is no `issuewild` property, `issue` values are judged the same way;
+- otherwise deny with reason `wildcard_unprotected`.
+
+Requesters with a `wildcard=true` grant skip this check. Operators are expected
+to publish such CAA records at each managed zone apex; the UI shows the CAA
+status of every managed zone.
 
 Suggested API:
 
@@ -309,7 +343,23 @@ A user's role controls what grants they are allowed to create/manage:
 - wildcard_allowed: ordinary or wildcard grants;
 - admin: all control-plane operations.
 
+Grants are deliberately **not scoped by name**: a granted IP may request any
+name in any managed zone, and in direct mode may fetch any cached identifier.
+This is the relaxed trust model, not an oversight.
+
 Do not reintroduce tokens. Machine gating is IP-based.
+
+## 4.3 Bootstrap administrators
+
+Roles are local state, so something must create the first admin. Two
+environment-driven mechanisms, both optional:
+
+- `TLS_BROKER_ADMINS` — comma-separated LDAP usernames that receive the `admin`
+  role whenever they log in.
+- `TLS_BROKER_LOCAL_ADMIN_USER` / `TLS_BROKER_LOCAL_ADMIN_PASSWORD` — a local
+  break-glass admin that authenticates without LDAP (the password may be given
+  as a bcrypt hash). It works when LDAP is down or not configured yet, is always
+  `admin`, and cannot be blocked from the UI.
 
 ---
 
@@ -356,7 +406,11 @@ If LDAP is unavailable, existing sessions continue to work.
 
 If LDAP config/filter is temporarily broken, existing sessions continue to work.
 
-New logins fail until LDAP works again.
+New logins fail until LDAP works again, except for the local break-glass admin.
+
+Sessions are opaque random identifiers stored (hashed) in SQLite and carried in
+an `HttpOnly`, `SameSite=Strict` cookie. There is no session-signing secret.
+State-changing UI requests carry a per-session CSRF token.
 
 When changing LDAP configuration through the UI/config system, test the new settings before activating the new configuration generation.
 
@@ -399,38 +453,44 @@ The email/contact field is metadata, not identity.
 
 Do:
 
-- normalize identifiers;
-- validate managed-zone membership;
-- run local gate;
-- if allowed, expose authorization as already valid;
-- create only a **local downstream order**.
+1. normalize identifiers;
+2. validate managed-zone membership;
+3. run local gate;
+4. if the same account already has an unexpired, unfinalized order for the same
+   identifier set, return that order instead of creating another;
+5. choose upstream provider and ask the scheduler for a slot, holding the HTTP
+   request for a bounded time (default 20 s);
+6. no slot or no budget: answer `429 rateLimited` (or `503` when every provider
+   is down) with `Retry-After`; nothing has been created upstream;
+7. slot granted: persist the downstream order with its upstream **intent**,
+   return it as `ready` with already-valid authorizations, and start upstream
+   preparation in the background.
 
-Do **not** create the upstream order yet.
+Upstream preparation: create the upstream order (with `replaces` where it
+applies, section 8), persist its URL, present DNS-01 through Route53, wait for
+the CA to validate, clean up the TXT values.
 
-State can become:
-
-```text
-READY
-```
-
-with no upstream cost.
+An order that is never finalized expires after a short TTL (default 15 min):
+its budget reservation is refunded and the upstream order is left to expire.
 
 ## 7.2 Downstream `finalize`
 
 On finalize:
 
-1. validate CSR;
-2. confirm CSR identifiers match the downstream order identifiers exactly;
-3. compute CSR hash;
-4. enforce idempotency;
-5. run scheduler/admission;
-6. choose upstream provider;
-7. create upstream ACME order;
-8. perform upstream DNS-01 using Route53;
-9. finalize upstream with the same CSR;
-10. verify returned certificate;
-11. persist certificate mapping;
-12. expose certificate downstream.
+1. re-check the gate for the current source IP;
+2. validate CSR;
+3. confirm CSR identifiers match the downstream order identifiers exactly;
+4. compute CSR hash and enforce idempotency;
+5. wait for upstream preparation to finish, holding the request for a bounded
+   time (default 20 s); if it is still running, answer `processing` with
+   `Retry-After` and let the client poll the order;
+6. finalize upstream with the same CSR;
+7. verify returned certificate;
+8. persist certificate mapping and commit the budget reservation;
+9. expose certificate downstream.
+
+Once the CSR has been sent upstream the issuance runs to completion and is
+persisted whether or not the client is still there.
 
 One downstream order maps to at most one upstream order.
 
@@ -491,7 +551,27 @@ A provider migration becomes a fresh issuance on the fallback CA.
 
 ARI continuity with the old CA is not preserved across provider migration.
 
-Emergency threshold is implementation-tunable; current architectural default is roughly 10 days before expiry.
+## Emergency window
+
+Whether a renewal is an emergency depends on how often the client comes back,
+not only on the certificate. A client that checks daily can be left on a broken
+primary much longer than one that checks weekly.
+
+```text
+emergency_window = fraction * certificate_lifetime
+                 + safety_checks * observed_check_interval
+capped at half the certificate lifetime
+```
+
+- `observed_check_interval` is tracked per certificate lineage (normalized
+  identifier set) from the gaps between that lineage's requests: ARI polls,
+  renewal orders, direct-mode fetches. Until two requests have been seen, a
+  configured default is used.
+- Defaults: `fraction = 0.05`, `safety_checks = 3`, default interval 24 h. A
+  90-day certificate checked daily gets 7.5 days; checked weekly, 25.5 days.
+
+A client that only asks for renewal when its certificate is almost gone has
+chosen its own risk; the broker does not compensate for that.
 
 ---
 
@@ -569,11 +649,35 @@ DNS proxy is the exception because the client owns the external ACME flow.
 - conservative local 429 responses are preferable to exhausting upstream quota;
 - ARI-qualified renewals get highest protection/priority;
 - cache hits do not consume issuance budget;
-- abandoned downstream `newOrder`s must not consume upstream orders;
+- a downstream `newOrder` reaches upstream only after admission, and an
+  abandoned one must never consume certificate budget;
 - provider `Retry-After` and real rate-limit signals become authoritative local state;
 - one upstream 429 should prevent repeated equivalent upstream hammering.
 
-Suggested priority classes:
+## Scheduler model
+
+The scheduler is synchronous: a caller asks for admission and either gets a
+ticket, waits a bounded time for one, or is refused with a retry time. There is
+no persisted work queue.
+
+It combines three things per provider:
+
+- **Concurrency slots** — how many upstream preparations (order + DNS-01) may
+  run at once. Callers wait for a slot in priority order, then first-come.
+- **Rate budgets** — sliding-window counters kept below the known upstream
+  limits (new orders per account, certificates per registered domain,
+  certificates per exact identifier set), each with reserved headroom that only
+  renewals may use. An exhausted budget refuses immediately; waiting would not
+  help.
+- **Provider circuit** — `Retry-After` and outage signals from the provider
+  close admission for that provider until the stated time.
+
+A ticket reserves budget at admission, commits it when a certificate is issued,
+and refunds it when the order is abandoned or fails before the CSR is sent.
+ARI-qualified renewals are admitted without consuming certificate budgets when
+the provider exempts them.
+
+Priority classes:
 
 ```text
 1. ARI-qualified renewals
@@ -581,7 +685,7 @@ Suggested priority classes:
 3. clean ACME renewals inside emergency window
 4. ordinary clean ACME issuance/renewal
 5. direct cache misses
-6. speculative/background prefetch
+6. direct-cache background renewal
 ```
 
 Exact numerical downstream limits should be tuned during implementation/testing.
@@ -652,7 +756,10 @@ For direct mode:
 
 - ARI controls renewal timing when available;
 - fallback timing should use a fraction of certificate lifetime if ARI is unavailable;
-- direct cache should pre-renew certificates before devices ask for them.
+- renewal is **request-driven**: a fetch of an identifier whose renewal is due
+  starts the background renewal. An identifier nobody fetches is never renewed,
+  so vanished devices stop consuming quota. Activity is tracked per identifier,
+  not per source IP.
 
 Concurrent requests for the same identifier must collapse into one issuance job.
 
@@ -795,12 +902,23 @@ Admin audit additionally shows:
 Use immutable configuration generations for static/operator-managed config:
 
 ```text
-/etc/tls-broker/config/
+<data>/config/
     000001.yaml
     000002.yaml
     000003.yaml
     current -> 000003.yaml
 ```
+
+Configuration is edited by admins in the web UI (the service ships as a
+container, so the UI is the primary operator surface). The UI offers the YAML
+of the current generation for editing, shows validation and LDAP-test results,
+activates the new generation, and can roll back to an earlier one. On first
+start with no configuration the broker writes generation `000001` with defaults
+and the local break-glass admin completes setup in the UI.
+
+Secret values (Route53 credentials, LDAP bind password, EAB keys) are set
+through the UI as write-only fields and stored under `<data>/secrets/`; config
+generations refer to them by name and never contain them.
 
 Update flow:
 
@@ -976,11 +1094,20 @@ Persist intent/state, not worker queues.
 
 ## ACME orders
 
-```text
-READY
-    -> local only
+The upstream intent is written **before** the upstream call and the upstream
+order URL right after it, so a crash can only leave these states:
 
-PROCESSING + upstream_order_url
+```text
+intent recorded, no upstream_order_url
+    -> the upstream call may or may not have happened
+    -> mark INVALID, count the new-order budget as spent
+    -> never create another upstream order; the client makes a new order
+
+READY/PREPARING + upstream_order_url
+    -> query upstream order after restart
+    -> resume preparation (re-present DNS-01 if still pending)
+
+PROCESSING + upstream_order_url (CSR already sent)
     -> query upstream order after restart
     -> resume
     -> never create another upstream order
@@ -1032,11 +1159,9 @@ Modules inside one process:
 - audit logging;
 - Prometheus.
 
-Run as a dedicated unprivileged user, e.g.:
-
-```text
-tls-broker
-```
+Implementation language is Go. The service ships as a container image and is
+deployed with Docker Compose (host networking, one data volume, settings from
+an env file). It runs as an unprivileged user inside the container.
 
 Use nginx in front.
 
@@ -1059,37 +1184,24 @@ Prometheus metrics endpoint should be restricted by nginx/network policy.
 
 # 22. Secrets and Files
 
-Service credentials:
+Everything lives under one data root (`TLS_BROKER_DATA_DIR`, `/data` in the
+container, `/var/lib/tls-broker` otherwise):
 
 ```text
-/etc/tls-broker/secrets/
+<data>/config/      configuration generations
+<data>/secrets/     service credentials, mode 0600
+<data>/state.db     SQLite
+<data>/certs/       direct cert cache
+<data>/audit/       audit JSONL
 ```
 
-Possible secrets:
+Secrets:
 
-- Route53 credentials;
+- Route53 credentials (optional; the standard AWS credential chain is used
+  when they are not set);
 - LDAP bind credentials;
-- upstream CA account keys;
-- EAB secrets for providers that require them;
-- session-signing secret.
-
-State:
-
-```text
-/var/lib/tls-broker/state.db
-```
-
-Direct cert cache:
-
-```text
-/var/lib/tls-broker/certs/
-```
-
-Audit:
-
-```text
-/var/log/tls-broker/audit/
-```
+- upstream CA account keys (generated by the broker);
+- EAB secrets for providers that require them.
 
 Root/service-user filesystem permissions are sufficient.
 
@@ -1152,7 +1264,8 @@ Needed ACME surface includes roughly:
 directory
 newNonce
 newAccount
-account lookup/update as required
+account lookup/update/deactivation
+keyChange (account key rollover; local protocol state only)
 newOrder
 authorization objects
 finalize
@@ -1165,6 +1278,10 @@ ARI endpoint for capable clients
 
 Already-valid authorization behavior should be tested carefully against older ACMEv2 clients.
 
+`revokeCert` is not offered: it is absent from the directory and requests get
+an ACME `unauthorized` problem. Certificates here are short-lived and
+revocation is an operator action taken directly with the CA if ever needed.
+
 ## DNS API
 
 ```text
@@ -1172,7 +1289,7 @@ POST /dns/present
 POST /dns/cleanup
 ```
 
-IP-grant gated.
+Gated as described in section 3.2.
 
 `present` returns a challenge ID and waits for DNS propagation before success.
 
@@ -1363,13 +1480,9 @@ The following should remain flexible until implementation/testing:
 
 ### ACME server library/implementation choice
 
-Likely direction:
-
-- custom minimal ACMEv2 server surface;
-- rely on solid JOSE/JWS/ACME libraries;
-- avoid embedding a full CA server unless it clearly reduces complexity.
-
-Evaluate concrete language/library options before committing.
+Settled: Go, with a custom minimal ACMEv2 server surface on top of a JOSE
+library, and an ACME client library for the upstream side. No embedded CA
+server.
 
 ### Exact schema
 
@@ -1387,11 +1500,10 @@ Architecture requires:
 
 Exact thresholds/burst sizes should be tuned with fake upstream + staging tests.
 
-### Emergency expiry threshold
+### Emergency window parameters
 
-Current working default: roughly 10 days.
-
-Keep configurable globally.
+Formula is settled (section 8). The fraction, safety-check count and default
+check interval are configurable globally.
 
 ### Alternate CA set
 

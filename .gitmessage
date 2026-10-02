@@ -1,0 +1,5 @@
+<imperative summary of intent, max 72 chars>
+
+<Body: why this change, what was validated, what constraints were
+discovered, what the observed results were. Files and line diffs are
+already visible in the commit — do not list them here. Wrap at 72.>
