@@ -638,6 +638,14 @@ Potential additional fallback:
 ZeroSSL
 ```
 
+ZeroSSL was evaluated in October 2026: ACME directory
+`https://acme.zerossl.com/v2/DV90`, EAB required but reusable, free 90-day
+certificates incl. wildcard, `renewalInfo` offered, CAA issuer `sectigo.com`.
+Against it: a frequent-short-outage record, slow finalization, no published
+quotas, and the default chain lost its legacy cross-sign in April 2026. It is
+a reasonable second fallback behind Google Trust Services; the generic ACME
+adapter covers it with configuration only. Not configured initially.
+
 CAA policy for managed zones (decided October 2026):
 
 - `issue` allows every configured provider, so ordinary names can fall back.
