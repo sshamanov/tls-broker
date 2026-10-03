@@ -76,7 +76,7 @@ Everything the broker keeps is under the data root (architecture §22):
   config/      000001.yaml 000002.yaml ... current -> 00000N.yaml   (0700)
   secrets/     route53-*, ldap-bind-password, eab.*, provider-account-key.*,
                provider-account-url.*                                (0700, files 0600)
-  state.db     SQLite (plus state.db-wal / state.db-shm while running)
+  state.db     SQLite (plus state.db-wal / state.db-shm while running)   (0600)
   certs/       direct-mode cache: <identifier>/generations/<n>/{privkey,fullchain}.pem
                and <identifier>/current -> generations/<n> (wildcards as _wildcard.<base>)
   audit/       audit JSONL, rotated by day and size

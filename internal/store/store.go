@@ -63,11 +63,20 @@ type Store struct {
 	budgets    *budgetStore
 }
 
+// fileMode is the mode of the database file. It holds session and CSRF
+// token hashes, account keys, pending CSRs and certificate chains, so it is
+// owner-only like <data>/secrets. SQLite creates the -wal and -shm files
+// with the main file's mode.
+const fileMode = 0o600
+
 // Open opens (creating if needed) the database at path and applies every
 // pending migration. It refuses a database written by a newer schema.
 func Open(path string) (*Store, error) {
 	if path == "" || strings.ContainsAny(path, "?#") {
 		return nil, fmt.Errorf("store: invalid database path %q", path)
+	}
+	if err := ensureFileMode(path); err != nil {
+		return nil, fmt.Errorf("store: %w", err)
 	}
 	bt := strconv.FormatInt(busyTimeout.Milliseconds(), 10)
 	wdsn := path + "?_txlock=immediate" +
@@ -115,6 +124,19 @@ func Open(path string) (*Store, error) {
 	s.providers = &providerStateStore{s}
 	s.budgets = &budgetStore{s}
 	return s, nil
+}
+
+// ensureFileMode creates the database file with fileMode before SQLite does
+// (which would use the umask), and tightens an existing one.
+func ensureFileMode(path string) error {
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, fileMode)
+	if err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Chmod(path, fileMode)
 }
 
 // Close closes the database. The WAL is checkpointed by SQLite when the last
@@ -378,11 +400,13 @@ func b2i(b bool) int {
 	return 0
 }
 
+// addrText is the stored form of an address: IPv4-mapped IPv6 addresses are
+// stored as the IPv4 they carry, so every reader compares the same text.
 func addrText(a netip.Addr) string {
 	if !a.IsValid() {
 		return ""
 	}
-	return a.String()
+	return a.Unmap().String()
 }
 
 func parseAddr(s string) (netip.Addr, error) {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -104,6 +105,37 @@ func TestReopenPersistsAndIsIdempotent(t *testing.T) {
 	ms, _ := migrations()
 	if v != len(ms) {
 		t.Fatalf("version %d after reopen", v)
+	}
+}
+
+// The database holds session token hashes, account keys and pending CSRs: it
+// is created owner-only, an existing world-readable one is tightened, and
+// SQLite's side files inherit the mode.
+func TestOpenFileMode(t *testing.T) {
+	path := dbPath(t)
+	s, err := Open(path)
+	must(t, err)
+	defer s.Close()
+	// A write forces the -wal and -shm files into existence.
+	u, _, err := s.Users().Ensure(ctx, "alice", false, time.Unix(1, 0))
+	must(t, err)
+	if u.ID == 0 {
+		t.Fatal("no user")
+	}
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		st, err := os.Stat(path + suffix)
+		must(t, err)
+		if st.Mode().Perm() != fileMode {
+			t.Errorf("%s mode %o, want %o", path+suffix, st.Mode().Perm(), fileMode)
+		}
+	}
+	must(t, s.Close())
+	must(t, os.Chmod(path, 0o644))
+	s2, err := Open(path)
+	must(t, err)
+	defer s2.Close()
+	if st, _ := os.Stat(path); st.Mode().Perm() != fileMode {
+		t.Fatalf("existing database left at %o", st.Mode().Perm())
 	}
 }
 
