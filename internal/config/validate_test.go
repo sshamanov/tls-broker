@@ -1,7 +1,6 @@
 package config
 
 import (
-	"fmt"
 	"net/netip"
 	"strings"
 	"testing"
@@ -48,21 +47,6 @@ func TestValidationRules(t *testing.T) {
 		{"zone duplicate", "zones[1].name", func(c *core.Config) { c.Zones[1].Name = "example.com" }},
 		{"zone bad id", "zones[0].hosted_zone_id", func(c *core.Config) { c.Zones[0].HostedZoneID = "/hostedzone/Z123" }},
 		{"zone lower-case id", "zones[0].hosted_zone_id", func(c *core.Config) { c.Zones[0].HostedZoneID = "z123abc" }},
-		{"trusted account empty", "zones[0].trusted_accounts[0]", trusted("")},
-		{"trusted account http", "zones[0].trusted_accounts[0]", trusted("http://primary.test/acme/acct/1")},
-		{"trusted account relative", "zones[0].trusted_accounts[0]", trusted("/acme/acct/1")},
-		{"trusted account no host", "zones[0].trusted_accounts[0]", trusted("https:///acme/acct/1")},
-		{"trusted account query", "zones[0].trusted_accounts[0]", trusted("https://primary.test/acme/acct/1?x=1")},
-		{"trusted account fragment", "zones[0].trusted_accounts[0]", trusted("https://primary.test/acme/acct/1#a")},
-		{"trusted account user info", "zones[0].trusted_accounts[0]", trusted("https://u@primary.test/acme/acct/1")},
-		{"trusted account semicolon", "zones[0].trusted_accounts[0]", trusted("https://primary.test/acme/acct/1;x")},
-		{"trusted account non-ASCII", "zones[0].trusted_accounts[0]", trusted("https://primary.test/acme/acct/\u00e4")},
-		{"trusted account duplicate", "zones[0].trusted_accounts[1]", trusted("https://primary.test/acme/acct/1", "https://primary.test/acme/acct/1")},
-		{"trusted accounts too many", "zones[0].trusted_accounts", func(c *core.Config) {
-			for i := range MaxTrustedAccounts + 1 {
-				c.Zones[0].TrustedAccounts = append(c.Zones[0].TrustedAccounts, fmt.Sprintf("https://primary.test/acme/acct/%d", i))
-			}
-		}},
 
 		{"region", "route53.region", func(c *core.Config) { c.Route53.Region = "mars" }},
 		{"route53 half credentials", "route53.access_key_id_secret", func(c *core.Config) { c.Route53.SecretAccessKeySecret = "" }},
@@ -147,25 +131,6 @@ func TestValidationRules(t *testing.T) {
 			}
 			t.Fatalf("no error at %q; got %v", tc.path, rep.Errors)
 		})
-	}
-}
-
-func trusted(accounts ...string) func(c *core.Config) {
-	return func(c *core.Config) { c.Zones[0].TrustedAccounts = accounts }
-}
-
-// Trusted accounts at a provider's directory host are valid without a
-// warning; one at a host no enabled provider uses is probably mistyped.
-func TestTrustedAccountHosts(t *testing.T) {
-	c := testConfig()
-	c.Zones[0].TrustedAccounts = []string{"https://primary.test/acme/acct/1", "https://FALLBACK.test/acme/acct/2"}
-	c.Zones[1].TrustedAccounts = []string{"https://ca.elsewhere.test/acct/3"}
-	rep := Validate(c)
-	if !rep.OK() {
-		t.Fatal(rep.Errors)
-	}
-	if len(rep.Warnings) != 1 || rep.Warnings[0].Path != "zones[1].trusted_accounts[0]" {
-		t.Fatalf("warnings %v", rep.Warnings)
 	}
 }
 

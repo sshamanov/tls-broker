@@ -97,7 +97,8 @@ further check, anyone allowed to present for `N` could obtain a wildcard
 certificate for `*.N` from any public CA.
 
 So a requester **without a wildcard grant** may present for `N` only when
-public CAA already stops every foreign ACME account from obtaining `*.N`:
+public CAA already stops every ACME account the operator did not choose from
+obtaining `*.N`:
 
 1. Find the effective CAA RRset for `N` (RFC 8659): ask `N`, then each
    parent up to the TLD; the first node with any CAA records wins. A CNAME at
@@ -107,14 +108,15 @@ public CAA already stops every foreign ACME account from obtaining `*.N`:
    `issue` properties.
 3. Every judged value must either forbid issuance (`;`, or an empty issuer)
    or name the CAA issuer domain of an **enabled** provider that honours RFC
-   8657 `accounturi`, with every `accounturi` parameter equal to the broker's
-   own account URL at that provider or to one of the trusted operator accounts
-   of the managed zone holding `N` (`zones[].trusted_accounts`, see
-   `configuration.md`).
+   8657 `accounturi` (`account_uri_honoured: true`) and carry at least one
+   `accounturi` parameter. Which account it pins does not matter — the
+   broker's, your own certbot's, or any other: only someone who controls the
+   zone's DNS can publish CAA, so every pinned account is one you chose, and
+   a CA that honours `accounturi` refuses every other account.
 4. Otherwise — no CAA anywhere, a set with neither `issue` nor `issuewild`,
-   an unpinned issuer, a foreign account, an unknown or disabled provider, a
-   provider that does not honour `accounturi`, or a malformed value — the
-   request is denied with `wildcard_unprotected`.
+   an unpinned issuer, an unknown or disabled provider, a provider that does
+   not honour `accounturi`, or a malformed value — the request is denied with
+   `wildcard_unprotected`.
 
 Details that matter when writing records:
 
@@ -122,12 +124,16 @@ Details that matter when writing records:
   `=` is fine.
 - The parameter must be spelled `accounturi` in lower case. Other spellings
   are treated as unpinned, because a CA may not recognize them.
-- The account URL must match byte for byte the URL the CA assigned to the
-  broker's account (or the trusted account as configured).
-- A trusted account is the operator vouching for its key holder; the DNS proxy
-  still cannot be used by any account the CAA does not name. The verdict and
-  the UI say when trusted accounts were relied on ("allows *.N only to the
-  broker's account and 2 trusted accounts at letsencrypt.org").
+- The verdict does not look at the account URLs and needs no configuration.
+  The CA compares them byte for byte, so a mistyped URL only locks that
+  account out.
+- The verdict says how many accounts are pinned at which CA and whether the
+  broker's own account is among them ("CAA issuewild at example.com allows
+  *.example.com only to 2 pinned accounts at letsencrypt.org; the broker's
+  account at letsencrypt.org is among them"). If it is not, the zone is still
+  protected for the DNS proxy, but the broker itself cannot obtain `*.N`
+  through the ACME proxy or the direct API; the status page warns about that
+  separately.
 - A failed CAA lookup denies with `dns_failure`.
 
 Requesters with a `wildcard=true` grant skip this check; they may have the
@@ -151,12 +157,15 @@ example.com. CAA 0 issuewild "letsencrypt.org; accounturi=https://acme-v02.api.l
 ```
 
 With your own ACME clients that also need wildcards: one more pinned
-`issuewild` per account, and the same URLs in the zone's `trusted_accounts`
-(otherwise the zone reads unprotected):
+`issuewild` per account (the zone stays protected; nothing to configure in the
+broker):
 
 ```text
 example.com. CAA 0 issuewild "letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/111111111"
 ```
+
+An unpinned `issuewild "letsencrypt.org"` for them instead would make the zone
+unprotected.
 
 Pinning `issue` as well (`issue "letsencrypt.org; accounturi=..."`) is
 stricter for ordinary names but shuts out every account not listed there,
@@ -195,7 +204,8 @@ confirmed. Choices:
 If the fallback CA is missing from `issue`, the broker cannot fail over to it
 for that zone at all. The UI's CAA panel shows, per managed zone, the
 effective node and records, whether wildcards are protected (and why not),
-and which enabled providers the records do not permit.
+whether the broker's own account is among the pinned ones, and which enabled
+providers the records do not permit.
 
 ## Decision reasons
 

@@ -51,7 +51,7 @@
 {{if .Admin}}
 <div class="grid admin-grid">
 <section class="panel span" aria-labelledby="h-accounts"><h2 id="h-accounts">CA accounts for CAA</h2>
-<p class="muted">Put each account URL into the <code>accounturi</code> parameter of the CAA records of your zones, so no other ACME account can obtain wildcards for them. Accounts of your own ACME clients that also need wildcards go into the zone's <code>trusted_accounts</code> (Configuration) and get <code>issuewild</code> records of their own. {{.Data.Counts.ACMECerts}} valid ACME certificates; {{.Data.Counts.Direct}} direct entries ({{.Data.Counts.DirectLive}} valid).</p>
+<p class="muted">Put each account URL into the <code>accounturi</code> parameter of the CAA records of your zones, so no other ACME account can obtain wildcards for them. Your own ACME clients that also need wildcards get <code>issuewild</code> records of their own, pinned to their accounts; the zone stays protected as long as every <code>issuewild</code> value is pinned. {{.Data.Counts.ACMECerts}} valid ACME certificates; {{.Data.Counts.Direct}} direct entries ({{.Data.Counts.DirectLive}} valid).</p>
 <table>
 <tr><th>Provider</th><th>Account URL</th><th>CAA issuer</th><th>Honours accounturi</th></tr>
 {{range .Data.Accounts}}<tr><td>{{.Provider}}</td><td>{{if .URL}}<code class="wrap">{{.URL}}</code>{{else}}<span class="t-bad">{{.Err}}</span>{{end}}</td><td>{{range .Issuers}}<code>{{.}}</code> {{end}}</td><td>{{if .Honoured}}yes{{else}}no{{end}}</td></tr>
@@ -68,7 +68,7 @@
 <td>{{if .Hosted.HostedZoneID}}<code>{{.Hosted.HostedZoneID}}</code><span class="cell-sub">{{if .Hosted.Resolved}}discovered by name{{else}}configured{{end}}</span>{{else}}<span class="t-bad">not discovered: {{.Hosted.Err}}</span>{{end}}</td>
 {{if .Err}}<td colspan="3"><span class="t-bad">CAA lookup failed: {{.Err}}</span></td>
 {{else}}<td>{{if .Status.Node}}<code>{{.Status.Node}}</code>{{else}}none{{end}}</td>
-<td><span class="pill {{if .Status.WildcardProtected}}ok{{else}}bad{{end}}">{{if .Status.WildcardProtected}}protected{{else}}unprotected{{end}}</span>{{with .Status.TrustedAccounts}}<span class="cell-sub">relies on {{len .}} trusted operator account{{if gt (len .) 1}}s{{end}}</span>{{end}}</td>
+<td><span class="pill {{if .Status.WildcardProtected}}ok{{else}}bad{{end}}">{{if .Status.WildcardProtected}}protected{{else}}unprotected{{end}}</span>{{with .Status.BrokerWildcard}}<span class="cell-sub{{if eq . "not_pinned"}} t-caution{{end}}">{{if eq . "pinned"}}broker's account pinned{{else if eq . "not_pinned"}}broker's account not pinned{{else}}broker's account unknown{{end}}</span>{{end}}</td>
 <td class="wrap">{{.Status.Detail}}{{if .Status.MissingProviders}} Missing providers: {{join .Status.MissingProviders ", "}}.{{end}}</td>{{end}}</tr>
 {{if .Suggest}}<tr><td></td><td colspan="4"><details><summary>CAA records for this zone</summary><pre>{{range .Suggest}}{{.}}
 {{end}}</pre></details></td></tr>{{end}}

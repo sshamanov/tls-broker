@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"net/http"
-	"net/url"
 
 	"tls-broker/internal/auth"
 	"tls-broker/internal/core"
@@ -409,7 +408,7 @@ func (h *Handler) adminDashboard(ctx context.Context, d *dashboardData) {
 	}
 	wg.Wait()
 	for i := range d.Zones {
-		d.Zones[i].Suggest = suggestCAA(d.Zones[i].Zone, d.Accounts, cfg.EnabledProviders())
+		d.Zones[i].Suggest = suggestCAA(d.Zones[i].Zone.Name, d.Accounts)
 	}
 	d.Warnings = h.warnings(ctx, d)
 }
@@ -437,45 +436,28 @@ func (h *Handler) zoneStatuses(cfg *core.Config) map[string]ZoneStatus {
 	return out
 }
 
-// suggestCAA builds CAA records for a zone that keep wildcards to known
+// suggestCAA builds CAA records for a zone that keep wildcards to pinned
 // accounts: an unpinned issue record per CA (ordinary names may come from
 // any of them, including the operator's own clients; the DNS-proxy condition
-// of architecture §3.2 only needs issuewild closed), and one issuewild record
-// pinned with accounturi per account: the broker's at each CA, then each
-// trusted operator account of the zone. A trusted account's CA is the
-// enabled provider whose directory URL has the account URL's host.
-func suggestCAA(zone core.ZoneConfig, accounts []accountView, providers []core.ProviderConfig) []string {
+// of architecture §3.2 only judges issuewild when there is one), one
+// issuewild record pinned with accounturi to the broker's account at each
+// CA, and a reminder that every other ACME account needing wildcards gets an
+// issuewild line of its own.
+func suggestCAA(zone string, accounts []accountView) []string {
 	var issue, wild []string
-	addIssue := func(issuer string) {
-		r := fmt.Sprintf(`%s. CAA 0 issue "%s"`, zone.Name, issuer)
-		if !slices.Contains(issue, r) {
-			issue = append(issue, r)
-		}
-	}
 	for _, a := range accounts {
 		if a.URL == "" || len(a.Issuers) == 0 {
 			continue
 		}
-		addIssue(a.Issuers[0])
-		wild = append(wild, fmt.Sprintf(`%s. CAA 0 issuewild "%s; accounturi=%s"`, zone.Name, a.Issuers[0], a.URL))
-	}
-	for _, acct := range zone.TrustedAccounts {
-		issuer := ""
-		if u, err := url.Parse(acct); err == nil {
-			for _, p := range providers {
-				if d, err := url.Parse(p.DirectoryURL); err == nil && len(p.CAAIssuers) > 0 && strings.EqualFold(d.Hostname(), u.Hostname()) {
-					issuer = p.CAAIssuers[0]
-					break
-				}
-			}
+		if r := fmt.Sprintf(`%s. CAA 0 issue "%s"`, zone, a.Issuers[0]); !slices.Contains(issue, r) {
+			issue = append(issue, r)
 		}
-		if issuer == "" {
-			wild = append(wild, fmt.Sprintf("; trusted account %s: no enabled provider has its host; add its issuewild record by hand", acct))
-			continue
-		}
-		addIssue(issuer)
-		wild = append(wild, fmt.Sprintf(`%s. CAA 0 issuewild "%s; accounturi=%s"`, zone.Name, issuer, acct))
+		wild = append(wild, fmt.Sprintf(`%s. CAA 0 issuewild "%s; accounturi=%s"`, zone, a.Issuers[0], a.URL))
 	}
+	if len(wild) == 0 {
+		return nil
+	}
+	wild = append(wild, "; add one issuewild line like the above, with its own accounturi, for each ACME account of yours that needs wildcards")
 	return append(issue, wild...)
 }
 
@@ -523,6 +505,10 @@ func (h *Handler) warnings(ctx context.Context, d *dashboardData) []string {
 			w = append(w, "Zone "+z.Zone.Name+" is unprotected: "+z.Status.Detail)
 		case len(z.Status.MissingProviders) > 0:
 			w = append(w, "Zone "+z.Zone.Name+": CAA does not authorize provider(s) "+strings.Join(z.Status.MissingProviders, ", ")+"; fallback would fail.")
+		}
+		if z.Err == "" && z.Status.BrokerWildcard == core.BrokerNotPinned {
+			w = append(w, "Zone "+z.Zone.Name+": CAA pins wildcards to other ACME accounts only; the broker itself cannot issue *."+
+				z.Zone.Name+" (ACME proxy, direct API). Add an issuewild record with the broker's account if it should.")
 		}
 	}
 	for _, a := range d.Accounts {

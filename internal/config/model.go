@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/netip"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 
@@ -48,9 +47,12 @@ type serverDoc struct {
 }
 
 type zoneDoc struct {
-	Name            string   `yaml:"name"`
-	HostedZoneID    string   `yaml:"hosted_zone_id"`
-	TrustedAccounts []string `yaml:"trusted_accounts,omitempty"`
+	Name         string `yaml:"name"`
+	HostedZoneID string `yaml:"hosted_zone_id"`
+	// TrustedAccounts is the removed trusted_accounts key. It is still
+	// accepted in any shape so older generations load, ignored, reported as
+	// a deprecation warning, and never written back.
+	TrustedAccounts yaml.Node `yaml:"trusted_accounts,omitempty"`
 }
 
 type route53Doc struct {
@@ -223,7 +225,7 @@ func docFromConfig(c *core.Config) *document {
 		d.Server.TrustedProxies = append(d.Server.TrustedProxies, p.String())
 	}
 	for _, z := range c.Zones {
-		d.Zones = append(d.Zones, zoneDoc{Name: z.Name, HostedZoneID: z.HostedZoneID, TrustedAccounts: slices.Clone(z.TrustedAccounts)})
+		d.Zones = append(d.Zones, zoneDoc{Name: z.Name, HostedZoneID: z.HostedZoneID})
 	}
 	for _, p := range c.Providers {
 		l := p.Limits
@@ -274,11 +276,7 @@ func configFromDoc(d *document, env Env, generation int) (*core.Config, Problems
 		if n, err := names.Normalize(name); err == nil {
 			name = n
 		}
-		var trusted []string
-		for _, a := range z.TrustedAccounts {
-			trusted = append(trusted, strings.TrimSpace(a))
-		}
-		cfg.Zones = append(cfg.Zones, core.ZoneConfig{Name: name, HostedZoneID: strings.TrimSpace(z.HostedZoneID), TrustedAccounts: trusted})
+		cfg.Zones = append(cfg.Zones, core.ZoneConfig{Name: name, HostedZoneID: strings.TrimSpace(z.HostedZoneID)})
 	}
 
 	r := d.Route53
@@ -450,7 +448,20 @@ func parse(data []byte, env Env, generation int) (*core.Config, Report) {
 	cfg, probs := configFromDoc(doc, env, generation)
 	rep := Validate(cfg)
 	rep.Errors = append(probs, rep.Errors...)
+	rep.Warnings = append(deprecations(doc), rep.Warnings...)
 	return cfg, rep
+}
+
+// deprecations reports removed keys that are still accepted and ignored.
+func deprecations(d *document) Problems {
+	var out Problems
+	for i, z := range d.Zones {
+		if !z.TrustedAccounts.IsZero() {
+			out = append(out, Problem{Path: fmt.Sprintf("zones[%d].trusted_accounts", i),
+				Message: "is no longer used and is ignored: the DNS-proxy CAA condition accepts any account pinned with accounturi; remove the key"})
+		}
+	}
+	return out
 }
 
 // Marshal renders the YAML-visible part of cfg as YAML (without comments).

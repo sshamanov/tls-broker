@@ -82,18 +82,28 @@ type CAAStatus struct {
 	// there is none anywhere up the tree.
 	Node    string
 	Records []CAA
-	// WildcardProtected is the §3.2 verdict: no foreign ACME account can
-	// obtain "*.Name".
+	// WildcardProtected is the §3.2 verdict: only ACME accounts pinned in
+	// the CAA records (or none) can obtain "*.Name".
 	WildcardProtected bool
 	// MissingProviders lists configured, enabled providers that the CAA
 	// set does not allow to issue (which would break fallback).
 	MissingProviders []string
-	// TrustedAccounts lists the zone's operator-trusted accounts (see
-	// ZoneConfig.TrustedAccounts) the verdict relied on: accounturi values
-	// in the wildcard set that are not the broker's own account.
-	TrustedAccounts []string
-	Detail          string // operator-readable explanation of the verdict
+	// BrokerWildcard says whether the broker's own account is among the
+	// accounts a protected verdict pins, i.e. whether the broker itself can
+	// obtain "*.Name". Empty when the verdict is unprotected or pins no
+	// account (";" only). It does not affect WildcardProtected.
+	BrokerWildcard BrokerPin
+	Detail         string // operator-readable explanation of the verdict
 }
+
+// BrokerPin is CAAStatus.BrokerWildcard.
+type BrokerPin string
+
+const (
+	BrokerPinned     BrokerPin = "pinned"     // the broker's account is pinned
+	BrokerNotPinned  BrokerPin = "not_pinned" // only other accounts are pinned
+	BrokerPinUnknown BrokerPin = "unknown"    // a broker account URL is unavailable
+)
 
 // CAAChecker reports CAA status for the UI. Implemented by internal/gate.
 type CAAChecker interface {

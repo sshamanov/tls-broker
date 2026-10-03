@@ -170,57 +170,9 @@ func (v *validator) zones() {
 			}
 			ids[z.HostedZoneID] = i
 		}
-		v.trustedAccounts(p+".trusted_accounts", z.TrustedAccounts)
 	}
 	if len(v.cfg.Zones) == 0 {
 		v.warnf("zones", "no managed zones configured; every name is refused")
-	}
-}
-
-// MaxTrustedAccounts is the most trusted accounts one zone may list.
-const MaxTrustedAccounts = 20
-
-// trustedAccounts checks a zone's operator-trusted ACME account URLs: each
-// is an absolute https URL that can stand in a CAA accounturi parameter, and
-// none is listed twice. An account whose host is no enabled provider's
-// directory host is only a warning: CAA values are judged by issuer, and the
-// URL is then probably mistyped.
-func (v *validator) trustedAccounts(p string, list []string) {
-	if len(list) > MaxTrustedAccounts {
-		v.errf(p, "%d accounts; at most %d", len(list), MaxTrustedAccounts)
-	}
-	hosts := map[string]bool{}
-	for _, pr := range v.cfg.Providers {
-		if u, err := url.Parse(pr.DirectoryURL); err == nil && !pr.Disabled {
-			hosts[strings.ToLower(u.Hostname())] = true
-		}
-	}
-	seen := map[string]int{}
-	for i, a := range list {
-		ip := fmt.Sprintf("%s[%d]", p, i)
-		u, err := url.Parse(a)
-		switch {
-		case a == "":
-			v.errf(ip, "is empty")
-			continue
-		case err != nil || u.Scheme != "https" || u.Host == "" || u.Opaque != "":
-			v.errf(ip, "%q is not an absolute https URL", a)
-			continue
-		case u.User != nil || u.Fragment != "" || u.RawQuery != "":
-			v.errf(ip, "%q: an account URL has no user info, query or fragment", a)
-			continue
-		case strings.ContainsFunc(a, func(r rune) bool { return r < 0x21 || r > 0x7e || r == ';' }):
-			v.errf(ip, "%q cannot appear in a CAA accounturi parameter (spaces, ';' or non-ASCII)", a)
-			continue
-		}
-		if j, dup := seen[a]; dup {
-			v.errf(ip, "%q duplicates %s[%d]", a, p, j)
-			continue
-		}
-		seen[a] = i
-		if len(hosts) > 0 && !hosts[strings.ToLower(u.Hostname())] {
-			v.warnf(ip, "host %s is not the directory host of any enabled provider; check the URL", u.Hostname())
-		}
 	}
 }
 

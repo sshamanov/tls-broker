@@ -136,15 +136,26 @@ Symptoms: a status page warning that the zone is unprotected and "no" in its
 `wildcard_unprotected`.
 
 1. Copy the suggested CAA records from the status page (unpinned `issue`,
-   `issuewild` with `accounturi=<the broker's account URL>`, plus one per
-   trusted account) into the zone in Route53 (or wherever the zone's CAA
-   lives). An `issuewild` naming any other account (for example your own
-   certbot) needs that account in the zone's `trusted_accounts`, or the zone
-   stays unprotected.
+   `issuewild` with `accounturi=<the broker's account URL>`) into the zone in
+   Route53 (or wherever the zone's CAA lives). Your own ACME clients that need
+   wildcards (for example certbot hosts) get an `issuewild` line each, pinned
+   with `accounturi=<their account URL>`; an unpinned `issuewild` keeps the
+   zone unprotected.
 2. Reload the status page until the zone's *Wildcard protected* column says
-   "yes". Account
-   URLs must match exactly (lower-case); a re-created CA account (lost
-   `provider-account-key.*`) has a new URL and needs new records.
+   "yes". The parameter name `accounturi` must be lower case, and the CA must
+   be an enabled provider with `account_uri_honoured: true`.
+
+### Broker cannot issue a zone's wildcards
+
+Symptoms: a status page warning "CAA pins wildcards to other ACME accounts
+only; the broker itself cannot issue ...", and "broker's account not pinned"
+under the zone's verdict. The zone is protected (the DNS proxy keeps
+working), but ACME proxy and direct-API wildcard orders fail at the CA.
+
+1. Add an `issuewild` line pinned to the broker's account URL (status page,
+   *CA accounts for CAA*). Account URLs must match exactly; a re-created CA
+   account (lost `provider-account-key.*`) has a new URL and needs new
+   records.
 
 ### LDAP down
 

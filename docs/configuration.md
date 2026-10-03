@@ -70,13 +70,6 @@ zones: []
 #                                # activation (the one public hosted zone with
 #                                # that name). Set it when two public zones
 #                                # share the name.
-#    trusted_accounts: []         # optional ACME account URLs of the operator's
-#                                # own clients (absolute https, no query or
-#                                # fragment, unique, at most 20). The DNS-proxy
-#                                # CAA condition accepts an issuewild/issue
-#                                # accounturi naming one of them for names in
-#                                # this zone like the broker's own account (see
-#                                # "Trusted operator accounts" below).
 
 route53:
   region: us-east-1
@@ -176,47 +169,18 @@ audit:
 (The exact value written for `renew_fraction` is the float 2/3; `0.6667` above
 is shortened for reading.)
 
-### Trusted operator accounts
+### Removed keys
 
-A requester without a wildcard grant may use the DNS proxy for `N` only when
-public CAA keeps foreign ACME accounts away from `*.N` (architecture §3.2,
-`docs/dns-proxy.md`). Normally that means every `issuewild` value (or `issue`
-value, when there is no `issuewild`) is `;` or pinned with `accounturi` to the
-broker's own account. When the operator also runs ACME clients of their own
-that must keep obtaining wildcards for the zone, list their account URLs under
-the zone's `trusted_accounts`:
-
-```yaml
-zones:
-  - name: example.com
-    trusted_accounts:
-      - https://acme-v02.api.letsencrypt.org/acme/acct/111111111
-      - https://acme-v02.api.letsencrypt.org/acme/acct/222222222
-```
-
-The CAA records may then contain extra `issuewild` lines such as
-`0 issuewild "letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/111111111"`
-and the zone still counts as protected. Exact semantics:
-
-- The list that applies to a name is the one of the managed zone the gate
-  matches it to (longest suffix); a sub-zone does not inherit its parent's
-  list. The effective CAA RRset itself may sit at a parent node; only the list
-  is per zone.
-- A value is accepted when its issuer is an enabled provider that honours
-  `accounturi` (`account_uri_honoured: true`) and every `accounturi`
-  parameter is the broker's account at that provider or one of the zone's
-  trusted accounts. Account URLs compare exactly (case-sensitive, no
-  normalization), as the CA compares them; the parameter name must be lower
-  case. A provider that does not honour `accounturi` gets no benefit from the
-  list.
-- Trusting an account is the operator's statement that whoever holds that
-  account key may obtain wildcards in the zone. The DNS proxy still cannot be
-  used by any other account: a TXT record it publishes validates `*.N` only for
-  the accounts the CAA names.
-- Changes take effect with the next activated generation, without a restart.
-- The status page says when a verdict relied on trusted accounts, and the
-  suggested CAA records for the zone are an unpinned `issue` per CA plus one
-  pinned `issuewild` line per account: the broker's and each trusted one.
+`zones[].trusted_accounts` (October 2026) listed ACME account URLs the
+DNS-proxy CAA condition should accept besides the broker's own. It is no
+longer needed: the condition accepts any account pinned with `accounturi` at
+a CA that honours it, because only whoever controls the zone's DNS can publish
+CAA (architecture §3.2, `docs/authorization.md`). A generation that still
+contains the key loads and activates as before; the key is ignored, in any
+shape, and validation reports a warning per zone (`zones[0].trusted_accounts:
+is no longer used and is ignored ...`, also shown under *Needs attention* on
+the status page). Remove it in the editor when convenient. The broker never
+writes it.
 
 ### Complete example
 
@@ -234,8 +198,6 @@ server:
 zones:
   - name: example.com
     hosted_zone_id: Z0123456789ABCDEFGHIJ
-    trusted_accounts:   # the operator's own certbot, which also issues *.example.com
-      - https://acme-v02.api.letsencrypt.org/acme/acct/111111111
   - name: example.org
     hosted_zone_id: Z9876543210JIHGFEDCBA
 
@@ -354,10 +316,7 @@ reference above; in addition:
 - zones: well-formed, normalized (lower case, no trailing dot), not wildcards,
   no duplicates; a hosted zone ID, when given, looks like `Z...` without
   `/hostedzone/` (an omitted one is discovered by name, see `docs/dns01.md`);
-  trusted accounts are absolute `https` URLs without user info, query or
-  fragment, contain no spaces, `;` or non-ASCII characters (they must fit a
-  CAA parameter), are unique within the zone and at most 20; one whose host is
-  no enabled provider's directory host is a warning (probably mistyped);
+  the removed `trusted_accounts` key is a warning (see "Removed keys");
 - providers: unique names, https directory URLs, plain e-mail contact, EAB
   fields together, CAA issuers are domain names, limit counts non-negative with
   a window whenever the count is positive;

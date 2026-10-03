@@ -888,26 +888,36 @@ func TestFormBodyLimits(t *testing.T) {
 	code(t, post("/ui/admin/config/validate", url.Values{"yaml": {goodYAML}}), 200)
 }
 
-// The zones section with trusted operator accounts: the verdict says it
-// relied on them, and the suggested records keep ordinary names open to every
-// CA (unpinned issue) while pinning issuewild to the broker's account and to
-// each trusted account.
-func TestDashboardTrustedAccounts(t *testing.T) {
+// The zones section: a zone whose CAA pins wildcards to the broker's and
+// other accounts is protected and says the broker's account is among them;
+// one that pins other accounts only is protected too, but warns that the
+// broker cannot issue its wildcards. A leftover trusted_accounts key in the
+// active generation is ignored with a warning. The suggested records keep
+// ordinary names open to every CA (unpinned issue) and pin issuewild to the
+// broker's account, with a reminder for the operator's own accounts.
+func TestDashboardZonesCAA(t *testing.T) {
 	e := newEnv(t)
 	y := strings.Replace(goodYAML, "    hosted_zone_id: Z0123456789ABC\n",
-		"    hosted_zone_id: Z0123456789ABC\n    trusted_accounts:\n      - https://acme.example/acme/acct/77\n      - https://elsewhere.example/acct/5\n", 1)
+		"    hosted_zone_id: Z0123456789ABC\n    trusted_accounts:\n      - https://acme.example/acme/acct/77\n", 1)
 	if _, chk, err := e.cfg.Activate(bg, []byte(y)); err != nil || !chk.OK() {
 		t.Fatalf("activate: %v %+v", err, chk)
 	}
 	e.caa.m["example.com"] = core.CAAStatus{Name: "example.com", Node: "example.com", WildcardProtected: true,
-		TrustedAccounts: []string{"https://acme.example/acme/acct/77"},
-		Detail:          "CAA issuewild at example.com allows *.example.com only to the broker's account and 1 trusted account at letsencrypt.org"}
+		BrokerWildcard: core.BrokerPinned,
+		Detail:         "CAA issuewild at example.com allows *.example.com only to 2 pinned accounts at letsencrypt.org; the broker's account at letsencrypt.org is among them"}
 	account, _ := e.ca.AccountURL(bg)
 	r := e.login("alice").get("/ui/")
-	see(t, r, "relies on 1 trusted operator account", "the broker&#39;s account and 1 trusted account at letsencrypt.org", "trusted_accounts",
+	see(t, r, "broker's account pinned", "only to 2 pinned accounts at letsencrypt.org; the broker&#39;s account at letsencrypt.org is among them",
+		"zones[0].trusted_accounts: is no longer used and is ignored",
 		`example.com. CAA 0 issue &#34;letsencrypt.org&#34;`,
 		`example.com. CAA 0 issuewild &#34;letsencrypt.org; accounturi=`+account+`&#34;`,
-		`example.com. CAA 0 issuewild &#34;letsencrypt.org; accounturi=https://acme.example/acme/acct/77&#34;`,
-		"; trusted account https://elsewhere.example/acct/5: no enabled provider has its host")
-	lacks(t, r, `CAA 0 issue &#34;letsencrypt.org; accounturi`, "is unprotected")
+		"for each ACME account of yours that needs wildcards")
+	lacks(t, r, `CAA 0 issue &#34;letsencrypt.org; accounturi`, "is unprotected", "trusted operator account", "cannot issue *.example.com")
+
+	e.caa.m["example.com"] = core.CAAStatus{Name: "example.com", Node: "example.com", WildcardProtected: true,
+		BrokerWildcard: core.BrokerNotPinned,
+		Detail:         "CAA issuewild at example.com allows *.example.com only to 1 pinned account at letsencrypt.org; the broker's own account is not among them, so the broker cannot obtain *.example.com itself"}
+	r = e.login("alice").get("/ui/")
+	see(t, r, "broker's account not pinned", "the broker itself cannot issue *.example.com (ACME proxy, direct API)")
+	lacks(t, r, "is unprotected")
 }

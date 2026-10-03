@@ -114,14 +114,14 @@ const (
 	srcIP       = "192.0.2.10"
 	primaryAcct = "https://primary.test/acme/acct/1"
 	fallbackAcc = "https://fallback.test/acme/acct/1"
-	// Accounts of the operator's own ACME clients at the primary.
+	// Accounts of other ACME clients at the primary (the operator's certbot
+	// hosts, or anyone's: which account is pinned does not matter).
 	operatorA = "https://primary.test/acme/acct/111111111"
 	operatorB = "https://primary.test/acme/acct/222222222"
 )
 
 type env struct {
 	gate      *Gate
-	cfg       *coretest.FakeConfig
 	res       *coretest.FakeResolver
 	grants    *memGrants
 	primary   *coretest.FakeCA
@@ -136,22 +136,10 @@ func newEnv() *env {
 		grants:   &memGrants{},
 		primary:  coretest.NewFakeCA("primary", clk),
 		fallback: coretest.NewFakeCA("fallback", clk),
-		cfg:      coretest.NewFakeConfig(nil),
 	}
 	e.providers = coretest.NewFakeProviders(e.primary, e.fallback)
-	e.gate = New(e.cfg, e.grants, e.res, e.providers)
+	e.gate = New(coretest.NewFakeConfig(nil), e.grants, e.res, e.providers)
 	return e
-}
-
-// trust sets the trusted accounts of a managed zone of the fixture.
-func (e *env) trust(zone string, accounts ...string) {
-	e.cfg.Update(func(c *core.Config) {
-		for i := range c.Zones {
-			if c.Zones[i].Name == zone {
-				c.Zones[i].TrustedAccounts = accounts
-			}
-		}
-	})
 }
 
 // grant creates a grant; IDs are assigned 1, 2, ... in call order.
@@ -450,7 +438,7 @@ func TestAuthorizeDNSProxyCAA(t *testing.T) {
 			setup: with(func(e *env) {
 				e.res.SetCAA("example.com", issuewild(";"), issuewild(pinned("fallback.test", fallbackAcc)))
 			})}),
-		proxy(authCase{name: "issuewild pinned to another account", detail: "not the broker's account",
+		proxy(authCase{name: "issuewild pinned to another account", allowed: true, reason: ok,
 			setup: with(func(e *env) {
 				e.res.SetCAA("example.com", issuewild(pinned("primary.test", "https://primary.test/acme/acct/666")))
 			})}),
@@ -474,7 +462,7 @@ func TestAuthorizeDNSProxyCAA(t *testing.T) {
 				e.providers.SetDisabled("fallback", true)
 				e.res.SetCAA("example.com", issuewild(pinned("fallback.test", fallbackAcc)))
 			})}),
-		proxy(authCase{name: "account URL unavailable", detail: "unknown",
+		proxy(authCase{name: "verdict needs no broker account URL", allowed: true, reason: ok,
 			setup: with(func(e *env) {
 				e.primary.Inject(coretest.Fault{Op: coretest.OpAccountURL, Err: e.primary.Down()})
 				e.res.SetCAA("example.com", issuewild(pinned("primary.test", primaryAcct)))
@@ -488,7 +476,7 @@ func TestAuthorizeDNSProxyCAA(t *testing.T) {
 			setup: with(func(e *env) {
 				e.res.SetCAA("example.com", issuewild("primary.test; AccountURI="+primaryAcct))
 			})}),
-		proxy(authCase{name: "two accounturi, one foreign", detail: "not the broker's account",
+		proxy(authCase{name: "two accounturi, one foreign", allowed: true, reason: ok,
 			setup: with(func(e *env) {
 				e.res.SetCAA("example.com", issuewild(pinned("primary.test", primaryAcct)+"; accounturi=https://x.test/1"))
 			})}),
@@ -543,102 +531,62 @@ func TestAuthorizeDNSProxyCAA(t *testing.T) {
 			names: []string{host, "*.example.com"}, aCalls: n(0), caaCalls: n(0),
 			setup: func(e *env) { e.grant(srcIP+"/32", true, true) }}),
 
-		// Operator-trusted accounts (zones[].trusted_accounts).
-		proxy(authCase{name: "trusted: broker and two operator accounts", allowed: true, reason: ok,
+		// Which account is pinned does not matter: whoever can write the
+		// zone's CAA chose every one of them.
+		proxy(authCase{name: "pinned: broker and two other accounts", allowed: true, reason: ok,
 			setup: with(func(e *env) {
-				e.trust("example.com", operatorA, operatorB)
 				e.res.SetCAA("example.com", issue("primary.test"), issue("fallback.test"),
 					issuewild(pinned("primary.test", primaryAcct)),
 					issuewild(pinned("primary.test", operatorA)),
 					issuewild(pinned("primary.test", operatorB)))
 			})}),
-		proxy(authCase{name: "trusted: operator account only", allowed: true, reason: ok,
+		proxy(authCase{name: "pinned: other accounts only, two issuers", allowed: true, reason: ok,
 			setup: with(func(e *env) {
-				e.trust("example.com", operatorA)
-				e.res.SetCAA("example.com", issuewild(pinned("primary.test", operatorA)))
+				e.res.SetCAA("example.com", issuewild(pinned("primary.test", operatorA)),
+					issuewild(pinned("fallback.test", "https://fallback.test/acme/acct/99")))
 			})}),
-		proxy(authCase{name: "trusted: broker and operator in one value", allowed: true, reason: ok,
+		proxy(authCase{name: "pinned: other account beside ;", allowed: true, reason: ok,
 			setup: with(func(e *env) {
-				e.trust("example.com", operatorA)
-				e.res.SetCAA("example.com", issuewild(pinned("primary.test", primaryAcct)+"; accounturi="+operatorA))
+				e.res.SetCAA("example.com", issuewild(";"), issuewild(pinned("primary.test", operatorA)))
 			})}),
-		proxy(authCase{name: "trusted: issue judged when there is no issuewild", allowed: true, reason: ok,
+		proxy(authCase{name: "pinned: issue judged when there is no issuewild", allowed: true, reason: ok,
 			setup: with(func(e *env) {
-				e.trust("example.com", operatorA)
-				e.res.SetCAA("example.com", issue(pinned("primary.test", primaryAcct)), issue(pinned("primary.test", operatorA)))
+				e.res.SetCAA("example.com", issue(pinned("primary.test", operatorA)), issue(pinned("primary.test", operatorB)))
 			})}),
-		proxy(authCase{name: "trusted: operator account needs no broker account URL", allowed: true, reason: ok,
+		proxy(authCase{name: "pinned: issue fallback with one unpinned value", detail: "issue \"fallback.test\" at example.com: issuer fallback.test is not pinned",
 			setup: with(func(e *env) {
-				e.trust("example.com", operatorA)
-				e.primary.Inject(coretest.Fault{Op: coretest.OpAccountURL, Err: e.primary.Down()})
-				e.res.SetCAA("example.com", issuewild(pinned("primary.test", operatorA)))
+				e.res.SetCAA("example.com", issue(pinned("primary.test", operatorA)), issue("fallback.test"))
 			})}),
-		proxy(authCase{name: "trusted: an untrusted foreign account still unprotects",
-			detail: "accounturi " + operatorB + " is not the broker's account at primary.test nor a trusted account of zone example.com",
+		proxy(authCase{name: "pinned: account URL case is the CA's business", allowed: true, reason: ok,
 			setup: with(func(e *env) {
-				e.trust("example.com", operatorA)
-				e.res.SetCAA("example.com", issuewild(pinned("primary.test", primaryAcct)),
-					issuewild(pinned("primary.test", operatorA)), issuewild(pinned("primary.test", operatorB)))
-			})}),
-		proxy(authCase{name: "trusted: foreign account beside a trusted one in one value", detail: "nor a trusted account",
-			setup: with(func(e *env) {
-				e.trust("example.com", operatorA)
-				e.res.SetCAA("example.com", issuewild(pinned("primary.test", operatorA)+"; accounturi="+operatorB))
-			})}),
-		proxy(authCase{name: "trusted: another zone's list does not apply", detail: "is not the broker's account",
-			setup: with(func(e *env) {
-				e.trust("example.org", operatorA)
-				e.res.SetCAA("example.com", issuewild(pinned("primary.test", operatorA)))
-			})}),
-		proxy(authCase{name: "trusted: compared exactly", detail: "nor a trusted account",
-			setup: with(func(e *env) {
-				e.trust("example.com", operatorA)
 				e.res.SetCAA("example.com", issuewild(pinned("primary.test", strings.ToUpper(operatorA))))
 			})}),
-		proxy(authCase{name: "trusted: provider does not honour accounturi", detail: "does not honour",
+		proxy(authCase{name: "pinned: one unpinned value unprotects", detail: "not pinned",
 			setup: with(func(e *env) {
-				e.trust("example.com", "https://fallback.test/acme/acct/7")
+				e.res.SetCAA("example.com", issuewild(pinned("primary.test", operatorA)), issuewild("primary.test"))
+			})}),
+		proxy(authCase{name: "pinned: provider does not honour accounturi", detail: "provider for issuer fallback.test does not honour accounturi",
+			setup: with(func(e *env) {
 				c := e.fallback.Caps()
 				c.AccountURIHonoured = false
 				e.fallback.SetCaps(c)
-				e.res.SetCAA("example.com", issuewild(pinned("fallback.test", "https://fallback.test/acme/acct/7")))
+				e.res.SetCAA("example.com", issuewild(pinned("primary.test", operatorA)),
+					issuewild(pinned("fallback.test", "https://fallback.test/acme/acct/7")))
 			})}),
-		proxy(authCase{name: "trusted: issuer is not a provider", detail: "not an enabled provider",
+		proxy(authCase{name: "pinned: issuer is not a provider", detail: "issuer letsencrypt.org is not an enabled provider",
 			setup: with(func(e *env) {
-				e.trust("example.com", operatorA)
 				e.res.SetCAA("example.com", issuewild(pinned("letsencrypt.org", operatorA)))
 			})}),
-		proxy(authCase{name: "trusted: accounturi tag in another case", detail: "lower case",
+		proxy(authCase{name: "pinned: accounturi tag in another case", detail: "lower case",
 			setup: with(func(e *env) {
-				e.trust("example.com", operatorA)
-				e.res.SetCAA("example.com", issuewild("primary.test; AccountURI="+operatorA))
+				e.res.SetCAA("example.com", issuewild(pinned("primary.test", operatorA)), issuewild("primary.test; ACCOUNTURI="+operatorB))
 			})}),
-		proxy(authCase{name: "trusted: unpinned value still unprotects", detail: "not pinned",
+		proxy(authCase{name: "pinned: lower-case tag beside another spelling", detail: "lower case",
 			setup: with(func(e *env) {
-				e.trust("example.com", operatorA)
-				e.res.SetCAA("example.com", issuewild(pinned("primary.test", operatorA)), issuewild("primary.test"))
+				e.res.SetCAA("example.com", issuewild(pinned("primary.test", operatorA)+"; AccountUri="+operatorB))
 			})}),
 	}
 	runAuth(t, tests)
-}
-
-// Trusted accounts come from the configuration in effect for each call: a
-// new generation applies without a restart.
-func TestTrustedAccountsFollowConfig(t *testing.T) {
-	e := newEnv()
-	e.res.SetCAA("example.com", issuewild(pinned("primary.test", primaryAcct)), issuewild(pinned("primary.test", operatorA)))
-	check := func(want bool) {
-		t.Helper()
-		st, err := e.gate.CheckCAA(context.Background(), "example.com")
-		if err != nil || st.WildcardProtected != want {
-			t.Fatalf("protected = %v (%s), want %v; err %v", st.WildcardProtected, st.Detail, want, err)
-		}
-	}
-	check(false)
-	e.trust("example.com", operatorA)
-	check(true)
-	e.trust("example.com")
-	check(false)
 }
 
 func TestCheckCAA(t *testing.T) {
@@ -650,34 +598,43 @@ func TestCheckCAA(t *testing.T) {
 		node      string
 		protected bool
 		missing   []string
-		trusted   []string
+		broker    core.BrokerPin
 		detail    string
 	}{
 		{name: "no CAA", check: "example.com", detail: "no CAA records"},
 		{name: "broker only", check: "example.com",
 			caa:  map[string][]core.CAA{"example.com": {issue(pinned("primary.test", primaryAcct)), issuewild(pinned("primary.test", primaryAcct))}},
-			node: "example.com", protected: true, missing: []string{"fallback"},
-			detail: "CAA issuewild at example.com allows *.example.com only to the broker's account at primary.test"},
-		{name: "broker and trusted accounts", check: "example.com",
+			node: "example.com", protected: true, missing: []string{"fallback"}, broker: core.BrokerPinned,
+			detail: "CAA issuewild at example.com allows *.example.com only to 1 pinned account at primary.test; the broker's account at primary.test is among them"},
+		{name: "broker and other accounts", check: "example.com",
 			caa: map[string][]core.CAA{"example.com": {issue("primary.test"), issue("fallback.test"),
 				issuewild(pinned("primary.test", primaryAcct)), issuewild(pinned("primary.test", operatorA)),
 				issuewild(pinned("primary.test", operatorB)), issuewild(pinned("primary.test", operatorA))}},
-			setup: func(e *env) { e.trust("example.com", operatorA, operatorB) },
-			node:  "example.com", protected: true, missing: []string{"fallback"}, trusted: []string{operatorA, operatorB},
-			detail: "allows *.example.com only to the broker's account and 2 trusted accounts at primary.test (trusted accounts of zone example.com: " +
-				operatorA + ", " + operatorB + ")"},
-		{name: "trusted account only, two issuers", check: "example.com",
-			caa:   map[string][]core.CAA{"example.com": {issuewild(pinned("primary.test", operatorA)), issuewild(pinned("fallback.test", fallbackAcc))}},
-			setup: func(e *env) { e.trust("example.com", operatorA) },
-			node:  "example.com", protected: true, missing: []string{"primary"}, trusted: []string{operatorA},
-			detail: "only to 1 trusted account at primary.test, the broker's account at fallback.test"},
-		{name: "trusted list of the zone holding the name", check: "*.sub.example.com",
-			caa:   map[string][]core.CAA{"example.com": {issuewild(pinned("primary.test", operatorA))}},
-			setup: func(e *env) { e.trust("example.com", operatorA) },
-			node:  "example.com", protected: true, missing: []string{"primary", "fallback"}, trusted: []string{operatorA}},
+			node: "example.com", protected: true, missing: []string{"fallback"}, broker: core.BrokerPinned,
+			detail: "allows *.example.com only to 3 pinned accounts at primary.test; the broker's account at primary.test is among them"},
+		{name: "other accounts only: protected, but the broker cannot issue wildcards", check: "example.com",
+			caa:  map[string][]core.CAA{"example.com": {issuewild(pinned("primary.test", operatorA)), issuewild(pinned("primary.test", operatorB))}},
+			node: "example.com", protected: true, missing: []string{"primary", "fallback"}, broker: core.BrokerNotPinned,
+			detail: "allows *.example.com only to 2 pinned accounts at primary.test; the broker's own account is not among them, so the broker cannot obtain *.example.com itself"},
+		{name: "other account at one CA, broker at another", check: "example.com",
+			caa:  map[string][]core.CAA{"example.com": {issuewild(pinned("primary.test", operatorA)), issuewild(pinned("fallback.test", fallbackAcc))}},
+			node: "example.com", protected: true, missing: []string{"primary"}, broker: core.BrokerPinned,
+			detail: "only to 1 pinned account at primary.test, 1 pinned account at fallback.test; the broker's account at fallback.test is among them"},
+		{name: "broker and another account in one value", check: "example.com",
+			caa:  map[string][]core.CAA{"example.com": {issuewild(pinned("primary.test", primaryAcct) + "; accounturi=" + operatorA)}},
+			node: "example.com", protected: true, missing: []string{"primary", "fallback"}, broker: core.BrokerNotPinned,
+			detail: "only to 2 pinned accounts at primary.test; the broker's own account is not among them"},
+		{name: "broker account unknown", check: "*.sub.example.com",
+			caa: map[string][]core.CAA{"example.com": {issuewild(pinned("primary.test", primaryAcct))}},
+			setup: func(e *env) {
+				e.primary.Inject(coretest.Fault{Op: coretest.OpAccountURL, Err: e.primary.Down()})
+			},
+			node: "example.com", protected: true, missing: []string{"primary", "fallback"}, broker: core.BrokerPinUnknown,
+			detail: "allows *.sub.example.com only to 1 pinned account at primary.test; whether the broker's account is among them is unknown (account URL unavailable at primary)"},
 		{name: "issue pinned to primary only", check: "example.com",
 			caa:  map[string][]core.CAA{"example.com": {issue(pinned("primary.test", primaryAcct))}},
-			node: "example.com", protected: true, missing: []string{"fallback"}},
+			node: "example.com", protected: true, missing: []string{"fallback"}, broker: core.BrokerPinned,
+			detail: "CAA issue at example.com allows"},
 		{name: "everything pinned, wildcards closed", check: "example.com",
 			caa: map[string][]core.CAA{"example.com": {
 				issue(pinned("primary.test", primaryAcct)), issue(pinned("fallback.test", fallbackAcc)), issuewild(";")}},
@@ -717,7 +674,7 @@ func TestCheckCAA(t *testing.T) {
 			}
 			if st.Name != names.Base(tc.check) || st.Node != tc.node || st.WildcardProtected != tc.protected ||
 				!slices.Equal(st.MissingProviders, tc.missing) || !slices.Equal(st.Records, tc.caa[tc.node]) ||
-				!slices.Equal(st.TrustedAccounts, tc.trusted) {
+				st.BrokerWildcard != tc.broker {
 				t.Fatalf("status = %+v", st)
 			}
 			if tc.detail != "" && !strings.Contains(st.Detail, tc.detail) {
@@ -778,37 +735,31 @@ func TestParseIssueValue(t *testing.T) {
 
 // The records the operator publishes (example.com, dev.example.com with its own
 // CAA node, example.org; example names and URLs here): open issue for both
-// CAs, issuewild pinned to the broker and to the operator's certbot accounts
-// listed as trusted accounts of the zone. All are protected; dropping an
-// account from trusted_accounts unprotects the nodes that name it.
+// CAs, issuewild pinned to the broker and to the operator's certbot
+// accounts. All are protected without any configuration; the broker's
+// account is among the pinned ones everywhere. A node that pins only the
+// operator's accounts is still protected, but the broker cannot issue its
+// wildcards.
 func TestOperatorCAAFixture(t *testing.T) {
 	const opC = "https://primary.test/acme/acct/333333333"
-	setup := func(e *env) {
-		open := []core.CAA{issue("primary.test"), issue("fallback.test")}
-		e.res.SetCAA("example.com", append(slices.Clone(open),
-			issuewild(pinned("primary.test", primaryAcct)), issuewild(pinned("primary.test", operatorA)))...)
-		e.res.SetCAA("dev.example.com", append(slices.Clone(open), issuewild(pinned("primary.test", primaryAcct)),
-			issuewild(pinned("primary.test", operatorA)), issuewild(pinned("primary.test", operatorB)))...)
-		e.res.SetCAA("example.org", append(slices.Clone(open),
-			issuewild(pinned("primary.test", primaryAcct)), issuewild(pinned("primary.test", opC)))...)
-		e.trust("example.com", operatorA, operatorB)
-		e.trust("example.org", opC)
-	}
-	cases := []struct {
-		name, node, detail string
-		trusted            []string
-	}{
-		{"example.com", "example.com", "only to the broker's account and 1 trusted account at primary.test", []string{operatorA}},
-		{"dev.example.com", "dev.example.com", "only to the broker's account and 2 trusted accounts at primary.test", []string{operatorA, operatorB}},
-		{"host.dev.example.com", "dev.example.com", "2 trusted accounts", []string{operatorA, operatorB}},
-		{"example.org", "example.org", "only to the broker's account and 1 trusted account at primary.test", []string{opC}},
-	}
+	open := []core.CAA{issue("primary.test"), issue("fallback.test")}
 	e := newEnv()
-	setup(e)
+	e.res.SetCAA("example.com", append(slices.Clone(open),
+		issuewild(pinned("primary.test", primaryAcct)), issuewild(pinned("primary.test", operatorA)))...)
+	e.res.SetCAA("dev.example.com", append(slices.Clone(open), issuewild(pinned("primary.test", primaryAcct)),
+		issuewild(pinned("primary.test", operatorA)), issuewild(pinned("primary.test", operatorB)))...)
+	e.res.SetCAA("example.org", append(slices.Clone(open),
+		issuewild(pinned("primary.test", primaryAcct)), issuewild(pinned("primary.test", opC)))...)
+	cases := []struct{ name, node, detail string }{
+		{"example.com", "example.com", "CAA issuewild at example.com allows *.example.com only to 2 pinned accounts at primary.test; the broker's account at primary.test is among them"},
+		{"dev.example.com", "dev.example.com", "CAA issuewild at dev.example.com allows *.dev.example.com only to 3 pinned accounts at primary.test; the broker's account"},
+		{"host.dev.example.com", "dev.example.com", "only to 3 pinned accounts at primary.test; the broker's account at primary.test is among them"},
+		{"example.org", "example.org", "CAA issuewild at example.org allows *.example.org only to 2 pinned accounts at primary.test; the broker's account"},
+	}
 	for _, tc := range cases {
 		st, err := e.gate.CheckCAA(context.Background(), tc.name)
 		if err != nil || !st.WildcardProtected || st.Node != tc.node || !strings.Contains(st.Detail, tc.detail) ||
-			!slices.Equal(st.TrustedAccounts, tc.trusted) || len(st.MissingProviders) != 1 || st.MissingProviders[0] != "fallback" {
+			st.BrokerWildcard != core.BrokerPinned || !slices.Equal(st.MissingProviders, []string{"fallback"}) {
 			t.Fatalf("%s: %+v %v", tc.name, st, err)
 		}
 	}
@@ -820,10 +771,13 @@ func TestOperatorCAAFixture(t *testing.T) {
 			t.Fatalf("%s: %+v %v", name, d, err)
 		}
 	}
-	// Without operatorB in the list, dev.example.com is unprotected again.
-	e.trust("example.com", operatorA)
-	if st, _ := e.gate.CheckCAA(context.Background(), "dev.example.com"); st.WildcardProtected ||
-		!strings.Contains(st.Detail, operatorB+" is not the broker's account at primary.test nor a trusted account of zone example.com") {
-		t.Fatalf("dev.example.com without operatorB: %+v", st)
+	// Without the broker's line, dev.example.com is still protected, but the
+	// broker itself cannot obtain its wildcards.
+	e = newEnv()
+	e.res.SetCAA("dev.example.com", append(slices.Clone(open),
+		issuewild(pinned("primary.test", operatorA)), issuewild(pinned("primary.test", operatorB)))...)
+	if st, err := e.gate.CheckCAA(context.Background(), "dev.example.com"); err != nil || !st.WildcardProtected ||
+		st.BrokerWildcard != core.BrokerNotPinned || !strings.Contains(st.Detail, "the broker's own account is not among them") {
+		t.Fatalf("dev.example.com without the broker: %+v %v", st, err)
 	}
 }

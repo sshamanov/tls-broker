@@ -644,3 +644,35 @@ func TestStoreWithFileSecretsAndReadOnlyInterfaces(t *testing.T) {
 		t.Fatal(n, check, err)
 	}
 }
+
+// A generation written while zones[].trusted_accounts existed (production
+// has one) still loads at startup: the key is ignored with a deprecation
+// warning, and a configuration rendered from it no longer has the key.
+func TestDeprecatedTrustedAccountsGenerationLoads(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	f.open()
+	old := "zones:\n  - name: example.com\n    trusted_accounts:\n      - https://acme-v02.api.letsencrypt.org/acme/acct/111111111\n"
+	os.WriteFile(filepath.Join(f.dir(), "000002.yaml"), []byte(old), 0o600)
+	os.Remove(filepath.Join(f.dir(), "current"))
+	os.Symlink("000002.yaml", filepath.Join(f.dir(), "current"))
+
+	s := f.open()
+	cur := s.Current()
+	if cur.Generation != 2 || f.target() != "000002.yaml" || len(cur.Zones) != 1 || cur.Zones[0].Name != "example.com" {
+		t.Fatalf("generation %d (%s): %+v", cur.Generation, f.target(), cur.Zones)
+	}
+	check, err := s.Validate(ctx, []byte(old))
+	if err != nil || !check.OK() || !slices.ContainsFunc(check.Warnings, func(w string) bool {
+		return strings.Contains(w, "zones[0].trusted_accounts") && strings.Contains(w, "ignored")
+	}) {
+		t.Fatalf("validate: %v %+v", err, check)
+	}
+	if out, err := Marshal(cur); err != nil || strings.Contains(string(out), "trusted_accounts") {
+		t.Fatalf("rendered:\n%s %v", out, err)
+	}
+	// Activating it again (the editor shows the current YAML) also works.
+	if n, check, err := s.Activate(ctx, []byte(old)); err != nil || n != 3 || len(check.Warnings) == 0 {
+		t.Fatalf("activate: %d %+v %v", n, check, err)
+	}
+}
