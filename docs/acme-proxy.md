@@ -235,8 +235,10 @@ Encrypt (Boulder) does, so a client that works there works here.
 image backed by Pebble, behind a Caddy TLS front. Each client obtains a
 certificate with the invocation shown above (`--webroot -w /tmp` for
 Certbot, `-w /tmp` for acme.sh), the chain is checked against Pebble's
-intermediate and root, and the certificate is renewed. Results of the run on
-2026-10-03:
+intermediate and root, and the certificate is renewed. The DNS-proxy rows
+use the broker only for DNS-01 and order from Pebble themselves; the suite
+also checks that no challenge and no TXT record is left afterwards. Results
+of the run on 2026-10-03:
 
 | Client | Version | Issue | Renew | Notes |
 |---|---|---|---|---|
@@ -244,7 +246,8 @@ intermediate and root, and the certificate is renewed. Results of the run on
 | Certbot, Ubuntu 20.04 `python3-certbot` | 0.40.0 | pass | pass | no ARI, no `replaces` |
 | Certbot, `certbot/certbot:v0.31.0` (as Debian 10) | 0.31.0 | pass | pass | needs the `application/pkix-cert` exception above; no ARI, no `replaces` |
 | acme.sh, `neilpang/acme.sh` | 3.1.6 | pass | pass (`--renew --force`) | fetches `renewalInfo` and sends `replaces` on renewal; logs "already verified, skipping" for the valid authorizations |
-| acme.sh DNS-proxy hook (`docs/dns-proxy.md`, verbatim) against Pebble | 3.1.6 | pass | pass | the hook cleans up every value it presented |
+| acme.sh DNS proxy, stock `--dns dns_acmeproxy` (`docs/dns-proxy.md`) against Pebble | 3.1.6 | pass | pass (`--renew --force`) | no custom hook; cleans up every value it presented |
+| Certbot DNS proxy, the two `curl` manual hooks of `docs/dns-proxy.md` (verbatim) against Pebble | 5.8.0 | pass | pass (`renew --force-renewal`) | `certbot/certbot:latest` plus `curl`; cleans up every value it presented |
 
 For every renewal the broker sent `replaces` upstream, inferred from the
 lineage where the client sent none. `certbot renew` without a terminal sleeps

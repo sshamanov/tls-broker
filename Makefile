@@ -54,7 +54,8 @@ e2e-pebble:
 		test/pebble.sh stop; exit $$rc'
 
 # Real certbot (current and old) and acme.sh containers against the broker
-# image backed by Pebble (test/compat/run.sh).
+# image backed by Pebble, as ACME-proxy and DNS-proxy clients
+# (test/compat/run.sh).
 compat:
 	@mkdir -p .claude/tmp
 	@flock $(PEBBLE_LOCK) test/compat/run.sh

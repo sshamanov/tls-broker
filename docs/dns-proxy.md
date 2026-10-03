@@ -156,110 +156,65 @@ curl -sS https://broker.lan/dns/challenges
 
 Use it to find the ID after a crashed hook.
 
-## Client hooks
+## Clients
 
-Set `BROKER` to the broker's base URL. Both hooks use only `curl` and `sed`.
+No hook script is needed: acme.sh and lego ship a hook that speaks the fqdn
+form, and Certbot needs two one-line `curl` hooks. Replace `broker.lan` with
+your broker's name; the client host must be allowed by the gate (above) and
+must trust the broker's TLS certificate. Hooks for `*.N` pass the record of
+`N`, so a wildcard order is gated as `N` (see "Grant requirements").
+`make compat` runs the acme.sh and Certbot commands below (the Certbot hooks
+verbatim) against Pebble, including renewal and cleanup.
 
-### acme.sh (`dns_broker.sh`)
+### acme.sh
 
-Save as `~/.acme.sh/dnsapi/dns_broker.sh`, then
-`export DNS_BROKER_URL=https://broker.lan` and issue with `--dns dns_broker`
-(add `--dnssleep 0`: the broker already waited for propagation).
+The built-in `dns_acmeproxy` hook. Leave `ACMEPROXY_USERNAME` and
+`ACMEPROXY_PASSWORD` unset: the broker trusts the source address.
 
 ```sh
-#!/usr/bin/env sh
-# acme.sh DNS API hook for the TLS broker's DNS proxy.
-# Usage: DNS_BROKER_URL=https://broker.lan acme.sh --issue --dns dns_broker -d foo.example.com
-
-dns_broker_add() {
-  fulldomain=$1   # _acme-challenge.foo.example.com
-  txtvalue=$2
-  _broker_init || return 1
-  domain=${fulldomain#_acme-challenge.}
-  _info "Asking the broker to publish the challenge for $domain"
-  resp=$(curl -sS -m 300 -w '\n%{http_code}' -X POST "$DNS_BROKER_URL/dns/present" \
-    -H 'Content-Type: application/json' \
-    -d "{\"identifier\":\"$domain\",\"value\":\"$txtvalue\"}") || {
-    _err "broker unreachable"; return 1; }
-  code=$(printf '%s' "$resp" | tail -n 1)
-  body=$(printf '%s' "$resp" | sed '$d')
-  if [ "$code" != 201 ]; then
-    _err "broker refused ($code): $body"
-    return 1
-  fi
-  id=$(printf '%s' "$body" | sed -n 's/.*"challenge_id":"\([^"]*\)".*/\1/p')
-  mkdir -p "$_broker_state" && printf '%s' "$id" >"$_broker_state/$txtvalue"
-}
-
-dns_broker_rm() {
-  fulldomain=$1
-  txtvalue=$2
-  _broker_init || return 1
-  f="$_broker_state/$txtvalue"
-  [ -f "$f" ] || { _info "no broker challenge recorded for this value"; return 0; }
-  code=$(curl -sS -m 60 -o /dev/null -w '%{http_code}' -X DELETE \
-    "$DNS_BROKER_URL/dns/challenges/$(cat "$f")")
-  case $code in
-    204|404) rm -f "$f" ;;   # 404: already gone
-    *) _err "broker cleanup failed ($code)"; return 1 ;;
-  esac
-}
-
-_broker_init() {
-  DNS_BROKER_URL="${DNS_BROKER_URL:-$(_readaccountconf_mutable DNS_BROKER_URL)}"
-  if [ -z "$DNS_BROKER_URL" ]; then
-    _err "Set DNS_BROKER_URL, for example https://broker.lan"
-    return 1
-  fi
-  _saveaccountconf_mutable DNS_BROKER_URL "$DNS_BROKER_URL"
-  _broker_state="${LE_WORKING_DIR:-$HOME/.acme.sh}/dns_broker_state"
-}
+export ACMEPROXY_ENDPOINT=https://broker.lan/dns
+acme.sh --issue --dns dns_acmeproxy --dnssleep 0 -d foo.example.com
 ```
+
+acme.sh stores the endpoint with the account, so renewals need nothing more.
+`--dnssleep 0` skips acme.sh's own propagation check, which is redundant:
+`present` returns only once the value is publicly visible.
 
 ### Certbot
 
-Certbot gives the base name in `CERTBOT_DOMAIN` (without `*.`), the value in
-`CERTBOT_VALIDATION`, and passes the output of the auth hook to the cleanup
-hook as `CERTBOT_AUTH_OUTPUT`, so the challenge ID needs no state file.
-
-`/etc/letsencrypt/broker-auth.sh`:
-
-```sh
-#!/bin/sh
-set -eu
-BROKER=${BROKER:-https://broker.lan}
-resp=$(curl -sS -m 300 -w '\n%{http_code}' -X POST "$BROKER/dns/present" \
-  -H 'Content-Type: application/json' \
-  -d "{\"identifier\":\"$CERTBOT_DOMAIN\",\"value\":\"$CERTBOT_VALIDATION\"}")
-code=$(printf '%s' "$resp" | tail -n 1)
-body=$(printf '%s' "$resp" | sed '$d')
-if [ "$code" != 201 ]; then echo "broker refused ($code): $body" >&2; exit 1; fi
-# stdout becomes CERTBOT_AUTH_OUTPUT: only the challenge ID
-printf '%s\n' "$body" | sed -n 's/.*"challenge_id":"\([^"]*\)".*/\1/p'
-```
-
-`/etc/letsencrypt/broker-cleanup.sh`:
-
-```sh
-#!/bin/sh
-set -eu
-BROKER=${BROKER:-https://broker.lan}
-[ -n "${CERTBOT_AUTH_OUTPUT:-}" ] || exit 0
-code=$(curl -sS -m 60 -o /dev/null -w '%{http_code}' -X DELETE \
-  "$BROKER/dns/challenges/$CERTBOT_AUTH_OUTPUT")
-case $code in 204|404) ;; *) echo "broker cleanup failed ($code)" >&2; exit 1 ;; esac
-```
-
 ```sh
 certbot certonly --manual --preferred-challenges dns \
-  --manual-auth-hook /etc/letsencrypt/broker-auth.sh \
-  --manual-cleanup-hook /etc/letsencrypt/broker-cleanup.sh \
+  --manual-auth-hook 'curl -sSf https://broker.lan/dns/present -d "{\"fqdn\":\"_acme-challenge.$CERTBOT_DOMAIN.\",\"value\":\"$CERTBOT_VALIDATION\"}"' \
+  --manual-cleanup-hook 'curl -sSf https://broker.lan/dns/cleanup -d "{\"fqdn\":\"_acme-challenge.$CERTBOT_DOMAIN.\",\"value\":\"$CERTBOT_VALIDATION\"}"' \
   -d foo.example.com
 ```
 
-For `*.example.com` plus `example.com` in one order Certbot runs the hook
-twice with the same `CERTBOT_DOMAIN` and different values; both coexist.
-Renewals reuse the stored hooks.
+The single quotes keep the variables for Certbot's hook shell, which expands
+them. `-f` makes a refusal fail the hook (and the run); `-S` prints why.
+Certbot stores both hooks in the renewal configuration, so `certbot renew`
+reuses them. For `*.example.com` plus `example.com` in one order Certbot runs
+the hook twice with the same `CERTBOT_DOMAIN` and different values; both
+coexist.
+
+### lego
+
+The built-in `httpreq` provider in its default (JSON) mode:
+
+```sh
+HTTPREQ_ENDPOINT=https://broker.lan/dns \
+  lego --email ops@example.com --dns httpreq -d foo.example.com run
+```
+
+(lego v4 command syntax.) Leave `HTTPREQ_MODE` unset (`RAW` sends a
+different body) and `HTTPREQ_USERNAME`/`HTTPREQ_PASSWORD` unset. lego
+`httpreq` sends the same requests as acme.sh but is not part of `make compat`.
+
+### Anything else
+
+Any client that can run a command per challenge works with the two `curl`
+calls of the Certbot hooks above: `POST /dns/present` with
+`{"fqdn":"_acme-challenge.<name>.","value":"<txt>"}` before validation, the
+same body to `/dns/cleanup` afterwards.
 
 ## Limits and housekeeping
 

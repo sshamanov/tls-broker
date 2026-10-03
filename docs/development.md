@@ -15,7 +15,7 @@ container through `scripts/dev`; `make` targets wrap the common cases.
 | `make run-test` | `docker compose -f deploy/compose.test.yaml up -d`: the local test deployment with live credentials (see `docs/deployment.md`). |
 | `make e2e` | Only the in-process end-to-end tests (`test/e2e`), uncached. |
 | `make e2e-pebble` | The broker with the real upstream adapter against Pebble and challtestsrv containers (`test/pebble.sh`). |
-| `make compat` | Real certbot (current, Ubuntu 20.04, 0.31) and acme.sh against the broker image backed by Pebble (`test/compat/run.sh`). |
+| `make compat` | Real certbot (current, Ubuntu 20.04, 0.31) and acme.sh against the broker image backed by Pebble, as ACME-proxy and DNS-proxy clients (`test/compat/run.sh`). |
 | `make clean` | Removes `bin/` and `.cache/`. |
 
 `scripts/dev <cmd...>` runs any command in the container, for example:
@@ -179,12 +179,16 @@ may use) and runs, on the host network, containers named
 
 Clients: `certbot/certbot:latest`, Ubuntu 20.04's `python3-certbot` (built
 from `test/compat/certbot-focal.Dockerfile`), `certbot/certbot:v0.31.0`
-(Debian 10's version) with `--webroot -w /tmp`, and `neilpang/acme.sh` both
-through the ACME proxy and with the DNS-proxy hook of `docs/dns-proxy.md`
-against Pebble directly. Each issues, the chain is compared with Pebble's
-intermediate and verified against its root, and each renews; the script also
-checks that current certbot fetched `renewalInfo`, that renewals went
-upstream with `replaces`, and that the hook left nothing published. It ends
+(Debian 10's version) with `--webroot -w /tmp`, and `neilpang/acme.sh`
+through the ACME proxy; and as DNS-proxy clients ordering from Pebble
+directly, acme.sh with its stock `--dns dns_acmeproxy` hook
+(`ACMEPROXY_ENDPOINT` = the broker's `/dns`) and current certbot (plus `curl`,
+`test/compat/certbot-curl.Dockerfile`) with the two manual hooks extracted
+verbatim from `docs/dns-proxy.md`. Each issues, the chain is compared with
+Pebble's intermediate and verified against its root, and each renews; the
+script also checks that current certbot fetched `renewalInfo`, that renewals
+went upstream with `replaces`, that the DNS-proxy clients left no challenge
+behind and that no TXT record is left in the zone. It ends
 with a PASS/FAIL table and exits non-zero on any FAIL; logs stay in
 `.claude/tmp/compat/`. `COMPAT_PLAIN_HTTP=1` points the clients at the broker
 over plain http instead of Caddy. The observed versions and behaviours are

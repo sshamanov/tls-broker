@@ -17,11 +17,13 @@
 #   caddy       127.0.0.1:18443  TLS front (tls internal), X-Real-IP
 #
 # Clients: current certbot (certbot/certbot:latest), Ubuntu 20.04's
-# python3-certbot, the certbot/certbot:v0.31.0 image, and acme.sh
-# (neilpang/acme.sh) both as an ACME-proxy client and with the DNS-proxy hook
-# from docs/dns-proxy.md talking to Pebble directly. Each obtains a
-# certificate, checks the chain against Pebble's intermediate and root, and
-# renews. The summary table at the end lists every check; the exit status is
+# python3-certbot, the certbot/certbot:v0.31.0 image and acme.sh
+# (neilpang/acme.sh) as ACME-proxy clients; and as DNS-proxy clients talking
+# to Pebble directly, acme.sh with its stock dns_acmeproxy hook and current
+# certbot with the two curl one-liner manual hooks taken verbatim from
+# docs/dns-proxy.md. Each obtains a certificate, checks the chain against
+# Pebble's intermediate and root, and renews; the DNS-proxy clients must leave
+# no challenge and no TXT record behind. The summary table at the end lists every check; the exit status is
 # non-zero if any failed. Logs stay in .claude/tmp/compat/ for inspection.
 set -uo pipefail
 
@@ -34,6 +36,7 @@ certbot_image="${CERTBOT_IMAGE:-certbot/certbot:latest}"
 certbot_old_image="${CERTBOT_OLD_IMAGE:-certbot/certbot:v0.31.0}"
 acmesh_image="${ACMESH_IMAGE:-neilpang/acme.sh:latest}"
 focal_image=tlsbroker-e2e-compat-certbot-focal
+curl_image=tlsbroker-e2e-compat-certbot-curl
 p=tlsbroker-e2e-compat
 broker_port=18480 caddy_port=18443 mockdoh_port=18453 r53_port=18454
 zone=compat.test zone_id=ZCOMPAT
@@ -94,6 +97,8 @@ make image IMAGE="$image" >"$work/image-build.log" 2>&1 || die "image build fail
 CGO_ENABLED=0 scripts/dev go build -o .claude/tmp/compat/r53mock ./test/compat/r53mock || die "r53mock build failed"
 docker build --network host -q -t "$focal_image" -f test/compat/certbot-focal.Dockerfile test/compat \
   >"$work/focal-build.log" 2>&1 || die "Ubuntu 20.04 certbot image build failed"
+docker build --network host -q -t "$curl_image" --build-arg CERTBOT_IMAGE="$certbot_image" \
+  -f test/compat/certbot-curl.Dockerfile test/compat >"$work/curl-build.log" 2>&1 || die "certbot+curl image build failed"
 
 curl -sf --cacert "$work/pebble.minica.pem" https://127.0.0.1:15000/intermediates/0 -o "$work/pebble-intermediate.pem"
 curl -sf --cacert "$work/pebble.minica.pem" https://127.0.0.1:15000/roots/0 -o "$work/pebble-root.pem"
@@ -103,7 +108,7 @@ docker run -d --rm --network host --name "$p-r53mock" -v "$work:/compat:ro" \
   --listen 127.0.0.1:$r53_port --zone "$zone=$zone_id" --challtestsrv http://127.0.0.1:8055 >/dev/null
 
 records=()
-for n in current old focal acmesh dnsproxy; do records+=(--record "$n.$zone A 127.0.0.1"); done
+for n in current old focal acmesh dnsproxy certbotdns; do records+=(--record "$n.$zone A 127.0.0.1"); done
 docker run -d --rm --network host --name "$p-mockdoh" --entrypoint /usr/local/bin/mockdoh "$image" \
   --listen 127.0.0.1:$mockdoh_port "${records[@]}" \
   --record "$zone CAA 0 issuewild \";\"" \
@@ -244,9 +249,9 @@ certbot_suite() {
 acmesh() { # dir args...
   local dir=$1
   shift
+  # ACMEPROXY_ENDPOINT is only read by the stock dns_acmeproxy hook.
   docker run --rm --network host -v "$dir:/acme.sh" -v "$work/bundle.pem:/bundle.pem:ro" \
-    -v "$work/dns_broker.sh:/acmebin/dnsapi/dns_broker.sh:ro" \
-    -e AUTO_UPGRADE=0 -e CURL_CA_BUNDLE=/bundle.pem -e DNS_BROKER_URL="https://127.0.0.1:$caddy_port" \
+    -e AUTO_UPGRADE=0 -e CURL_CA_BUNDLE=/bundle.pem -e ACMEPROXY_ENDPOINT="https://127.0.0.1:$caddy_port/dns" \
     "$acmesh_image" acme.sh "$@"
 }
 
@@ -275,15 +280,67 @@ acmesh_suite() { # label name args...
   check_chain "acme.sh $label" "$ver" "renew --force" "$fc" "$name"
 }
 
-# The acme.sh hook exactly as documented in docs/dns-proxy.md.
-awk '/^### acme.sh \(`dns_broker.sh`\)/{f=1} f&&/^```sh$/{c=1;next} c&&/^```$/{exit} c{print}' docs/dns-proxy.md >"$work/dns_broker.sh"
-grep -q 'dns_broker_add()' "$work/dns_broker.sh" || die "could not extract the acme.sh hook from docs/dns-proxy.md"
+# certbot_dns_suite <label> <name>: current certbot as a DNS-proxy client
+# against Pebble, with the manual hooks exactly as documented.
+certbot_dns_suite() {
+  local label=$1 name=$2 dir="$work/$1" ver
+  mkdir -p "$dir"
+  local run=(docker run --rm -t --network host --user "$(id -u):$(id -g)" -v "$dir:/w" -v "$work/bundle.pem:/bundle.pem:ro"
+    -e REQUESTS_CA_BUNDLE=/bundle.pem -e CURL_CA_BUNDLE=/bundle.pem -e HOME=/w "$curl_image")
+  local common=(--config-dir /w/etc --work-dir /w/lib --logs-dir /w/log --non-interactive)
+  ver=$(docker run --rm "$curl_image" --version 2>&1 | awk '/^certbot /{print $2}' | tr -d '\r' | tail -1)
+  if ! "${run[@]}" certonly "${common[@]}" --server https://127.0.0.1:14000/dir \
+    --manual --preferred-challenges dns --manual-auth-hook "$auth_hook" --manual-cleanup-hook "$cleanup_hook" \
+    -d "$name" --agree-tos --no-eff-email -m "ops@$zone" >"$dir/issue.log" 2>&1; then
+    record "certbot $label" "$ver" "issue (--manual, curl hooks)" FAIL
+    return
+  fi
+  local live="$dir/etc/live/$name"
+  check_chain "certbot $label" "$ver" issue "$live/fullchain.pem" "$name" || return
+  local before
+  before=$(serial "$live/cert.pem")
+  if ! "${run[@]}" renew "${common[@]}" --force-renewal >"$dir/renew.log" 2>&1; then
+    record "certbot $label" "$ver" "renew --force-renewal" FAIL
+    return
+  fi
+  if [ "$(serial "$live/cert.pem")" = "$before" ]; then
+    record "certbot $label" "$ver" "renew --force-renewal: new cert" FAIL
+    return
+  fi
+  check_chain "certbot $label" "$ver" "renew --force-renewal" "$live/fullchain.pem" "$name"
+}
+
+# dns_left <client>: the DNS-proxy client cleaned up every value it presented.
+dns_left() {
+  local left
+  left=$(curl -s --cacert "$work/caddy-root.pem" "https://127.0.0.1:$caddy_port/dns/challenges")
+  if printf '%s' "$left" | grep -q '"challenges":\[\]'; then
+    record "$1" "-" "cleanup left no challenge" PASS
+  else
+    record "$1" "-" "cleanup left no challenge ($left)" FAIL
+  fi
+}
+
+# The Certbot hooks exactly as documented in docs/dns-proxy.md, pointed at
+# the compat broker.
+hook() { # option
+  sed -n "s/^ *$1 '\(.*\)' \\\\\$/\1/p" docs/dns-proxy.md | head -1 | sed "s#https://broker.lan#https://127.0.0.1:$caddy_port#"
+}
+auth_hook=$(hook --manual-auth-hook)
+cleanup_hook=$(hook --manual-cleanup-hook)
+case $auth_hook$cleanup_hook in
+*/dns/present*/dns/cleanup*) ;;
+*) die "could not extract the Certbot hooks from docs/dns-proxy.md" ;;
+esac
 
 certbot_suite current "$certbot_image" "current.$zone" yes
 certbot_suite focal "$focal_image" "focal.$zone" no
 certbot_suite old "$certbot_old_image" "old.$zone" no
 acmesh_suite proxy "acmesh.$zone" --server "$dir_url" -w /tmp
-acmesh_suite dnsproxy "dnsproxy.$zone" --server https://127.0.0.1:14000/dir --dns dns_broker --dnssleep 0
+acmesh_suite dnsproxy "dnsproxy.$zone" --server https://127.0.0.1:14000/dir --dns dns_acmeproxy --dnssleep 0
+dns_left "acme.sh dnsproxy"
+certbot_dns_suite certbotdns "certbotdns.$zone"
+dns_left "certbot dnsproxy"
 
 # Every ACME-proxy renewal went upstream with `replaces` (sent by the client
 # or inferred by the broker): the order audit event names it.
@@ -297,12 +354,20 @@ for n in current focal old acmesh; do
   fi
 done
 
-# The DNS-proxy hook must have cleaned up after itself.
-left=$(curl -s --cacert "$work/caddy-root.pem" "https://127.0.0.1:$caddy_port/dns/challenges")
-if printf '%s' "$left" | grep -q '"challenges":\[\]'; then
-  record "acme.sh dnsproxy" "-" "hook cleanup left nothing" PASS
+# No TXT record is left in the zone: neither the DNS-proxy clients' nor the
+# broker's own orders'.
+txt=1
+for _ in $(seq 1 25); do
+  curl -s "http://127.0.0.1:$r53_port/2013-04-01/hostedzone/$zone_id/rrset" >"$work/rrsets.xml"
+  grep -q '<ResourceRecordSet' "$work/rrsets.xml" || grep -q '<ResourceRecordSets' "$work/rrsets.xml" || { sleep 0.2; continue; }
+  txt=$(grep -o '<Type>TXT</Type>' "$work/rrsets.xml" | wc -l)
+  [ "$txt" -eq 0 ] && break
+  sleep 0.2
+done
+if [ "$txt" -eq 0 ]; then
+  record "broker" "-" "no TXT record left in the zone" PASS
 else
-  record "acme.sh dnsproxy" "-" "hook cleanup left nothing ($left)" FAIL
+  record "broker" "-" "no TXT record left ($work/rrsets.xml)" FAIL
 fi
 
 for c in broker r53mock mockdoh caddy; do docker logs "$p-$c" >"$work/$c.log" 2>&1 || true; done
