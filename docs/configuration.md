@@ -26,8 +26,7 @@ listed. Empty is the same as unset.
 | `TLS_BROKER_LOCAL_ADMIN_USER` | empty | Break-glass administrator that works without LDAP. Setting one of user and password without the other is an error. |
 | `TLS_BROKER_LOCAL_ADMIN_PASSWORD` | empty | Plain password, or a bcrypt hash (a value starting with `$2`; it must then be a valid hash). In a compose `.env` file write every `$` of a hash as `$$`. |
 | `TLS_BROKER_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. |
-
-`TLS_BROKER_LOG_LEVEL` is not in `deploy/.env.example` yet.
+| `TLS_BROKER_DOH_ENDPOINTS` | empty | **Development only.** Comma-separated DoH URLs (`http` or `https`) that replace the fixed Cloudflare and Google resolvers, tried in order. The DNS gate, CAA checks and DNS-01 propagation checks then see whatever these servers answer (for example `cmd/mockdoh`, see `docs/development.md`). When set, the broker logs a warning at start-up and every UI page shows a "DNS gate is mocked" banner. Never set it in production. |
 
 ## The YAML
 

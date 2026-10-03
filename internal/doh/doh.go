@@ -3,7 +3,8 @@
 // fallback resolver (architecture §16).
 //
 // Rules:
-//   - The endpoints are fixed. WithEndpoints exists only for tests.
+//   - The endpoints are fixed. WithEndpoints exists for tests and for the
+//     development-only TLS_BROKER_DOH_ENDPOINTS override (a mocked DNS gate).
 //   - The fallback is asked only when the previous resolver failed: transport
 //     error, timeout, non-200 HTTP answer, a response that is not a valid DNS
 //     answer to the question (malformed, truncated, wrong question), or a
@@ -57,8 +58,9 @@ var _ core.Resolver = (*Resolver)(nil)
 // Option configures a Resolver.
 type Option func(*Resolver)
 
-// WithEndpoints replaces the DoH endpoints (tried in order). For tests only:
-// production always uses CloudflareURL then GoogleURL.
+// WithEndpoints replaces the DoH endpoints (tried in order). For tests and
+// the development-only TLS_BROKER_DOH_ENDPOINTS override: production always
+// uses CloudflareURL then GoogleURL.
 func WithEndpoints(urls ...string) Option {
 	return func(r *Resolver) { r.endpoints = append([]string(nil), urls...) }
 }

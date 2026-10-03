@@ -3,6 +3,7 @@ package config
 import (
 	"log/slog"
 	"net"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -21,6 +22,9 @@ const (
 	EnvLocalAdminUser     = "TLS_BROKER_LOCAL_ADMIN_USER"
 	EnvLocalAdminPassword = "TLS_BROKER_LOCAL_ADMIN_PASSWORD"
 	EnvLogLevel           = "TLS_BROKER_LOG_LEVEL"
+	// EnvDoHEndpoints is for development only: it replaces the fixed
+	// public DoH resolvers, so the DNS gate sees whatever a mock answers.
+	EnvDoHEndpoints = "TLS_BROKER_DOH_ENDPOINTS"
 )
 
 // Env is the process-level configuration read from the environment. It is
@@ -34,6 +38,9 @@ type Env struct {
 	Bootstrap core.BootstrapConfig
 	// LogLevel is the minimum level to log.
 	LogLevel slog.Level
+	// DoHEndpoints, when not empty, replaces the public DoH resolvers
+	// (development only; the DNS gate is then mocked).
+	DoHEndpoints []string
 }
 
 // DefaultEnv returns the settings used for every variable that is unset.
@@ -120,6 +127,18 @@ func LoadEnv(lookup func(string) (string, bool)) (Env, Problems) {
 		default:
 			c.errf(EnvLogLevel, "must be one of debug, info, warn, error, got %q", v)
 		}
+	}
+	for _, raw := range strings.Split(get(EnvDoHEndpoints), ",") {
+		v := strings.TrimSpace(raw)
+		if v == "" {
+			continue
+		}
+		u, err := url.Parse(v)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Fragment != "" {
+			c.errf(EnvDoHEndpoints, "%q is not an http(s) URL", v)
+			continue
+		}
+		env.DoHEndpoints = append(env.DoHEndpoints, v)
 	}
 	return env, c.problems
 }

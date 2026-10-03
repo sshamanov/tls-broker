@@ -104,3 +104,20 @@ func TestEnvApply(t *testing.T) {
 		t.Fatalf("%+v", cfg)
 	}
 }
+
+func TestLoadEnvDoHEndpoints(t *testing.T) {
+	env, probs := LoadEnv(lookupMap(map[string]string{EnvDoHEndpoints: " http://127.0.0.1:8053/dns-query , ,https://dns.example/q"}))
+	if len(probs) != 0 {
+		t.Fatal(probs)
+	}
+	if got := strings.Join(env.DoHEndpoints, ","); got != "http://127.0.0.1:8053/dns-query,https://dns.example/q" {
+		t.Fatalf("endpoints %q", got)
+	}
+	_, probs = LoadEnv(lookupMap(map[string]string{EnvDoHEndpoints: "dns.example,ftp://x/,http://u:p@h/"}))
+	if len(probs) != 3 || probs[0].Path != EnvDoHEndpoints {
+		t.Fatalf("problems: %v", probs)
+	}
+	if env, _ := LoadEnv(lookupMap(nil)); env.DoHEndpoints != nil {
+		t.Fatalf("default endpoints %v", env.DoHEndpoints)
+	}
+}
