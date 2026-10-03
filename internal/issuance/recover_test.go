@@ -315,10 +315,18 @@ func TestRecoverDirectProcessing(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := e.waitTerminal(o.ID)
-			st := e.budgetStates(o.ID)
-			if len(e.openRefs()) != 0 {
-				t.Fatal("reservation left open")
-			}
+			// The reservation is settled (in memory, then in the store) right
+			// after the order's final state.
+			var st map[core.BudgetKind]core.BudgetState
+			e.waitUntil("reservation settled", func() bool {
+				st = e.budgetStates(o.ID)
+				for _, v := range st {
+					if v == core.BudgetReserved {
+						return false
+					}
+				}
+				return len(e.openRefs()) == 0
+			})
 			if arrived {
 				if got.Status != core.OrderValid || got.CertificateID == "" {
 					t.Fatalf("order after recovery: %+v %v", got, got.Error)

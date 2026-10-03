@@ -139,6 +139,10 @@ func (e *Engine) admit(ctx context.Context, cfg *core.Config, p admitParams) (*a
 			e.addJob(j)
 			a := &admitted{order: o, job: j, plan: pl, adopted: donor != nil}
 			e.auditAdmission(ctx, p, a, refusals)
+			e.log.Info("issuance: order admitted", "order", id, "mode", p.mode, "names", p.cls.set.Key(),
+				"provider", pl.provider.Name(), "class", class.String(), "renewal", p.cls.renewal,
+				"ari_qualified", ari, "replaces", pl.replaces, "adopted", donor != nil,
+				"wait_ms", now.Sub(p.now).Milliseconds())
 			return a, nil
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"tls-broker/internal/core"
 )
@@ -39,9 +40,12 @@ func (e *Engine) runOrder(a *admitted) {
 func (e *Engine) prepare(ctx context.Context, j *job, o *core.Order, pl plan) error {
 	p := pl.provider
 	replaces := pl.replaces
+	started := e.clock.Now()
 	j.getTicket().OrderCreated()
 	up, err := p.NewOrder(ctx, o.Names.Names(), replaces)
 	e.report(ctx, p.Name(), err)
+	e.log.Debug("issuance: upstream newOrder", "order", o.ID, "provider", p.Name(), "replaces", replaces,
+		"upstream_order", up.URL, "status", up.Status, "err", err)
 
 	if pe := core.AsProviderError(err); pe != nil && pe.Kind == core.ProviderAlreadyReplaced && replaces != "" {
 		// Architecture §8: the predecessor already has a live replacement
@@ -61,6 +65,8 @@ func (e *Engine) prepare(ctx context.Context, j *job, o *core.Order, pl plan) er
 		replaces = ""
 		up, err = p.NewOrder(ctx, o.Names.Names(), "")
 		e.report(ctx, p.Name(), err)
+		e.log.Debug("issuance: upstream newOrder", "order", o.ID, "provider", p.Name(), "replaces", "",
+			"upstream_order", up.URL, "status", up.Status, "err", err)
 	}
 	if err != nil {
 		return e.failOrder(ctx, j, o, err)
@@ -80,7 +86,7 @@ func (e *Engine) prepare(ctx context.Context, j *job, o *core.Order, pl plan) er
 		return e.failOrder(ctx, j, o, err)
 	}
 	o.UpstreamOrderURL, o.UpstreamReplaces, o.UpstreamExpiresAt, o.Prep = up.URL, replaces, up.Expires, core.PrepPreparing
-	return e.validate(ctx, j, o, p, up)
+	return e.validate(ctx, j, o, p, up, started)
 }
 
 // resume continues preparation of an order whose upstream order exists: an
@@ -91,18 +97,22 @@ func (e *Engine) resume(ctx context.Context, j *job, o *core.Order) error {
 	if err != nil {
 		return e.failOrder(ctx, j, o, err)
 	}
+	started := e.clock.Now()
 	up, err := p.GetOrder(ctx, o.UpstreamOrderURL)
 	e.report(ctx, p.Name(), err)
+	e.log.Debug("issuance: upstream getOrder", "order", o.ID, "provider", p.Name(), "upstream_order", o.UpstreamOrderURL,
+		"status", up.Status, "err", err)
 	if err != nil {
 		return e.failOrder(ctx, j, o, err)
 	}
-	return e.validate(ctx, j, o, p, up)
+	return e.validate(ctx, j, o, p, up, started)
 }
 
 // validate drives the upstream order to ready: DNS-01 for every pending
 // authorization (all values presented, then all accepted once visible),
-// wait for the CA, remove the TXT values, mark the order prepared.
-func (e *Engine) validate(ctx context.Context, j *job, o *core.Order, p core.Provider, up core.UpstreamOrder) error {
+// wait for the CA, remove the TXT values, mark the order prepared. started
+// is when preparation began, for the log.
+func (e *Engine) validate(ctx context.Context, j *job, o *core.Order, p core.Provider, up core.UpstreamOrder, started time.Time) error {
 	owner := core.OrderOwner(o.ID)
 	if up.Status == core.UpstreamPending {
 		chs, err := p.DNSChallenges(ctx, up)
@@ -110,18 +120,27 @@ func (e *Engine) validate(ctx context.Context, j *job, o *core.Order, p core.Pro
 		if err != nil {
 			return e.failOrder(ctx, j, o, err)
 		}
+		e.log.Debug("issuance: presenting DNS-01 values", "order", o.ID, "challenges", len(chs))
+		t0 := e.clock.Now()
 		if err := e.present(ctx, owner, chs); err != nil {
 			return e.failOrder(ctx, j, o, err)
 		}
+		e.log.Debug("issuance: DNS-01 values visible", "order", o.ID, "challenges", len(chs),
+			"duration_ms", e.clock.Now().Sub(t0).Milliseconds())
 		for _, ch := range chs {
 			err := p.Accept(ctx, ch)
 			e.report(ctx, p.Name(), err)
+			e.log.Debug("issuance: upstream challenge accepted", "order", o.ID, "provider", p.Name(),
+				"record", ch.RecordName, "challenge", ch.URL, "err", err)
 			if err != nil {
 				return e.failOrder(ctx, j, o, err)
 			}
 		}
+		t0 = e.clock.Now()
 		up, err = p.WaitReady(ctx, up.URL)
 		e.report(ctx, p.Name(), err)
+		e.log.Debug("issuance: upstream order validated", "order", o.ID, "provider", p.Name(), "status", up.Status,
+			"duration_ms", e.clock.Now().Sub(t0).Milliseconds(), "err", err)
 		if err != nil {
 			return e.failOrder(ctx, j, o, err)
 		}
@@ -139,6 +158,8 @@ func (e *Engine) validate(ctx context.Context, j *job, o *core.Order, p core.Pro
 	}
 	o.Prep = core.PrepPrepared
 	j.getTicket().PrepDone()
+	e.log.Info("issuance: order prepared", "order", o.ID, "provider", p.Name(), "names", o.Names.Key(),
+		"upstream_order", up.URL, "duration_ms", e.clock.Now().Sub(started).Milliseconds())
 	return nil
 }
 

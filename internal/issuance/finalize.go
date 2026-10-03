@@ -124,8 +124,11 @@ func (e *Engine) finalizeOrder(j *job) (*core.Certificate, error) {
 		return nil, e.failOrder(ctx, j, o, core.NewProblem(core.ProblemBadCSR, "stored CSR cannot be parsed"))
 	}
 
+	started := e.clock.Now()
 	_, err = p.Finalize(ctx, o.UpstreamOrderURL, o.CSRDER)
 	e.report(ctx, p.Name(), err)
+	e.log.Debug("issuance: upstream finalize (CSR sent)", "order", o.ID, "provider", p.Name(),
+		"upstream_order", o.UpstreamOrderURL, "err", err)
 	if err != nil {
 		if pe := core.AsProviderError(err); (pe != nil && pe.AffectsHealth()) || isCtxErr(err) {
 			if isCtxErr(err) && e.closing() {
@@ -145,6 +148,8 @@ func (e *Engine) finalizeOrder(j *job) (*core.Certificate, error) {
 
 	chain, err := p.WaitCertificate(ctx, o.UpstreamOrderURL)
 	e.report(ctx, p.Name(), err)
+	e.log.Debug("issuance: upstream certificate", "order", o.ID, "provider", p.Name(), "bytes", len(chain),
+		"duration_ms", e.clock.Now().Sub(started).Milliseconds(), "err", err)
 	if err != nil {
 		return nil, e.failOrder(ctx, j, o, err)
 	}
@@ -194,7 +199,8 @@ func (e *Engine) finalizeOrder(j *job) (*core.Certificate, error) {
 	ev.Detail = detail
 	e.audit(bctx, ev)
 	e.log.Info("issuance: certificate issued", "order", o.ID, "provider", o.Provider, "names", o.Names.Key(),
-		"not_after", cert.NotAfter, "certificate", cert.ID)
+		"not_after", cert.NotAfter, "certificate", cert.ID, "serial", cert.Serial,
+		"finalize_ms", now.Sub(started).Milliseconds(), "order_age_ms", now.Sub(o.CreatedAt).Milliseconds())
 	e.endJob(j)
 	return cert, nil
 }

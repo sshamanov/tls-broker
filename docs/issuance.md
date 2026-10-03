@@ -125,6 +125,29 @@ generating its key and CSR, so in the common case the TXT value is already
 visible when `finalize` arrives and the client sees `valid` within a few
 seconds.
 
+Observed against Let's Encrypt staging with real Route53 (2026-10-03): a
+Certbot new issuance took 37 s end to end (finalize held the full 20 s, then
+`processing`, certificate at +33 s); an acme.sh DNS-proxy `present` 26.5 s;
+a first direct fetch 33 s. The Route53 change reaching `INSYNC` dominates;
+the defaults above leave room for it.
+
+## Logging
+
+Every step is logged through the engine's `*slog.Logger` with the order ID
+(`order=`), so `grep order=<id>` reconstructs one issuance:
+
+- info: `order admitted` (mode, names, provider, class, renewal, ARI,
+  replaces, adoption, admission wait), `order prepared` (upstream order URL,
+  preparation duration), `certificate issued` (serial, expiry, finalize
+  duration, order age), `order failed`, `order expired`, recovery decisions;
+- debug: each upstream call (`upstream newOrder`, `getOrder`, `challenge
+  accepted`, `order validated`, `finalize (CSR sent)`, `certificate`) and
+  each DNS-01 phase (`presenting DNS-01 values`, `DNS-01 values visible`)
+  with durations and the provider's error, if any.
+
+Run with `TLS_BROKER_LOG_LEVEL=debug` to see where time goes in a slow
+issuance (Route53 propagation versus CA validation versus finalize).
+
 ## Classification
 
 Every `Admit` and `Issue` first observes the request on the **lineage** (the

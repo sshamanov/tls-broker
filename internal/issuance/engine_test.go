@@ -1,13 +1,14 @@
 package issuance_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"errors"
-	"io"
 	"log/slog"
 	"net/netip"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -46,6 +47,25 @@ type env struct {
 	auditor   *coretest.FakeAuditor
 	eng       *issuance.Engine
 	key       *ecdsa.PrivateKey
+	logs      *logSink
+}
+
+// logSink collects the engine's log lines (text handler at debug level).
+type logSink struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (l *logSink) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.Write(p)
+}
+
+func (l *logSink) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.String()
 }
 
 func newEnv(t *testing.T, mutate func(c *core.Config)) *env {
@@ -66,6 +86,7 @@ func newEnv(t *testing.T, mutate func(c *core.Config)) *env {
 		primary: coretest.NewFakeCA("primary", clock), fallback: coretest.NewFakeCA("fallback", clock),
 		resolver: resolver, dns: coretest.NewFakeDNSEngine(resolver, clock),
 		gate: coretest.NewFakeGate(), auditor: coretest.NewFakeAuditor(clock), key: coretest.GenKey(),
+		logs: &logSink{},
 	}
 	e.primary.SetTXTLookup(resolver.LookupTXT)
 	e.fallback.SetTXTLookup(resolver.LookupTXT)
@@ -78,7 +99,7 @@ func newEnv(t *testing.T, mutate func(c *core.Config)) *env {
 // start builds the scheduler and the engine on the current stores.
 func (e *env) start() {
 	e.t.Helper()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.NewTextHandler(e.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	s, err := sched.New(e.ctx, sched.Options{Config: e.cfg, Budgets: e.st.Budgets(), States: e.st.ProviderStates(),
 		Clock: e.clock, Auditor: e.auditor, Logger: logger})
 	if err != nil {
@@ -331,5 +352,27 @@ func (b *blocker) wait(t *testing.T) {
 	case <-b.entered:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Present was never called")
+	}
+}
+
+// The engine logs the life of an order (admitted, prepared, issued at info;
+// each upstream and DNS-01 step at debug) so an operator can see where time
+// goes without reading the audit log.
+func TestIssuanceProgressIsLogged(t *testing.T) {
+	e := newEnv(t, nil)
+	o, _ := e.issue("acct", "www.example.com")
+	logs := e.logs.String()
+	for _, want := range []string{
+		"issuance: order admitted", "issuance: upstream newOrder", "issuance: presenting DNS-01 values",
+		"issuance: DNS-01 values visible", "issuance: upstream challenge accepted", "issuance: upstream order validated",
+		"issuance: order prepared", "issuance: upstream finalize (CSR sent)", "issuance: upstream certificate",
+		"issuance: certificate issued",
+	} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("log line %q missing in:\n%s", want, logs)
+		}
+	}
+	if n := strings.Count(logs, "order="+o.ID); n < 10 {
+		t.Errorf("order id on %d lines only:\n%s", n, logs)
 	}
 }
