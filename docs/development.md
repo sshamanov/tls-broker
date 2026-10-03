@@ -10,8 +10,9 @@ container through `scripts/dev`; `make` targets wrap the common cases.
 | `make check` | gofmt check, `go vet ./...`, `go test -race ./...`. Must be green before every commit. |
 | `make test` | `go test ./...` without the race detector (faster). |
 | `make fmt` | `gofmt -w` on the source tree. |
-| `make build` | Static binary in `bin/tls-broker`. |
-| `make image` | Container image from `deploy/Dockerfile`. |
+| `make build` | Static binaries `bin/tls-broker` and `bin/mockdoh`. |
+| `make image` | Container image `tls-broker:local` from `deploy/Dockerfile` (both binaries). |
+| `make run-test` | `docker compose -f deploy/compose.test.yaml up -d`: the local test deployment with live credentials (see `docs/deployment.md`). |
 | `make e2e` | In-process end-to-end tests (`test/e2e`). Placeholder until wave 4. |
 | `make e2e-pebble` | Upstream adapter against Pebble. Placeholder until wave 4. |
 | `make compat` | Real certbot / acme.sh against the broker. Placeholder until wave 4. |
@@ -88,6 +89,39 @@ set `sessions.cookie_secure: false` in the configuration first (for example
 with `bin/tls-broker config apply <file>` before the start), or the browser
 drops the session cookie. `bin/tls-broker help` lists the maintenance
 subcommands.
+
+## Mock DNS gate (`mockdoh`, development only)
+
+The DNS gate authorizes a machine when the requested name resolves, in
+public DNS, to the machine's address. LAN test names usually do not exist in
+public DNS, so for development the broker can ask a mock instead:
+`cmd/mockdoh` is a tiny RFC 8484 DoH server (GET and POST wire format)
+answering A, CNAME, TXT and CAA from a static table. Names it does not know
+are NXDOMAIN, or with `--upstream` forwarded to a real DoH server, which you
+want with real Route53 so that DNS-01 propagation checks and CAA lookups
+still see public DNS.
+
+```sh
+bin/mockdoh --listen 127.0.0.1:8053 \
+  --record 'text2.example.com A 192.0.2.10' \
+  --record 'www.example.com CNAME text2.example.com' \
+  --upstream https://cloudflare-dns.com/dns-query
+# or --file records.yaml with
+#   records:
+#     - text2.example.com A 192.0.2.10
+#     - example.com CAA 0 issue "letsencrypt.org"
+
+TLS_BROKER_DOH_ENDPOINTS=http://127.0.0.1:8053/dns-query bin/tls-broker
+```
+
+Records use zone-file syntax after `<name> <type>`. The image ships the same
+binary as `/usr/local/bin/mockdoh`; in compose run it as a second service
+from the same image with `entrypoint: ["/usr/local/bin/mockdoh", ...]` and
+host networking. With `TLS_BROKER_DOH_ENDPOINTS` set the broker logs a loud
+warning at start-up and every UI page shows "DNS gate is mocked". Never set
+it, or run mockdoh, in production: whoever edits the table decides which
+machine gets which certificate. `cmd/mockdoh/main_test.go` tests it against
+the broker's own `internal/doh` resolver.
 
 ## Wiring the broker in tests (`internal/app`)
 

@@ -7,7 +7,8 @@ same commit.
 
 ## Stack
 
-- Go (latest stable), module `tls-broker`, one binary `cmd/tls-broker`.
+- Go (latest stable), module `tls-broker`, one service binary
+  `cmd/tls-broker` (plus the development-only DoH mock `cmd/mockdoh`).
 - SQLite through `modernc.org/sqlite` (no cgo in the shipped binary).
 - Downstream ACME server: own handlers on `net/http` + `go-jose/v4` for JWS.
 - Upstream ACME client: `go-acme/lego/v5` low-level `acme/api` package (step
@@ -21,7 +22,8 @@ same commit.
 ## Package layout
 
 ```text
-cmd/tls-broker/        main: flags/env, start app
+cmd/tls-broker/        main: env, serve, maintenance subcommands
+cmd/mockdoh/           development-only DoH mock for the DNS gate
 internal/core/         domain types, ports (interfaces), errors, clock
 internal/core/coretest fakes for every non-store port: clock, resolver, provider
                        (fake CA), DNS engine, LDAP, auditor, gate, scheduler,
