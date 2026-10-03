@@ -164,7 +164,7 @@ func TestInvalidActivateStoresNothing(t *testing.T) {
 	if err != nil || n != 0 || check.OK() || len(check.Errors) == 0 {
 		t.Fatalf("%d %+v %v", n, check, err)
 	}
-	n, check, _ = s.Activate(ctx, []byte("direct:\n  rsa_bits: 7\n"))
+	_, check, _ = s.Activate(ctx, []byte("direct:\n  rsa_bits: 7\n"))
 	if !strings.Contains(strings.Join(check.Errors, "\n"), "direct.rsa_bits") {
 		t.Fatalf("%v", check.Errors)
 	}

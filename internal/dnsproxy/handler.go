@@ -156,13 +156,6 @@ func (h *Handler) audit(ctx context.Context, typ, src string, set []string, d co
 	})
 }
 
-func srcString(a netip.Addr) string {
-	if a.IsValid() {
-		return a.String()
-	}
-	return ""
-}
-
 // source returns the caller's IPv4 or writes the not_ipv4 denial.
 func (h *Handler) source(w http.ResponseWriter, r *http.Request, typ string, set []string) (netip.Addr, bool) {
 	src, ok := httpx.SourceIP(r.Context())

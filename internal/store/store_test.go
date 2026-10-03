@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -395,12 +394,4 @@ func newCert(id, orderID string, set names.Set, notBefore time.Time) *core.Certi
 		IssuedAt:   notBefore.Add(time.Minute),
 		ChainPEM:   []byte("chain of " + id),
 	}
-}
-
-// rawExec runs SQL on the writer, for tests that need to set up states.
-func rawExec(t *testing.T, s *Store, q string, args ...any) sql.Result {
-	t.Helper()
-	res, err := s.w.Exec(q, args...)
-	must(t, err)
-	return res
 }

@@ -277,15 +277,6 @@ func (e *Engine) reattach(ctx context.Context, ref string) core.Ticket {
 	return t
 }
 
-// ticketFor returns the ticket to settle an order with: its job's when the
-// job is in memory, otherwise a reattached one.
-func (e *Engine) ticketFor(ctx context.Context, id string) core.Ticket {
-	if j := e.lookupJob(id); j != nil {
-		return j.getTicket()
-	}
-	return e.reattach(ctx, id)
-}
-
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------

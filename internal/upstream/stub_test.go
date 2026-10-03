@@ -151,12 +151,6 @@ func (s *stubCA) inject(f *stubFault) {
 	s.faults = append(s.faults, f)
 }
 
-func (s *stubCA) clearFaults() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.faults = nil
-}
-
 func (s *stubCA) count(prefix string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
