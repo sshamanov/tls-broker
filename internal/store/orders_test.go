@@ -177,6 +177,23 @@ func TestOrderStatePreconditions(t *testing.T) {
 		t.Fatalf("conflicting SetUpstream changed the order: %+v", got)
 	}
 
+	// A CA may hand back the pending upstream order of an order that failed
+	// here: the failed order passes it on and is marked adopted.
+	must(t, os.Create(ctx, newOrder("o3", "c.example.com")))
+	must(t, os.SetUpstream(ctx, "o3", "https://ca.example/order/c", "", t0, t0))
+	must(t, os.Fail(ctx, "o3", core.NewProblem(core.ProblemDNS, "not visible"), t0.Add(time.Second)))
+	must(t, os.Create(ctx, newOrder("o4", "c.example.com")))
+	must(t, os.SetUpstream(ctx, "o4", "https://ca.example/order/c", "", t0, t0.Add(2*time.Second)))
+	if got, _ := os.Get(ctx, "o4"); got.Prep != core.PrepPreparing || got.UpstreamOrderURL != "https://ca.example/order/c" {
+		t.Fatalf("taker after SetUpstream: %+v", got)
+	}
+	if got, _ := os.Get(ctx, "o3"); got.AdoptedByOrderID != "o4" || got.Status != core.OrderInvalid {
+		t.Fatalf("failed holder after hand-over: %+v", got)
+	}
+	// o4 is live now: nobody else gets that upstream order.
+	must(t, os.Create(ctx, newOrder("o5", "c.example.com")))
+	wantErr(t, os.SetUpstream(ctx, "o5", "https://ca.example/order/c", "", t0, t0), core.ErrConflict)
+
 	// A failed order accepts nothing but a repeated Fail.
 	must(t, os.Fail(ctx, "o2", core.NewProblem(core.ProblemServerInternal, "boom"), t0.Add(time.Minute)))
 	wantErr(t, os.SetUpstream(ctx, "o2", "https://ca.example/order/o2", "", t0, t0), core.ErrConflict)

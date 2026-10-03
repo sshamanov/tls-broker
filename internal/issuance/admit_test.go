@@ -3,6 +3,7 @@ package issuance_test
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -659,5 +660,87 @@ func TestLineageProviderDisabledBecomesFreshIssuance(t *testing.T) {
 	}
 	if fo := e.events(core.AuditFailover); len(fo) != 1 || !strings.Contains(fo[0].Detail, "no longer enabled") {
 		t.Fatalf("failover audit: %+v", fo)
+	}
+}
+
+// reusingCA answers newOrder like Let's Encrypt: an existing pending or
+// ready order of the same account for the same names is returned again.
+type reusingCA struct {
+	*coretest.FakeCA
+	mu    sync.Mutex
+	byKey map[string]string
+}
+
+func (r *reusingCA) NewOrder(ctx context.Context, orderNames []string, replaces string) (core.UpstreamOrder, error) {
+	key := strings.Join(orderNames, ",")
+	r.mu.Lock()
+	url, ok := r.byKey[key]
+	r.mu.Unlock()
+	if ok {
+		if up, err := r.FakeCA.GetOrder(ctx, url); err == nil && (up.Status == core.UpstreamPending || up.Status == core.UpstreamReady) {
+			return up, nil
+		}
+	}
+	up, err := r.FakeCA.NewOrder(ctx, orderNames, replaces)
+	if err == nil {
+		r.mu.Lock()
+		if r.byKey == nil {
+			r.byKey = map[string]string{}
+		}
+		r.byKey[key] = up.URL
+		r.mu.Unlock()
+	}
+	return up, err
+}
+
+func useReusingCA(e *env) {
+	e.providers = coretest.NewFakeProviders(&reusingCA{FakeCA: e.primary}, e.fallback)
+	e.restart()
+}
+
+// Found against Let's Encrypt staging: after an order failed on DNS, the
+// next order for the same names got the CA's still-pending upstream order
+// back, recording it hit the unique upstream URL, and the order was left
+// processing forever. The upstream order now passes to the new order.
+func TestCAReturnsPendingOrderOfFailedOrder(t *testing.T) {
+	e := newEnv(t, nil)
+	useReusingCA(e)
+	e.dns.OnPresent(func(ctx context.Context, owner, record, value string) error { return core.ErrDNSPropagation })
+	o1 := e.waitTerminal(e.admit("acct", "www.example.com").ID)
+	if o1.Status != core.OrderInvalid || o1.UpstreamOrderURL == "" {
+		t.Fatalf("first order: %+v", o1)
+	}
+	e.waitUntil("issue audit", func() bool { return len(e.events(core.AuditIssue)) > 0 })
+	e.dns.OnPresent(nil)
+
+	o2, _ := e.issue("acct", "www.example.com")
+	if o2.UpstreamOrderURL != o1.UpstreamOrderURL {
+		t.Fatalf("second order upstream %q, want the reused %q", o2.UpstreamOrderURL, o1.UpstreamOrderURL)
+	}
+	if got := e.order(o1.ID); got.AdoptedByOrderID != o2.ID {
+		t.Fatalf("failed order not marked as handed over: %+v", got)
+	}
+	if up := e.primary.Orders(); len(up) != 1 {
+		t.Fatalf("upstream orders: %d, want the one reused order", len(up))
+	}
+}
+
+// An upstream order a live order owns is never shared; the second order
+// fails instead of staying processing with nothing working on it.
+func TestCAReturnsOrderOwnedByLiveOrder(t *testing.T) {
+	e := newEnv(t, nil)
+	useReusingCA(e)
+	o1 := e.waitPrepared(e.admit("acct1", "www.example.com").ID)
+	if o1.Prep != core.PrepPrepared {
+		t.Fatalf("first order: %+v", o1)
+	}
+	o2 := e.waitTerminal(e.admit("acct2", "www.example.com").ID)
+	if o2.Status != core.OrderInvalid || o2.Error == nil || o2.UpstreamOrderURL != "" {
+		t.Fatalf("second order: %+v %v", o2, o2.Error)
+	}
+	e.waitUntil("refund", func() bool { return len(e.openRefs()) == 1 })
+	got, err := e.finalize(o1, e.csr(o1))
+	if err != nil || got.Status != core.OrderValid {
+		t.Fatalf("first order after finalize: %+v %v", got, err)
 	}
 }

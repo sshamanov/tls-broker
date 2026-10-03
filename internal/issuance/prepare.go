@@ -67,9 +67,17 @@ func (e *Engine) prepare(ctx context.Context, j *job, o *core.Order, pl plan) er
 	}
 
 	if err := e.orders.SetUpstream(context.WithoutCancel(ctx), o.ID, up.URL, replaces, up.Expires, e.clock.Now()); err != nil {
-		// The order ended (expired) between admission and here; the upstream
-		// order cannot be attached to it and is left to expire at the CA.
-		return e.abandon(j, o, fmt.Errorf("record upstream order: %w", err))
+		err = fmt.Errorf("record upstream order: %w", err)
+		if cur, gerr := e.orders.Get(context.WithoutCancel(ctx), o.ID); gerr == nil && cur.Status.Terminal() {
+			// The order ended (expired) between admission and here; the
+			// upstream order cannot be attached to it and is left to
+			// expire at the CA.
+			return e.abandon(j, o, err)
+		}
+		// Still live (for example the CA returned an upstream order that a
+		// live order already owns): fail it, or the client would poll a
+		// processing order that nothing works on.
+		return e.failOrder(ctx, j, o, err)
 	}
 	o.UpstreamOrderURL, o.UpstreamReplaces, o.UpstreamExpiresAt, o.Prep = up.URL, replaces, up.Expires, core.PrepPreparing
 	return e.validate(ctx, j, o, p, up)

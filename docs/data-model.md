@@ -117,6 +117,7 @@ State machine (who may change what):
 ```text
 Create            status=ready      prep=intent
 SetUpstream                         intent -> preparing (URL recorded)   [status ready|processing]
+                  URL held by an invalid order: that order's adopted_by_order_id = this id
 SetPrepared                         preparing -> prepared                [prepared again: no-op]
 BeginFinalize     ready -> processing                CSR recorded once  [may precede SetUpstream/SetPrepared]
 Complete          processing -> valid                certificate row + replaced-by link, CSR dropped
@@ -142,6 +143,14 @@ and same identifier set, in the same transaction that marks the donor and
 inserts the adopter; of any number of concurrent adopters exactly one wins,
 the others get `ErrConflict` and nothing changes. An adopter that itself
 expires unfinalized becomes adoptable in turn.
+
+**Upstream order returned again.** A CA may answer `newOrder` with an
+existing pending or ready order of the same account and names (Let's Encrypt
+does). If that upstream order belongs to an order that is already `invalid`
+here (for example one whose DNS-01 publication failed), `SetUpstream` hands
+it over in its transaction: the dead order gets `adopted_by_order_id` and the
+new order records the URL. If a live order holds it, `SetUpstream` is
+`ErrConflict` and the issuance engine fails the new order.
 
 **Compaction.** The CSR is dropped when an order becomes terminal; problem
 documents are small. `Prune(before)` deletes terminal orders last changed

@@ -137,7 +137,11 @@ type OrderStore interface {
 	// SetUpstream records the upstream order right after it was created:
 	// Prep intent -> preparing, UpstreamOrderURL, UpstreamReplaces,
 	// UpstreamExpiresAt. ErrConflict unless Prep is intent and Status is
-	// ready or processing.
+	// ready or processing. A CA may return an existing pending order for
+	// the same account and names: when the URL is held by an invalid order
+	// (not adopted), that order gets AdoptedByOrderID=id in the same
+	// transaction and the URL moves to id; any other holder is
+	// ErrConflict, with nothing changed.
 	SetUpstream(ctx context.Context, id, upstreamOrderURL, upstreamReplaces string, upstreamExpires, now time.Time) error
 	// SetPrepared marks preparation finished: Prep preparing -> prepared.
 	// Calling it on an order that is already prepared is a no-op.

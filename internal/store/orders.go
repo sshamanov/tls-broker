@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -234,13 +235,39 @@ func (st *orderStore) SetUpstream(ctx context.Context, id, upstreamOrderURL, ups
 	if upstreamOrderURL == "" {
 		return fmt.Errorf("store: order %q: empty upstream order URL", id)
 	}
-	return st.change(ctx, id, func(o *core.Order) (string, []any, error) {
-		if o.Prep != core.PrepIntent || (o.Status != core.OrderReady && o.Status != core.OrderProcessing) {
-			return "", nil, conflict("order %q: cannot record upstream order in status %s, prep %s", id, o.Status, o.Prep)
+	return st.s.write(ctx, func(tx *sql.Tx) error {
+		o, err := getOrderTx(ctx, tx, id)
+		if err != nil {
+			return err
 		}
-		return `UPDATE orders SET prep = 'preparing', upstream_order_url = ?, upstream_replaces = ?,
+		if o.Prep != core.PrepIntent || (o.Status != core.OrderReady && o.Status != core.OrderProcessing) {
+			return conflict("order %q: cannot record upstream order in status %s, prep %s", id, o.Status, o.Prep)
+		}
+		// A CA may answer newOrder with an existing pending order of the
+		// same account and names (Let's Encrypt does). When that upstream
+		// order belongs to an order that already failed here, hand it
+		// over: the failed order is marked adopted by this one, which
+		// releases the unique index on live upstream order URLs. A live
+		// holder stays a conflict.
+		var holder, status string
+		err = tx.QueryRowContext(ctx, `SELECT id, status FROM orders
+			WHERE upstream_order_url = ? AND adopted_by_order_id = '' AND id <> ?`, upstreamOrderURL, id).Scan(&holder, &status)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+		case err != nil:
+			return err
+		case core.OrderStatus(status) != core.OrderInvalid:
+			return conflict("order %q: upstream order %s belongs to order %q (status %s)", id, upstreamOrderURL, holder, status)
+		default:
+			if _, err := tx.ExecContext(ctx, `UPDATE orders SET adopted_by_order_id = ?, updated_at = ? WHERE id = ?`,
+				id, ts(now), holder); err != nil {
+				return err
+			}
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE orders SET prep = 'preparing', upstream_order_url = ?, upstream_replaces = ?,
 			upstream_expires_at = ?, updated_at = ? WHERE id = ?`,
-			[]any{upstreamOrderURL, upstreamReplaces, ts(upstreamExpires), ts(now), id}, nil
+			upstreamOrderURL, upstreamReplaces, ts(upstreamExpires), ts(now), id)
+		return err
 	})
 }
 
