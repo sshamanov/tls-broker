@@ -194,6 +194,37 @@ func TestConcurrentMissesCollapse(t *testing.T) {
 	}
 }
 
+// While a background renewal runs, further hits join it silently: only the
+// fetch that actually started the job audits "background job started".
+func TestBackgroundJobStartAuditedOnce(t *testing.T) {
+	e := newEnv(t)
+	e.mustGet(host)
+	e.clock.Advance(61 * day) // renewal due
+	release := make(chan struct{})
+	e.iss.set(func(f *fakeIssuer) { f.block = release })
+	e.aud.Reset()
+	for i := range 4 { // the first starts the renewal, the others join it
+		if _, err := e.svc.Get(ctx, device, host); err != nil {
+			t.Fatalf("hit %d: %v", i, err)
+		}
+		if i == 0 {
+			<-e.iss.started
+		}
+	}
+	close(release)
+	e.idle()
+	e.wantCalls(2)
+	var started int
+	for _, ev := range e.aud.OfType(core.AuditDirectFetch) {
+		if strings.Contains(ev.Detail, "background job started") {
+			started++
+		}
+	}
+	if started != 1 {
+		t.Fatalf("%d fetches audited a job start for one job", started)
+	}
+}
+
 func TestUpstreamDownServesValidCertificate(t *testing.T) {
 	e := newEnv(t)
 	e.mustGet(host)
@@ -400,6 +431,35 @@ func TestVerifyAdoptsNewerCurrent(t *testing.T) {
 	if c := e.mustGet(host); c.Generation != 2 {
 		t.Fatalf("served %d", c.Generation)
 	}
+}
+
+// A generation on disk without any database row (the entry could not be
+// saved after the first issuance, or a restored certs directory) is adopted
+// at startup instead of being re-issued at the next fetch. The wildcard
+// directory name maps back to the identifier.
+func TestVerifyAdoptsDirectoryWithoutEntry(t *testing.T) {
+	e := newEnv(t)
+	for _, id := range []string{host, "*.example.com"} {
+		k, _ := poolKey(2048)
+		now := e.clock.Now()
+		_, chain := e.iss.ca.sign(&k.PublicKey, []string{id}, now, now.Add(90*day), false)
+		if _, err := e.svc.Files().Write(id, k, chain, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.svc = e.newService()
+	if err := e.svc.Verify(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{host, "*.example.com"} {
+		if en := e.entry(id); en.Generation != 1 || en.NotAfter.IsZero() {
+			t.Fatalf("%s: entry %+v", id, en)
+		}
+	}
+	if c := e.mustGet(host); c.Generation != 1 {
+		t.Fatalf("served %d", c.Generation)
+	}
+	e.wantCalls(0)
 }
 
 func TestVerifyResetsWhenNothingUsable(t *testing.T) {

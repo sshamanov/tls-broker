@@ -191,6 +191,13 @@ audit log as an admin-only `error` event starting with "direct cache
 repaired". Leftover temporary directories are removed and the expiry gauge
 is seeded for every entry.
 
+Directories under `<data>/certs` that have no entry at all (the entry could
+not be saved after a first issuance, or a `certs` directory restored without
+its database) are adopted the same way: the newest complete generation
+becomes the entry, so the next fetch is a hit instead of a new issuance.
+Writing a new identifier directory fsyncs `certs` itself so the directory
+survives a crash together with the generation inside it.
+
 ## Rotating a key
 
 Renewals keep the key. To replace it (suspected compromise, policy),
@@ -208,7 +215,8 @@ budget. Devices pick it up on their next fetch (the `ETag` changes).
   `observability.md`).
 - Audit: one `direct_fetch` event per request with source IP, identifier,
   gate decision and reason, result and certificate expiry; the detail says
-  `hit`, `miss` or `expired`, the generation served and whether a background
-  job (renewal, emergency renewal, renewal-information check) was started.
+  `hit`, `miss` or `expired`, the generation served and whether this fetch
+  started a background job (renewal, emergency renewal, renewal-information
+  check); fetches that merely join a job already running say nothing.
   Served fetches are visible to every logged-in user; denials and failures
   to admins only. Issuance itself is audited by the issuance engine.

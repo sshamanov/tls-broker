@@ -38,10 +38,30 @@ func (s *Service) Verify(ctx context.Context) error {
 	}
 	cfg := s.cfg.Current()
 	f := s.Files()
+	seen := map[string]bool{}
 	for i := range list {
 		e := &list[i]
+		seen[e.Identifier] = true
 		if err := s.verifyEntry(ctx, cfg, f, e); err != nil {
 			s.log.Error("direct: verifying cache entry failed", "identifier", e.Identifier, "err", err)
+		}
+	}
+	// The files are the truth: a generation written while the entry could
+	// not be saved (or a restored certs directory without its database) is
+	// adopted instead of being re-issued at the next fetch.
+	ids, err := f.Identifiers()
+	if err != nil {
+		s.log.Error("direct: listing cache directories failed", "root", f.Root(), "err", err)
+		return nil
+	}
+	now := s.clock.Now()
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		e := &core.DirectEntry{Identifier: id, CreatedAt: now}
+		if err := s.verifyEntry(ctx, cfg, f, e); err != nil {
+			s.log.Error("direct: adopting cache directory failed", "identifier", id, "err", err)
 		}
 	}
 	return nil

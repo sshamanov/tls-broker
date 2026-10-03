@@ -92,6 +92,34 @@ func NewFiles(root string, keep int) *Files {
 // Root returns the directory holding every identifier directory.
 func (f *Files) Root() string { return f.root }
 
+// Identifiers returns every identifier that has a directory under Root,
+// sorted. A missing root is an empty list.
+func (f *Files) Identifiers() ([]string, error) {
+	entries, err := os.ReadDir(f.root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		id := e.Name()
+		if rest, ok := strings.CutPrefix(id, wildcardDirPrefix); ok {
+			id = names.Wildcard(rest)
+		}
+		if _, err := names.Normalize(id); err != nil {
+			continue // not one of ours
+		}
+		out = append(out, id)
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
 func (f *Files) identDir(identifier string) string {
 	return filepath.Join(f.root, DirName(identifier))
 }
@@ -138,8 +166,20 @@ func (f *Files) Write(identifier string, key *rsa.PrivateKey, chainPEM []byte, a
 	}
 
 	gensDir := filepath.Join(f.identDir(identifier), generationsDir)
+	fresh := false
+	if _, err := os.Stat(f.identDir(identifier)); err != nil {
+		fresh = true
+	}
 	if err := os.MkdirAll(gensDir, dirMode); err != nil {
 		return nil, err
+	}
+	if fresh {
+		// A new identifier directory must survive a crash as well as the
+		// generation inside it, or SQLite would reference a directory that
+		// is gone and the next start would issue again.
+		if err := syncDir(f.root); err != nil {
+			return nil, err
+		}
 	}
 	nums, err := f.List(identifier)
 	if err != nil {

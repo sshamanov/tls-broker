@@ -88,6 +88,9 @@ type Service struct {
 	gens   map[string]*Generation // last loaded generation per identifier
 	holds  map[string]hold        // failure backoff per identifier
 	rotate map[string]bool        // key rotation requested
+	// waiting counts callers of start per identifier that have not received
+	// their result yet; a start that finds none begins a new job.
+	waiting map[string]int
 }
 
 // hold is the backoff after a failed attempt: until then no new attempt is
@@ -131,7 +134,7 @@ func New(o Options) (*Service, error) {
 		cfg: o.Config, issuer: o.Issuer, gate: o.Gate, entries: o.Entries, lineages: o.Lineages,
 		certs: o.Certificates, auditor: o.Auditor, metrics: o.Metrics, clock: o.Clock, log: o.Logger,
 		keep: o.KeepGenerations, newKey: o.NewKey,
-		gens: map[string]*Generation{}, holds: map[string]hold{}, rotate: map[string]bool{},
+		gens: map[string]*Generation{}, holds: map[string]hold{}, rotate: map[string]bool{}, waiting: map[string]int{},
 	}
 	if s.metrics == nil {
 		s.metrics = metrics.Nop{}
@@ -262,8 +265,9 @@ func (s *Service) Get(ctx context.Context, src netip.Addr, raw string) (*Cert, e
 		ev.Detail = fmt.Sprintf("hit: generation %d", gen.Number)
 		interval := lin.Interval(cfg.Emergency.DefaultInterval)
 		if why := s.maintenanceDue(cfg, id, entry, gen, now, interval); why != "" {
-			s.start(id, t)
-			ev.Detail += "; background job started: " + why
+			if _, started := s.start(id, t); started {
+				ev.Detail += "; background job started: " + why
+			}
 		}
 		return s.served(ctx, ev, id, gen)
 	}
@@ -279,8 +283,9 @@ func (s *Service) Get(ctx context.Context, src netip.Addr, raw string) (*Cert, e
 		return nil, p
 	}
 	var res singleflight.Result
+	ch, _ := s.start(id, t)
 	select {
-	case res = <-s.start(id, t):
+	case res = <-ch:
 	case <-ctx.Done():
 		ev.Result, ev.Detail = core.AuditResultFailed, kind+": request ended while issuance was running"
 		s.audit(context.WithoutCancel(ctx), ev)
@@ -431,23 +436,33 @@ func (s *Service) held(cfg *core.Config, id string, e *core.DirectEntry, now tim
 var errClosed = errors.New("direct: service is closed")
 
 // start runs (or joins) the identifier's job and returns a channel that
-// receives its result. At most one job per identifier runs at a time.
-func (s *Service) start(id string, t trigger) <-chan singleflight.Result {
+// receives its result, and whether this call started the job rather than
+// joining one already running. At most one job per identifier runs at a
+// time.
+func (s *Service) start(id string, t trigger) (<-chan singleflight.Result, bool) {
 	out := make(chan singleflight.Result, 1)
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		out <- singleflight.Result{Err: errClosed}
-		return out
+		return out, false
 	}
 	s.wg.Add(1)
+	started := s.waiting[id] == 0
+	s.waiting[id]++
 	s.mu.Unlock()
 	ch := s.jobs.DoChan(id, func() (any, error) { return nil, s.run(id, t) })
 	go func() {
 		defer s.wg.Done()
-		out <- <-ch
+		res := <-ch
+		s.mu.Lock()
+		if s.waiting[id]--; s.waiting[id] == 0 {
+			delete(s.waiting, id)
+		}
+		s.mu.Unlock()
+		out <- res
 	}()
-	return out
+	return out, started
 }
 
 // jobTimeout bounds one job: the whole upstream budget of an issuance. A
@@ -637,8 +652,9 @@ func (s *Service) Rotate(ctx context.Context, identifier string) error {
 		s.rotate[id] = true
 		s.mu.Unlock()
 		var res singleflight.Result
+		ch, _ := s.start(id, t)
 		select {
-		case res = <-s.start(id, t):
+		case res = <-ch:
 		case <-ctx.Done():
 			return ctx.Err()
 		}
