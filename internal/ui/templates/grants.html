@@ -21,7 +21,7 @@
 <td><span class="pill {{if .Enabled}}ok{{else}}quiet{{end}}">{{if .Enabled}}enabled{{else}}disabled{{end}}</span></td>
 <td class="wrap">{{.Note}}</td><td>{{ts .CreatedAt}}</td>
 <td class="actions">{{if .CanEdit}}
-<form method="post" action="/ui/grants/{{.ID}}/{{if .Enabled}}disable{{else}}enable{{end}}">{{template "csrf" $}}<input type="hidden" name="owner" value="{{$.Data.Owner}}"><button type="submit" class="small">{{if .Enabled}}Disable{{else}}Enable{{end}}</button></form>
+{{if or .Enabled .CanEnable}}<form method="post" action="/ui/grants/{{.ID}}/{{if .Enabled}}disable{{else}}enable{{end}}">{{template "csrf" $}}<input type="hidden" name="owner" value="{{$.Data.Owner}}"><button type="submit" class="small">{{if .Enabled}}Disable{{else}}Enable{{end}}</button></form>{{end}}
 <form method="post" action="/ui/grants/{{.ID}}/delete" data-confirm="Delete network {{.Prefix}} of {{.Owner}}? Machines there lose access unless their names resolve to them.">{{template "csrf" $}}<input type="hidden" name="owner" value="{{$.Data.Owner}}"><button type="submit" class="small danger">Delete</button></form>
 {{end}}</td></tr>
 {{else}}<tr><td colspan="7" class="empty">{{if and .Data.Owner (ne .Data.Owner "all")}}No networks match the filter. <a href="/ui/grants">Show everyone's</a>.{{else if .Blocked}}You have no networks.{{else}}No networks yet. Add the address of a machine that runs certbot or acme.sh, and it can request certificates for any name in the managed zones.{{end}}</td></tr>{{end}}
@@ -31,7 +31,8 @@
 {{if not .Blocked}}
 <section class="panel add" id="add" aria-labelledby="h-add"><h2 id="h-add">Add a network</h2>
 <form method="post" action="/ui/grants" class="form">{{template "csrf" .}}
-<label>IPv4 address or network <input name="prefix" value="{{.Data.Form.Prefix}}" placeholder="10.1.2.3 or 10.1.2.0/24" required spellcheck="false" autocomplete="off"><span class="hint">A single address is stored as /32.</span></label>
+{{if .Data.CanNetwork}}<label>IPv4 address or network <input name="prefix" value="{{.Data.Form.Prefix}}" placeholder="10.1.2.3 or 10.1.2.0/24" required spellcheck="false" autocomplete="off"><span class="hint">A single address is stored as /32.</span></label>
+{{else}}<label>IPv4 address <input name="prefix" value="{{.Data.Form.Prefix}}" placeholder="10.1.2.3" required spellcheck="false" autocomplete="off"><span class="hint">One machine, stored as /32. Network ranges can be added by administrators.</span></label>{{end}}
 <label>Note <input name="note" value="{{.Data.Form.Note}}" maxlength="200" placeholder="build server"><span class="hint">Optional; helps others know what the machine is.</span></label>
 {{if .Data.CanWildcard}}<label class="check"><input type="checkbox" name="wildcard" value="true"{{if .Data.Form.Wildcard}} checked{{end}}> Allow wildcard certificates (<code>*.example.com</code>)</label>
 {{else}}<p class="muted small">Wildcard certificates need the wildcard role; ask an administrator.</p>{{end}}

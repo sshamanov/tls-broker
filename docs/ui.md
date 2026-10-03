@@ -48,7 +48,7 @@ the route's role check.
 |---|---|---|---|---|
 | Log in, see banner | yes | yes | yes | yes |
 | Status | banner only | CA states, queue, rate-limit headroom, recent issuance, expiring next | same | plus needs attention, provider details, full budgets, CA accounts, zones and CAA |
-| Client access | own, read only | see all with owner; create, enable, disable, delete own | plus `wildcard` | plus change anyone's |
+| Client access | own, read only | see all with owner; create single-address grants, enable, disable, delete own | plus `wildcard` | plus network ranges, change anyone's |
 | Certificates | no | all, with owner | same | plus last error and rotate hook |
 | Activity log | issuance activity | issuance activity | issuance activity | all events, with detail |
 | Admin pages | no | no | no | yes |
@@ -117,12 +117,18 @@ Admins additionally see:
   it.
 
 **Client access** (`/ui/grants`). Networks allowed to request certificates (IP grants). One page for everyone: every grant with its owner,
-filtered by owner (everyone, mine, or one user). Create one from an IPv4
-address (stored as /32) or IPv4 CIDR (stored masked) with a note; it is owned
-by you. `/0` and IPv6 are refused. The wildcard checkbox appears only for
+filtered by owner (everyone, mine, or one user). Create one with a note; it is
+owned by you. Users who are not admins enter a single IPv4 address (stored as
+/32; the field reads "IPv4 address"); a network range answers 403 with
+"Only administrators can add a network range." Admins may also enter an IPv4
+CIDR (stored masked; the field reads "IPv4 address or network"). `/0` and IPv6
+are refused for everyone. The wildcard checkbox appears only for
 `wildcard_allowed` and `admin`; the server enforces it too. Enable, disable and
 delete appear on your own grants, and on all grants for an admin; posting an
-action on someone else's grant answers 403. A blocked user sees only their own
+action on someone else's grant answers 403. A non-admin's own disabled grant
+wider than /32 (from before ranges became admin-only) offers delete but not
+enable, and enabling it answers 403; such grants stay in force while enabled,
+and admins review them here. A blocked user sees only their own
 grants, read-only. Changes are audited as `grant_change`.
 
 **Certificates** (`/ui/certificates`). Every user who is not blocked sees all

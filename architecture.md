@@ -361,9 +361,15 @@ Important:
 
 A user's role controls what grants they are allowed to create/manage:
 
-- normal: ordinary grants;
-- wildcard_allowed: ordinary or wildcard grants;
-- admin: all control-plane operations.
+- normal: ordinary grants for a single IPv4 address (/32);
+- wildcard_allowed: ordinary or wildcard grants for a single IPv4 address;
+- admin: all control-plane operations, including grants for a network range
+  (any IPv4 CIDR except /0).
+
+Only admins create or enable grants that cover more than one address. A user
+who is not an admin may still disable or delete such a grant they own, but
+not enable it again. Wider grants that non-admins created before this rule
+stay in force (no migration); admins review them on the Client access page.
 
 Grants are deliberately **not scoped by name**: a granted IP may request any
 name in any managed zone, and in direct mode may fetch any cached identifier.
@@ -1165,7 +1171,8 @@ If nginx fronts the broker:
 - otherwise broker uses actual TCP peer IP;
 - do not trust arbitrary `X-Forwarded-For` chains.
 
-IP grants support IPv4 or IPv4 CIDR.
+IP grants support IPv4 or IPv4 CIDR (CIDR wider than /32 for admins only,
+§4.2).
 
 ---
 

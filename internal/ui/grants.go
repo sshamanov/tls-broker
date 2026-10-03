@@ -20,18 +20,33 @@ type grantsData struct {
 	Owners      []string // usernames that own a grant, for the filter
 	Owner       string   // filter: "" (all), "mine" or a username
 	CanWildcard bool
+	CanNetwork  bool // may add grants wider than one address (admins)
 	Form        grantForm
 	Error       string
 }
 
 // grantRow is a grant with its owner's name and whether the viewer may
-// change it (their own grant, or any grant for an admin).
+// change it (their own grant, or any grant for an admin). CanEnable is false
+// for a non-admin's disabled grant wider than one address: they may disable
+// or delete it, but only an admin may switch a network range back on.
 type grantRow struct {
 	core.Grant
-	Owner   string
-	Mine    bool
-	CanEdit bool
+	Owner     string
+	Mine      bool
+	CanEdit   bool
+	CanEnable bool
 }
+
+// msgNetworkAdminOnly answers a non-admin who adds a grant wider than a
+// single address.
+const msgNetworkAdminOnly = "Only administrators can add a network range. Add a single address, or ask an administrator."
+
+// msgEnableNetworkAdminOnly answers a non-admin who enables their own
+// disabled grant wider than a single address.
+const msgEnableNetworkAdminOnly = "Only administrators can enable a network range. You can still delete it, or add a single address instead."
+
+// singleAddress reports whether p covers exactly one IPv4 address.
+func singleAddress(p netip.Prefix) bool { return p.Bits() == 32 }
 
 type grantForm struct {
 	Prefix, Note string
@@ -61,7 +76,7 @@ func (h *Handler) renderGrants(w http.ResponseWriter, r *http.Request, cur *auth
 		return
 	}
 	admin := cur.User.Can(core.RoleAdmin)
-	d := &grantsData{CanWildcard: cur.User.Can(core.RoleWildcardAllowed), Form: form, Error: errMsg}
+	d := &grantsData{CanWildcard: cur.User.Can(core.RoleWildcardAllowed), CanNetwork: admin, Form: form, Error: errMsg}
 	if !cur.User.Blocked {
 		d.Owner = r.URL.Query().Get("owner")
 	}
@@ -69,6 +84,7 @@ func (h *Handler) renderGrants(w http.ResponseWriter, r *http.Request, cur *auth
 	for _, g := range grants {
 		row := grantRow{Grant: g, Owner: names.name(g.OwnerUserID), Mine: g.OwnerUserID == cur.User.ID}
 		row.CanEdit = !cur.User.Blocked && (row.Mine || admin)
+		row.CanEnable = row.CanEdit && (admin || singleAddress(g.Prefix))
 		if !seen[row.Owner] {
 			seen[row.Owner] = true
 			d.Owners = append(d.Owners, row.Owner)
@@ -150,6 +166,10 @@ func (h *Handler) grantCreate(w http.ResponseWriter, r *http.Request, cur *auth.
 		bad(http.StatusBadRequest, fmt.Sprintf("The note is longer than %d characters.", maxNote))
 		return
 	}
+	if !singleAddress(prefix) && !cur.User.Can(core.RoleAdmin) {
+		bad(http.StatusForbidden, msgNetworkAdminOnly)
+		return
+	}
 	if form.Wildcard && !cur.User.Can(core.RoleWildcardAllowed) {
 		bad(http.StatusForbidden, "Your role may not allow wildcard certificates. Ask an administrator for the wildcard role.")
 		return
@@ -191,7 +211,9 @@ var errUnknownAction = fmt.Errorf("unknown action")
 
 // grantAction enables, disables or deletes a grant. Users change their own
 // grants; admins change any. Someone else's grant answers 403: every user
-// sees all grants, so its existence is no secret.
+// sees all grants, so its existence is no secret. Only an admin may enable a
+// grant wider than one address; its non-admin owner may still disable or
+// delete it.
 func (h *Handler) grantAction(w http.ResponseWriter, r *http.Request, cur *auth.Current) {
 	if !limitForm(w, r, maxForm) {
 		return
@@ -218,7 +240,12 @@ func (h *Handler) grantAction(w http.ResponseWriter, r *http.Request, cur *auth.
 		h.forbidden(w, r, cur)
 		return
 	}
-	msg, err := h.applyGrantAction(r, cur, g, r.PathValue("action"))
+	action := r.PathValue("action")
+	if action == "enable" && !singleAddress(g.Prefix) && !cur.User.Can(core.RoleAdmin) {
+		h.renderGrants(w, r, cur, http.StatusForbidden, grantForm{}, msgEnableNetworkAdminOnly)
+		return
+	}
+	msg, err := h.applyGrantAction(r, cur, g, action)
 	switch {
 	case err == errUnknownAction:
 		h.notFound(w, r, cur)

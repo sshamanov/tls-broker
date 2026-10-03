@@ -261,9 +261,9 @@ func testDNSProxy(t *testing.T) {
 }
 
 // The UI: an LDAP user logs in, creates a grant (CSRF-protected form), may
-// not create a wildcard grant with the normal role, and sees the change in
-// the audit log (admin-only there; the issuance it allows is public); the
-// grant then authorizes a host.
+// not create a network-range or wildcard grant with the normal role, and sees
+// the change in the audit log (admin-only there; the issuance it allows is
+// public); the grant then authorizes that host.
 func testUI(t *testing.T) {
 	b := newFakeBroker(t)
 	bob := b.machine("10.0.2.1").browser()
@@ -275,17 +275,21 @@ func testUI(t *testing.T) {
 	// Without the CSRF token the form is refused.
 	tok := bob.csrf
 	bob.csrf = ""
-	if code, _ := bob.do(http.MethodPost, "/ui/grants", url.Values{"prefix": {"10.0.3.0/24"}}); code != http.StatusForbidden {
+	if code, _ := bob.do(http.MethodPost, "/ui/grants", url.Values{"prefix": {"10.0.3.7"}}); code != http.StatusForbidden {
 		t.Fatalf("grant without CSRF token: %d", code)
 	}
 	bob.csrf = tok
-	if code, body := bob.do(http.MethodPost, "/ui/grants", url.Values{"prefix": {"10.0.3.0/24"}, "note": {"lab"}}); code != http.StatusSeeOther {
+	if code, body := bob.do(http.MethodPost, "/ui/grants", url.Values{"prefix": {"10.0.3.0/24"}, "note": {"lab"}}); code != http.StatusForbidden ||
+		!strings.Contains(body, "Only administrators can add a network range.") {
+		t.Fatalf("network-range grant with the normal role: %d %.300s", code, body)
+	}
+	if code, body := bob.do(http.MethodPost, "/ui/grants", url.Values{"prefix": {"10.0.3.7"}, "note": {"lab"}}); code != http.StatusSeeOther {
 		t.Fatalf("create grant: %d %.300s", code, body)
 	}
-	if code, _ := bob.do(http.MethodPost, "/ui/grants", url.Values{"prefix": {"10.0.4.0/24"}, "wildcard": {"true"}}); code != http.StatusForbidden {
+	if code, _ := bob.do(http.MethodPost, "/ui/grants", url.Values{"prefix": {"10.0.4.1"}, "wildcard": {"true"}}); code != http.StatusForbidden {
 		t.Fatalf("wildcard grant with the normal role: %d", code)
 	}
-	if code, body := bob.do(http.MethodGet, "/ui/grants", nil); code != http.StatusOK || !strings.Contains(body, "10.0.3.0/24") {
+	if code, body := bob.do(http.MethodGet, "/ui/grants", nil); code != http.StatusOK || !strings.Contains(body, "10.0.3.7/32") {
 		t.Fatalf("grants page: %d", code)
 	}
 
@@ -299,20 +303,20 @@ func testUI(t *testing.T) {
 		t.Fatalf("admin users page: %d", code)
 	}
 
-	// The grant created in the UI authorizes a host in its prefix.
+	// The grant created in the UI authorizes that host.
 	m := b.machine("10.0.3.7")
 	b.dns.SetA("lab.example.com", "192.0.2.7")
 	m.acme().issue("", "lab.example.com")
 
 	// Activity log: everyone sees grant changes and issuance; only admins
 	// see logins and the raw detail.
-	if code, body := alice.do(http.MethodGet, "/ui/audit", nil); code != http.StatusOK || !strings.Contains(body, "created grant 10.0.3.0/24") ||
+	if code, body := alice.do(http.MethodGet, "/ui/audit", nil); code != http.StatusOK || !strings.Contains(body, "created grant 10.0.3.7/32") ||
 		!strings.Contains(body, "<td>login</td>") {
 		t.Fatalf("admin activity page: %d", code)
 	}
 	code, body := bob.do(http.MethodGet, "/ui/audit", nil)
-	if code != http.StatusOK || !strings.Contains(body, "Added network 10.0.3.0/24.") || !strings.Contains(body, "lab.example.com") ||
-		strings.Contains(body, "created grant 10.0.3.0/24") || strings.Contains(body, "<td>login</td>") {
+	if code != http.StatusOK || !strings.Contains(body, "Added network 10.0.3.7/32.") || !strings.Contains(body, "lab.example.com") ||
+		strings.Contains(body, "created grant 10.0.3.7/32") || strings.Contains(body, "<td>login</td>") {
 		t.Fatalf("user activity page: %d", code)
 	}
 	if evs := b.auditEvents(core.AuditGrantChange); len(evs) != 1 || evs[0].Username != "bob" {

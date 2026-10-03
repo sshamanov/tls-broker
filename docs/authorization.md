@@ -40,8 +40,15 @@ A grant is an IPv4 address or CIDR with two switches, `enabled` and
 - Every user who is not blocked sees all grants with their owner. A user
   creates grants owned by themselves and enables, disables or deletes only
   those; an admin may change any grant. Only `wildcard_allowed` users and
-  admins may create wildcard grants. The server enforces all of it (someone
-  else's grant answers 403), not just the page.
+  admins may create wildcard grants. Only admins may create or enable a grant
+  for a network range: `normal` and `wildcard_allowed` users add a single
+  IPv4 address (`10.1.2.3` or `10.1.2.3/32`), and may disable or delete, but
+  not re-enable, a wider grant they own. The server enforces all of it
+  (someone else's grant, a range or re-enabling one answers 403), not just
+  the page.
+- Wider grants that users who are not admins created before that rule stay
+  in force; admins review them on the Client access page (filter by owner)
+  and disable or delete what should not be there.
 
 When several enabled grants cover an address, a wildcard grant wins over an
 ordinary one, then the longest prefix, then the lowest ID. That grant's ID is

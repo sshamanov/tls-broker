@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strconv"
@@ -201,7 +202,7 @@ func TestGrantRules(t *testing.T) {
 
 	// Normal user: ordinary grant ok, wildcard refused.
 	code(t, bob.act("/ui/grants", url.Values{"prefix": {"10.1.2.3"}, "note": {"<b>laptop</b>"}}), 303)
-	r := bob.act("/ui/grants", url.Values{"prefix": {"10.1.3.0/24"}, "wildcard": {"true"}})
+	r := bob.act("/ui/grants", url.Values{"prefix": {"10.1.3.1"}, "wildcard": {"true"}})
 	code(t, r, 403)
 	see(t, r, "may not allow wildcard certificates")
 	// Invalid input.
@@ -216,12 +217,16 @@ func TestGrantRules(t *testing.T) {
 	see(t, page, "&lt;b&gt;laptop&lt;/b&gt;")
 	lacks(t, page, "<b>laptop</b>", `name="wildcard"`)
 
-	// CIDR is masked; wildcard allowed for wildcard_allowed and admin.
-	code(t, carol.act("/ui/grants", url.Values{"prefix": {"10.9.9.9/24"}, "wildcard": {"true"}}), 303)
-	code(t, admin.act("/ui/grants", url.Values{"prefix": {"10.8.0.0/16"}, "wildcard": {"true"}}), 303)
+	// Wildcard allowed for wildcard_allowed and admin; an admin's CIDR is
+	// masked.
+	code(t, carol.act("/ui/grants", url.Values{"prefix": {"10.9.9.9"}, "wildcard": {"true"}}), 303)
+	code(t, admin.act("/ui/grants", url.Values{"prefix": {"10.8.0.1/16"}, "wildcard": {"true"}}), 303)
 	cg, _ := e.store.Grants().List(bg, e.userID("carol"))
-	if len(cg) != 1 || cg[0].Prefix.String() != "10.9.9.0/24" || !cg[0].Wildcard {
+	if len(cg) != 1 || cg[0].Prefix.String() != "10.9.9.9/32" || !cg[0].Wildcard {
 		t.Fatalf("carol: %+v", cg)
+	}
+	if ag, _ := e.store.Grants().List(bg, e.userID("alice")); len(ag) != 1 || ag[0].Prefix.String() != "10.8.0.0/16" {
+		t.Fatalf("alice: %+v", ag)
 	}
 	see(t, carol.get("/ui/grants"), `name="wildcard"`)
 
@@ -239,7 +244,7 @@ func TestGrantRules(t *testing.T) {
 	// Everyone sees every grant with its owner, but changes only their own:
 	// someone else's grant answers 403 and stays as it is.
 	page = bob.get("/ui/grants")
-	see(t, page, "10.9.9.0/24", "carol", "10.8.0.0/16", "alice", "10.1.2.3/32")
+	see(t, page, "10.9.9.9/32", "carol", "10.8.0.0/16", "alice", "10.1.2.3/32")
 	if strings.Count(page.body, `action="/ui/grants/`) != 2 {
 		t.Errorf("bob gets action forms for grants he does not own:\n%s", trim(page.body))
 	}
@@ -263,11 +268,11 @@ func TestGrantRules(t *testing.T) {
 	code(t, bob.act("/ui/grants", url.Values{"prefix": {"10.1.2.4"}}), 303)
 	mine := bob.get("/ui/grants?owner=mine")
 	see(t, mine, "10.1.2.4/32")
-	lacks(t, mine, "10.9.9.0/24", "10.8.0.0/16")
+	lacks(t, mine, "10.9.9.9/32", "10.8.0.0/16")
 	byCarol := bob.get("/ui/grants?owner=carol")
-	see(t, byCarol, "10.9.9.0/24")
+	see(t, byCarol, "10.9.9.9/32")
 	lacks(t, byCarol, "10.1.2.4/32", "10.8.0.0/16")
-	see(t, bob.get("/ui/grants?owner=all"), "10.9.9.0/24", "10.1.2.4/32", "10.8.0.0/16")
+	see(t, bob.get("/ui/grants?owner=all"), "10.9.9.9/32", "10.1.2.4/32", "10.8.0.0/16")
 	// An admin manages everyone's grants on the same page.
 	code(t, admin.act("/ui/grants/"+itoa(cg[0].ID)+"/disable", nil), 303)
 	if g, _ := e.store.Grants().Get(bg, cg[0].ID); g.Enabled {
@@ -285,7 +290,71 @@ func TestGrantRules(t *testing.T) {
 	if len(evs) < 5 {
 		t.Errorf("grant audit events: %d", len(evs))
 	}
-	see(t, bob.get("/ui/audit"), "Added network 10.9.9.0/24 (wildcards allowed).", "Deleted network 10.1.2.3/32.", "Disabled network 10.9.9.0/24.", "carol")
+	see(t, bob.get("/ui/audit"), "Added network 10.9.9.9/32 (wildcards allowed).", "Deleted network 10.1.2.3/32.", "Disabled network 10.9.9.9/32.", "carol")
+}
+
+// TestNetworkGrantsAdminOnly: users who are not admins add single addresses
+// only; a network range is an admin's call. Their existing wider grants stay
+// in force and they may still disable or delete them, but not re-enable them.
+func TestNetworkGrantsAdminOnly(t *testing.T) {
+	e := newEnv(t)
+	admin := e.login("alice")
+	see(t, admin.get("/ui/grants"), "IPv4 address or network", `placeholder="10.1.2.3 or 10.1.2.0/24"`)
+	for i, role := range []core.Role{core.RoleNormal, core.RoleWildcardAllowed} {
+		user := []string{"bob", "carol"}[i]
+		c := e.loginAs(user, role)
+		uid := e.userID(user)
+		net := "10.5." + itoa(int64(i)) + "."
+
+		page := c.get("/ui/grants")
+		see(t, page, "IPv4 address <input", `placeholder="10.1.2.3"`, "Network ranges can be added by administrators.")
+		lacks(t, page, "IPv4 address or network", "10.1.2.0/24")
+
+		code(t, c.act("/ui/grants", url.Values{"prefix": {net + "1"}}), 303)
+		code(t, c.act("/ui/grants", url.Values{"prefix": {net + "2/32"}}), 303)
+		for _, wide := range []string{net + "0/24", net + "2/31", "10.0.0.0/8"} {
+			r := c.act("/ui/grants", url.Values{"prefix": {wide}, "note": {"lab"}})
+			code(t, r, 403)
+			see(t, r, "Only administrators can add a network range. Add a single address, or ask an administrator.", `value="`+wide+`"`)
+		}
+		gs, _ := e.store.Grants().List(bg, uid)
+		if len(gs) != 2 || gs[0].Prefix.Bits() != 32 || gs[1].Prefix.Bits() != 32 {
+			t.Fatalf("%s: %+v", role, gs)
+		}
+
+		// A wider grant they own from before the rule: it stays in force,
+		// they may disable and delete it, but only an admin re-enables it.
+		old := &core.Grant{OwnerUserID: uid, Prefix: netip.MustParsePrefix(net + "0/24"), Enabled: true, CreatedAt: e.clock.Now()}
+		if err := e.store.Grants().Create(bg, old); err != nil {
+			t.Fatal(err)
+		}
+		path := "/ui/grants/" + itoa(old.ID)
+		see(t, c.get("/ui/grants"), `action="`+path+`/disable"`)
+		code(t, c.act(path+"/disable", nil), 303)
+		page = c.get("/ui/grants")
+		see(t, page, net+"0/24", `action="`+path+`/delete"`)
+		lacks(t, page, `action="`+path+`/enable"`)
+		r := c.act(path+"/enable", nil)
+		code(t, r, 403)
+		see(t, r, "Only administrators can enable a network range.")
+		if g, _ := e.store.Grants().Get(bg, old.ID); g.Enabled {
+			t.Fatalf("%s re-enabled a network range", role)
+		}
+		see(t, admin.get("/ui/grants"), `action="`+path+`/enable"`)
+		code(t, admin.act(path+"/enable", nil), 303)
+		if g, _ := e.store.Grants().Get(bg, old.ID); !g.Enabled {
+			t.Fatal("admin could not enable the range")
+		}
+		code(t, c.act(path+"/delete", nil), 303)
+		if _, err := e.store.Grants().Get(bg, old.ID); !isNotFound(err) {
+			t.Fatalf("%s could not delete their range: %v", role, err)
+		}
+	}
+	code(t, admin.act("/ui/grants", url.Values{"prefix": {"10.6.0.0/24"}}), 303)
+	if ag, _ := e.store.Grants().List(bg, e.userID("alice")); len(ag) != 1 || ag[0].Prefix.String() != "10.6.0.0/24" {
+		t.Fatalf("admin range: %+v", ag)
+	}
+	code(t, admin.act("/ui/grants", url.Values{"prefix": {"0.0.0.0/0"}}), 400)
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
@@ -322,10 +391,10 @@ func TestBlockedUserCannotCreate(t *testing.T) {
 	code(t, bob.act("/ui/grants", url.Values{"prefix": {"10.0.0.2"}}), 303)
 
 	// Role change applies immediately.
-	r = bob.act("/ui/grants", url.Values{"prefix": {"10.0.1.0/24"}, "wildcard": {"true"}})
+	r = bob.act("/ui/grants", url.Values{"prefix": {"10.0.1.1"}, "wildcard": {"true"}})
 	code(t, r, 403)
 	code(t, admin.act("/ui/admin/users/"+itoa(bid)+"/role", url.Values{"role": {"wildcard_allowed"}}), 303)
-	code(t, bob.act("/ui/grants", url.Values{"prefix": {"10.0.1.0/24"}, "wildcard": {"true"}}), 303)
+	code(t, bob.act("/ui/grants", url.Values{"prefix": {"10.0.1.1"}, "wildcard": {"true"}}), 303)
 	code(t, admin.act("/ui/admin/users/"+itoa(bid)+"/role", url.Values{"role": {"emperor"}}), 303)
 	if u, _ := e.store.Users().Get(bg, bid); u.Role != core.RoleWildcardAllowed {
 		t.Errorf("role %q", u.Role)
@@ -578,8 +647,8 @@ func TestCertificates(t *testing.T) {
 	seedCert(t, e, "c2", "api.example.com")
 	bob := e.login("bob")
 	carol := e.login("carol")
-	code(t, carol.act("/ui/grants", url.Values{"prefix": {"10.0.0.0/24"}}), 303)
-	code(t, bob.act("/ui/grants", url.Values{"prefix": {"10.9.0.0/24"}}), 303)
+	code(t, carol.act("/ui/grants", url.Values{"prefix": {"10.0.0.5"}}), 303)
+	code(t, bob.act("/ui/grants", url.Values{"prefix": {"10.9.0.1"}}), 303)
 	cg, _ := e.store.Grants().List(bg, e.userID("carol"))
 	bgr, _ := e.store.Grants().List(bg, e.userID("bob"))
 	seedGrantCert(t, e, "c3", "carols.example.com", cg[0].ID)
@@ -593,8 +662,8 @@ func TestCertificates(t *testing.T) {
 	lacks(t, r, "Rotate key", "boom")
 	// Owners: the grant's owner and network, a deleted grant with the
 	// requesting address, or no owner for a DNS match.
-	see(t, r, `carol<span class="cell-sub">via <code>10.0.0.0/24</code>`, `network removed</span><span class="cell-sub">requested from <code>10.0.0.5</code>`, `no owner</span><span class="cell-sub">DNS match from <code>10.0.0.5</code>`)
-	if n := strings.Count(r.body, "via <code>10.0.0.0/24</code>"); n != 3 { // c3, c5 and the direct entry
+	see(t, r, `carol<span class="cell-sub">via <code>10.0.0.5/32</code>`, `network removed</span><span class="cell-sub">requested from <code>10.0.0.5</code>`, `no owner</span><span class="cell-sub">DNS match from <code>10.0.0.5</code>`)
+	if n := strings.Count(r.body, "via <code>10.0.0.5/32</code>"); n != 3 { // c3, c5 and the direct entry
 		t.Errorf("carol owns %d rows, want 3", n)
 	}
 	lacks(t, bob.get("/ui/certificates?q=api"), "www.example.com", "svc.example.com")
