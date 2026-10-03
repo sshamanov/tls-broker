@@ -2,7 +2,7 @@
 {{if .Data.Error}}<p class="flash error" role="alert">{{.Data.Error}}</p>{{end}}
 <p class="muted">A grant lets clients at an IPv4 address or CIDR use the broker. Grants stay in force when their owner is later blocked or demoted; disable or delete them to revoke.</p>
 <table>
-<tr><th>Network</th><th>Wildcards</th><th>Status</th><th>Note</th><th>Created</th><th></th></tr>
+<tr><th>Network</th><th>Wildcards</th><th>Status</th><th>Note</th><th>Created</th><th><span class="sr">Actions</span></th></tr>
 {{range .Data.Grants}}
 <tr><td><code>{{.Prefix}}</code></td><td>{{if .Wildcard}}allowed{{else}}no{{end}}</td>
 <td><span class="badge {{if .Enabled}}good{{else}}warn{{end}}">{{if .Enabled}}enabled{{else}}disabled{{end}}</span></td>

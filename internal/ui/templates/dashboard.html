@@ -40,7 +40,7 @@
 <p class="muted">Put these account URLs into the CAA <code>accounturi</code> parameter of your zones.</p>
 <table>
 <tr><th>Provider</th><th>Account URL</th><th>Issuers</th><th>accounturi honoured</th></tr>
-{{range .Data.Accounts}}<tr><td>{{.Provider}}</td><td>{{if .URL}}<code>{{.URL}}</code>{{else}}<span class="bad">{{.Err}}</span>{{end}}</td><td>{{join .Issuers ", "}}</td><td>{{if .Honoured}}yes{{else}}no{{end}}</td></tr>
+{{range .Data.Accounts}}<tr><td>{{.Provider}}</td><td>{{if .URL}}<code class="wrap">{{.URL}}</code>{{else}}<span class="bad">{{.Err}}</span>{{end}}</td><td>{{join .Issuers ", "}}</td><td>{{if .Honoured}}yes{{else}}no{{end}}</td></tr>
 {{else}}<tr><td colspan="4" class="muted">No enabled providers.</td></tr>{{end}}
 </table>
 </section>

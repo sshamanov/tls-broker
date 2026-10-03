@@ -9,8 +9,8 @@
 <tr><th>Consecutive failures</th><td>{{.State.Failures}}</td></tr>
 <tr><th>Last error</th><td>{{if .State.LastError}}{{.State.LastError}}{{else}}-{{end}}</td></tr>
 <tr><th>Slots</th><td>{{.SlotsInUse}} in use of {{.SlotsTotal}}; {{.Waiting}} waiting; {{.Reserved}} open reservations</td></tr>
-<tr><th>Directory</th><td><code>{{$cfg.DirectoryURL}}</code></td></tr>
-<tr><th>Account URL</th><td>{{if $acc.URL}}<code>{{$acc.URL}}</code>{{else if $acc.Err}}<span class="bad">{{$acc.Err}}</span>{{else}}-{{end}}</td></tr>
+<tr><th>Directory</th><td><code class="wrap">{{$cfg.DirectoryURL}}</code></td></tr>
+<tr><th>Account URL</th><td>{{if $acc.URL}}<code class="wrap">{{$acc.URL}}</code>{{else if $acc.Err}}<span class="bad">{{$acc.Err}}</span>{{else}}-{{end}}</td></tr>
 <tr><th>Capabilities</th><td>ARI {{if $cfg.ARI}}yes{{else}}no{{end}}; accounturi honoured {{if $cfg.AccountURIHonoured}}yes{{else}}no{{end}}; CAA issuers {{join $cfg.CAAIssuers ", "}}</td></tr>
 </table>
 {{if .Budgets}}

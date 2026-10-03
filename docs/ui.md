@@ -131,6 +131,14 @@ consecutive failures, last error, slots, reservations, directory URL, account
 URL, capabilities and budget usage. There is no circuit reset: `core` exposes
 none, and circuits close by themselves.
 
+## Presentation
+
+Tables fill their box and scroll horizontally when they are wider than the
+viewport; a shaded edge shows which side has more. Timestamps are `<time>`
+elements (UTC, never wrapped). Persistent notices (process banners, the
+blocked-account notice) are `role="status"` regions; only the outcome of an
+action is an alert. The YAML editor does not soft-wrap lines.
+
 ## First start
 
 1. Start the container with `TLS_BROKER_LOCAL_ADMIN_USER` and

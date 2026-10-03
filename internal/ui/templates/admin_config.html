@@ -13,7 +13,7 @@
 <p>Active generation: <b>{{.Data.Current}}</b>. Editing generation {{.Data.Selected}}. Credentials are never part of the YAML; refer to secrets by name (see <a href="/ui/admin/secrets">Secrets</a>).</p>
 <form method="post" class="stack" id="cfgform">{{template "csrf" .}}
 <input type="hidden" name="gen" value="{{.Data.Selected}}">
-<textarea name="yaml" rows="30" spellcheck="false" aria-label="Configuration YAML">{{.Data.YAML}}</textarea>
+<textarea name="yaml" rows="30" class="code" spellcheck="false" aria-label="Configuration YAML">{{.Data.YAML}}</textarea>
 <div class="row">
 <button type="submit" formaction="/ui/admin/config/validate">Validate</button>
 <button type="submit" formaction="/ui/admin/config/activate" data-confirm="Activate this configuration as a new generation?">Activate</button>
@@ -30,7 +30,7 @@
 
 <section><h2>Generations</h2>
 <table>
-<tr><th>#</th><th>Created</th><th></th><th></th></tr>
+<tr><th>#</th><th>Created</th><th><span class="sr">View</span></th><th><span class="sr">Actions</span></th></tr>
 {{range .Data.Generations}}
 <tr><td>{{.Number}}{{if .Active}} <span class="badge good">active</span>{{end}}</td><td>{{ts .CreatedAt}}</td>
 <td><a href="/ui/admin/config?gen={{.Number}}">View</a></td>

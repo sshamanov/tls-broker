@@ -431,7 +431,7 @@ func isNotFound(err error) bool { return errors.Is(err, core.ErrNotFound) }
 
 func (h *Handler) loadTemplates() error {
 	funcs := template.FuncMap{
-		"ts":      func(t time.Time) string { return fmtTime(t) },
+		"ts":      tsHTML,
 		"rel":     func(t time.Time) string { return relTime(h.Clock.Now(), t) },
 		"dur":     fmtDur,
 		"join":    strings.Join,
@@ -473,6 +473,16 @@ func fmtTime(t time.Time) string {
 		return "-"
 	}
 	return t.UTC().Format("2006-01-02 15:04:05 UTC")
+}
+
+// tsHTML renders a timestamp as a <time> element: machine-readable datetime,
+// and styled nowrap so a time never wraps into four lines in a narrow column.
+// Every byte comes from the time format, so it is safe to mark as HTML.
+func tsHTML(t time.Time) template.HTML {
+	if t.IsZero() {
+		return "-"
+	}
+	return template.HTML(`<time datetime="` + t.UTC().Format(time.RFC3339) + `">` + fmtTime(t) + `</time>`)
 }
 
 func relTime(now, t time.Time) string {

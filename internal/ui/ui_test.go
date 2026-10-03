@@ -626,6 +626,11 @@ func TestBanners(t *testing.T) {
 	bob := e.login("bob")
 	see(t, bob.get("/ui/"), "DNS gate is mocked")
 	see(t, bob.get("/ui/grants"), "DNS gate is mocked")
+	// A persistent banner is a status region, not an alert that interrupts
+	// screen-reader users on every page.
+	r := bob.get("/ui/")
+	see(t, r, `class="flash error banner" role="status"`)
+	lacks(t, r, `role="alert"`)
 
 	lacks(t, newEnv(t).client().get("/ui/login"), "DNS gate is mocked")
 }

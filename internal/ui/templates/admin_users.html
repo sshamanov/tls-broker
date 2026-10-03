@@ -1,6 +1,6 @@
 {{define "content"}}
 <table>
-<tr><th>User</th><th>Source</th><th>Role</th><th>State</th><th>Last login</th><th></th></tr>
+<tr><th>User</th><th>Source</th><th>Role</th><th>State</th><th>Last login</th><th><span class="sr">Actions</span></th></tr>
 {{range .Data.Users}}
 <tr><td>{{.Username}}</td><td>{{if .Local}}local break-glass{{else}}LDAP{{end}}</td>
 <td>{{if or .Local (eq .ID $.User.ID)}}{{role .Role}}{{else}}

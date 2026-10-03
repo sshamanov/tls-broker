@@ -22,7 +22,7 @@
 {{if ne .Data.Mode "acme"}}
 <h2>Direct cache</h2>
 <table>
-<tr><th>Identifier</th><th>Provider</th><th>Generation</th><th>Expires</th><th>Renew at</th><th>Last fetch</th><th>Last attempt</th><th></th></tr>
+<tr><th>Identifier</th><th>Provider</th><th>Generation</th><th>Expires</th><th>Renew at</th><th>Last fetch</th><th>Last attempt</th><th><span class="sr">Actions</span></th></tr>
 {{range .Data.Direct}}
 <tr><td>{{.Identifier}}</td><td>{{if .Provider}}{{.Provider}}{{else}}-{{end}}</td><td>{{.Generation}}</td>
 <td>{{ts .NotAfter}}{{if not (isZero .NotAfter)}} <span class="muted">({{rel .NotAfter}})</span>{{end}}</td>
