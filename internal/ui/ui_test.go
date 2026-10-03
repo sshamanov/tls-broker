@@ -634,3 +634,38 @@ func TestBanners(t *testing.T) {
 
 	lacks(t, newEnv(t).client().get("/ui/login"), "DNS gate is mocked")
 }
+
+func TestNotFoundPageAndFavicon(t *testing.T) {
+	e := newEnv(t)
+	c := e.client()
+	// An unknown path under /ui/ renders the styled page, logged in or not.
+	r := c.get("/ui/no-such-page")
+	code(t, r, 404)
+	if ct := r.hdr.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("content type %q", ct)
+	}
+	see(t, r, "<title>Not found - TLS broker</title>", `class="brand"`, "There is nothing here", `href="/ui/static/ui.css?v=`)
+	lacks(t, r, "My grants")
+	bob := e.login("bob")
+	r = bob.get("/ui/admin/nope/")
+	code(t, r, 404)
+	see(t, r, "There is nothing here", "My grants", "Log out")
+	// The exact routes still win over the catch-all, and a wrong method on
+	// a known path stays a 405.
+	code(t, bob.get("/ui/"), 200)
+	code(t, bob.get("/ui/grants"), 200)
+	code(t, bob.get("/ui/logout"), 405)
+
+	// Every page links the favicon with the asset hash; the file is served
+	// as SVG with the same long cache as the other static assets.
+	see(t, r, `<link rel="icon" type="image/svg+xml" href="/ui/static/favicon.svg?v=`+e.h.assets+`">`)
+	r = c.get("/ui/static/favicon.svg?v=" + e.h.assets)
+	code(t, r, 200)
+	if ct := r.hdr.Get("Content-Type"); !strings.HasPrefix(ct, "image/svg+xml") {
+		t.Errorf("favicon content type %q", ct)
+	}
+	if cc := r.hdr.Get("Cache-Control"); !strings.Contains(cc, "immutable") {
+		t.Errorf("favicon Cache-Control %q", cc)
+	}
+	see(t, r, "<svg")
+}

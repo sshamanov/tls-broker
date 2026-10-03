@@ -109,6 +109,9 @@ type Handler struct {
 	root   http.Handler
 	static http.Handler
 	assets string // content hash used as cache-busting query
+	// patterns are the "METHOD /path" patterns passed to route, used to
+	// keep 405 answers for POST-only paths next to the GET catch-all.
+	patterns []string
 
 	mu       sync.Mutex
 	ldapAt   time.Time // last "Test LDAP" run since start; zero when none
@@ -197,6 +200,7 @@ func (h *Handler) route(pattern string, level access, fn handlerFunc) {
 	case accessAdmin:
 		guarded = auth.RequireRole(core.RoleAdmin)(inner)
 	}
+	h.patterns = append(h.patterns, pattern)
 	h.mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		cur := auth.From(r.Context())
 		if level == accessAnon {
@@ -257,6 +261,28 @@ func (h *Handler) routes() {
 	h.route("POST /ui/admin/secrets/delete", accessAdmin, h.secretDelete)
 
 	h.route("GET /ui/admin/providers", accessAdmin, h.providersPage)
+
+	// Everything else under /ui/ is the styled 404. "GET /ui/{$}" (the
+	// dashboard) and the other exact patterns are more specific and win. A
+	// GET on a POST-only path would match the catch-all too, so those paths
+	// get an explicit 405 first.
+	get := map[string]bool{}
+	for _, p := range h.patterns {
+		if m, path, ok := strings.Cut(p, " "); ok && m == http.MethodGet {
+			get[path] = true
+		}
+	}
+	for _, p := range h.patterns {
+		if m, path, ok := strings.Cut(p, " "); ok && m == http.MethodPost && !get[path] {
+			h.mux.HandleFunc(http.MethodGet+" "+path, methodNotAllowed)
+		}
+	}
+	h.route("GET /ui/", accessAnon, h.notFound)
+}
+
+func methodNotAllowed(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Allow", http.MethodPost)
+	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 }
 
 func (h *Handler) serveStatic(w http.ResponseWriter, r *http.Request) {

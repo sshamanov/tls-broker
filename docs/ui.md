@@ -1,9 +1,9 @@
 # Web UI
 
 The UI is the primary operator surface. It is server-rendered `html/template`
-with embedded assets (`internal/ui`): one small stylesheet and a few lines of
-JavaScript (`ui.js`) that ask for confirmation before destructive forms. There
-is no build step. Everything lives under `/ui/`.
+with embedded assets (`internal/ui`): one small stylesheet, an SVG favicon and
+a few lines of JavaScript (`ui.js`) that ask for confirmation before destructive
+forms. There is no build step. Everything lives under `/ui/`.
 
 Code: `internal/ui`. The handler (`ui.New(ui.Deps{...})`, mount it at `/ui/`)
 depends on the `core` ports plus `*auth.Service` for sessions and cookies. Per
@@ -25,7 +25,9 @@ the route's role check.
   `Sec-Fetch-Site: cross-site`.
 - Methods are part of the route: a wrong method is 405. Anonymous GETs redirect
   to `/ui/login?next=...` (only local `/ui/` targets are honoured); anonymous
-  POSTs get 401; a missing role gets a 403 page.
+  POSTs get 401; a missing role gets a 403 page. Any other `GET` under `/ui/`
+  renders the styled 404 page (with the navigation when a session exists; no
+  login is required to see it).
 - Flash messages travel in a short-lived `SameSite=Strict` cookie and are
   rendered escaped.
 - Secret values are write-only: no page, flash or audit event ever contains
