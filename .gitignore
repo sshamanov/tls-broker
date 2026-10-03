@@ -20,3 +20,6 @@ deploy/data-test/
 # Local deployment compose files with inline credentials (never commit)
 deploy/compose.test.yaml
 deploy/compose.prod.yaml
+
+# Browser tool scratch
+.playwright-mcp/
