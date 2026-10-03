@@ -236,7 +236,9 @@ func reasonText(d core.Decision, src netip.Addr) string {
 // gateDenied builds the problem for a gate denial and records it.
 func (s *Server) gateDenied(x *exchange, d core.Decision, src netip.Addr, set names.Set, orderID string) *core.Problem {
 	detail := fmt.Sprintf("denied by the broker's authorization gate (reason %s): %s", d.Reason, reasonText(d, src))
-	if d.Detail != "" {
+	if d.Detail != "" && d.Reason != core.ReasonDNSFailure {
+		// A resolver failure's detail is the DoH client's error text (URLs,
+		// dial errors); it goes to the audit log below, not to the client.
 		detail += " (" + d.Detail + ")"
 	}
 	p := core.NewProblem(core.ProblemUnauthorized, "%s", detail)

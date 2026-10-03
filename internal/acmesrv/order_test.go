@@ -100,10 +100,21 @@ func TestNewOrderGateDenied(t *testing.T) {
 	if len(evs) != 1 || evs[0].Reason != core.ReasonDNSMismatch || evs[0].SourceIP != "127.0.0.1" || evs[0].Mode != core.ModeACME {
 		t.Fatalf("audit %+v", evs)
 	}
+	// A resolver failure's detail (the DoH client's error text) stays in the
+	// audit log and is not shown to the client.
+	e.gate.Decide(core.Decision{Reason: core.ReasonDNSFailure, Name: "www.example.com",
+		Detail: `Get "https://cloudflare-dns.com/dns-query": dial tcp 1.1.1.1:443: i/o timeout`})
+	p = expectProblem(t, c.post(e.url(pathNewOrder), map[string]any{"identifiers": ids("www.example.com")}), 403, core.ProblemUnauthorized)
+	if !strings.Contains(p.Detail, "dns_failure") || strings.Contains(p.Detail, "cloudflare") || strings.Contains(p.Detail, "1.1.1.1") {
+		t.Fatalf("resolver error leaked: %q", p.Detail)
+	}
+	if evs := e.aud.OfType(core.AuditGate); len(evs) != 2 || !strings.Contains(evs[1].Detail, "1.1.1.1") {
+		t.Fatalf("resolver error not audited: %+v", evs)
+	}
 	// Allowed orders are not audited here: the issuer records them.
 	e.gate.Decide(core.Decision{Allowed: true, Reason: core.ReasonIPGrant, GrantID: 7})
 	o, _ := c.newOrder("www.example.com")
-	if o.Status != "ready" || e.iss.Admits()[0].Decision.GrantID != 7 || len(e.aud.Events()) != 1 {
+	if o.Status != "ready" || e.iss.Admits()[0].Decision.GrantID != 7 || len(e.aud.Events()) != 2 {
 		t.Fatalf("allowed: %+v %d events", o, len(e.aud.Events()))
 	}
 }
