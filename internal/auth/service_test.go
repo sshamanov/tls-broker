@@ -280,7 +280,11 @@ func TestLocalAdminDisabledWithoutPassword(t *testing.T) {
 	}
 }
 
-func TestLocalAdminAndLDAPUserSameNameAreDistinct(t *testing.T) {
+// The break-glass name is reserved: a wrong password is invalid credentials
+// (throttled), never tried against LDAP — even when an LDAP user of the same
+// name exists, and even when LDAP is down, where it used to come back as
+// "directory unavailable" and escape the throttle.
+func TestLocalAdminWrongPasswordNeverReachesLDAP(t *testing.T) {
 	e := newEnv(t)
 	e.cfg.Update(func(c *core.Config) {
 		c.Bootstrap.LocalAdminUser = "alice"
@@ -290,9 +294,31 @@ func TestLocalAdminAndLDAPUserSameNameAreDistinct(t *testing.T) {
 	if err != nil || !a.User.Local {
 		t.Fatalf("%v %+v", err, a)
 	}
-	b, err := e.s.Login(ctx, "alice", "alicepw", ip1)
-	if err != nil || b.User.Local || b.User.ID == a.User.ID || b.User.Role != core.RoleNormal {
-		t.Fatalf("%v %+v", err, b)
+	calls := e.dir.Calls()
+	// "alicepw" is the LDAP password of the same-named directory user.
+	if _, err := e.s.Login(ctx, "alice", "alicepw", ip1); !errors.Is(err, core.ErrInvalidCredentials) {
+		t.Fatalf("LDAP password accepted for the break-glass name: %v", err)
+	}
+	if e.dir.Calls() != calls {
+		t.Fatal("break-glass password was tried against LDAP")
+	}
+	e.dir.SetDown(true)
+	for i := 0; i < 4; i++ {
+		if _, err := e.s.Login(ctx, "alice", "wrong", ip1); !errors.Is(err, core.ErrInvalidCredentials) || errors.Is(err, core.ErrDirectoryUnavailable) {
+			t.Fatalf("attempt %d: %v", i, err)
+		}
+	}
+	var te *ThrottledError
+	if _, err := e.s.Login(ctx, "alice", "wrong", ip1); !errors.As(err, &te) {
+		t.Fatalf("break-glass guessing not throttled: %v", err)
+	}
+	if ev := e.audit.OfType(core.AuditError); len(ev) != 0 {
+		t.Fatalf("directory errors audited for break-glass attempts: %+v", ev)
+	}
+	// The right password still works while LDAP is down, after the window.
+	e.clock.Advance(2 * time.Minute)
+	if _, err := e.s.Login(ctx, "alice", "localpw", ip1); err != nil {
+		t.Fatal(err)
 	}
 }
 

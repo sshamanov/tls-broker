@@ -11,8 +11,12 @@ authenticated by it: ACME and direct mode are gated by source IP
    defines roles.
 
 A user row is created locally at the first successful login with role
-`normal`. Usernames are trimmed and lower-cased everywhere. The LDAP user
-`alice` and a local admin named `alice` are two different users.
+`normal`. Usernames are trimmed and lower-cased everywhere. The break-glass
+name is reserved: a login with that username is only ever checked against the
+local password. A wrong password is "invalid credentials" (and counts for the
+throttle); it is never tried against LDAP, so a mistyped break-glass password
+does not travel to the directory and an LDAP account of the same name cannot
+log in through the UI. Pick a break-glass name that no directory user has.
 
 ## LDAP setup
 
@@ -133,7 +137,9 @@ for the rest of the window; further attempts are refused without touching LDAP
 and without extending the lock. A success clears the counter. The error is a
 `*auth.ThrottledError` that also matches `core.ErrInvalidCredentials`. The
 table is in memory and forgotten on restart. Failures caused by LDAP being
-down do not count. The break-glass admin is throttled like everyone else.
+down do not count. The break-glass admin is throttled like everyone else,
+also while LDAP is down: its wrong passwords are "invalid credentials", never
+"directory unavailable".
 
 ## When LDAP is down
 

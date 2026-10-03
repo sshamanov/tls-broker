@@ -57,8 +57,9 @@ the schema only by adding a new file; never edit a released one.
 ### `users`
 
 Humans of the control plane (architecture §4–5). `id` is assigned by the
-store; `(username, local)` is unique, so the local break-glass admin and an
-LDAP user of the same name are different rows. Columns: `role`
+store; `(username, local)` is unique: the local break-glass admin is its own
+row even if an LDAP user of the same name once logged in (such a user can no
+longer log in; see `docs/authentication.md`). Columns: `role`
 (`normal | wildcard_allowed | admin`), `blocked`, `created_at`,
 `last_login_at`. Users are never deleted.
 

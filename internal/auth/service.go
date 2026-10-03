@@ -115,7 +115,15 @@ func (s *Service) authenticate(ctx context.Context, cfg *core.Config, name, pass
 	if name == "" || password == "" {
 		return nil, "", core.ErrInvalidCredentials
 	}
-	if s.isLocalAdmin(cfg, name, password) {
+	if local, ok := s.isLocalAdmin(cfg, name, password); local {
+		if !ok {
+			// The break-glass name is reserved: a wrong password is a wrong
+			// password, counted by the throttle, never tried against LDAP
+			// (that would leak the typed password to the directory and,
+			// with LDAP down, make the break-glass password guessable
+			// without any throttling, as "directory unavailable").
+			return nil, "", core.ErrInvalidCredentials
+		}
 		u, err := s.localAdminUser(ctx, name)
 		return u, "local", err
 	}
@@ -126,20 +134,22 @@ func (s *Service) authenticate(ctx context.Context, cfg *core.Config, name, pass
 	return u, "ldap", err
 }
 
-func (s *Service) isLocalAdmin(cfg *core.Config, name, password string) bool {
+// isLocalAdmin reports whether name is the configured break-glass admin
+// (local) and, if so, whether the password is right (ok). The password is
+// only checked for that name: the bcrypt comparison would otherwise cost
+// every login attempt of every user tens of milliseconds of CPU.
+func (s *Service) isLocalAdmin(cfg *core.Config, name, password string) (local, ok bool) {
 	b := cfg.Bootstrap
 	if b.LocalAdminUser == "" || b.LocalAdminPassword == "" {
-		return false
+		return false, false
 	}
-	// Evaluate both comparisons so timing does not reveal which failed.
-	userOK := constEq(NormalizeUsername(b.LocalAdminUser), name)
-	var passOK bool
+	if !constEq(NormalizeUsername(b.LocalAdminUser), name) {
+		return false, false
+	}
 	if strings.HasPrefix(b.LocalAdminPassword, "$2") {
-		passOK = bcrypt.CompareHashAndPassword([]byte(b.LocalAdminPassword), []byte(password)) == nil
-	} else {
-		passOK = constEq(b.LocalAdminPassword, password)
+		return true, bcrypt.CompareHashAndPassword([]byte(b.LocalAdminPassword), []byte(password)) == nil
 	}
-	return userOK && passOK
+	return true, constEq(b.LocalAdminPassword, password)
 }
 
 // localAdminUser stores the break-glass admin as a Local user that is always
