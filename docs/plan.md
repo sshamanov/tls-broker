@@ -356,6 +356,17 @@ together. Steps inside a wave touch disjoint directories and run in parallel.
 | 4 | App wiring, main, e2e, compat scripts, deployment and operations docs | `internal/app`, `cmd/`, `test/` | `docs/deployment.md`, `docs/operations.md` |
 | 5 | Independent review against architecture §25 invariants, fixes | whole repo | as needed |
 
+### Status (2026-10-03)
+
+Waves 0-4 have landed: every package, the wired binary and image, the
+deployment and operations guides, and all automated testing layers —
+unit tests, the in-process end-to-end suite covering every architecture §25
+scenario and invariant (`test/e2e`, part of `make check`), the broker
+against Pebble (`make e2e-pebble`) and real clients (`make compat`: Certbot
+5.8.0, 0.40.0, 0.31.0 and acme.sh 3.1.6, see `docs/acme-proxy.md`). Layer 5
+(Let's Encrypt staging, production canary) is run by the operator. Wave 5,
+the independent review, is next.
+
 Rules while waves run in parallel:
 
 - Touch only the directories your step owns. If a `core` contract is wrong or

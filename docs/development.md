@@ -15,7 +15,7 @@ container through `scripts/dev`; `make` targets wrap the common cases.
 | `make run-test` | `docker compose -f deploy/compose.test.yaml up -d`: the local test deployment with live credentials (see `docs/deployment.md`). |
 | `make e2e` | Only the in-process end-to-end tests (`test/e2e`), uncached. |
 | `make e2e-pebble` | The broker with the real upstream adapter against Pebble and challtestsrv containers (`test/pebble.sh`). |
-| `make compat` | Real certbot / acme.sh against the broker. Placeholder until wave 4. |
+| `make compat` | Real certbot (current, Ubuntu 20.04, 0.31) and acme.sh against the broker image backed by Pebble (`test/compat/run.sh`). |
 | `make clean` | Removes `bin/` and `.cache/`. |
 
 `scripts/dev <cmd...>` runs any command in the container, for example:
@@ -135,9 +135,8 @@ usually listens there); only Pebble's defaults are published on 127.0.0.1:
 14000 (ACME), 15000 (management) and 8055 (challtestsrv management). If one of
 them is taken the target prints `SKIPPED` and succeeds. It writes Pebble's API
 TLS root and the root of the certificates it issues to `.claude/tmp/e2e/`;
-`test/pebble.sh stop` removes everything. `make e2e-pebble` holds
-`flock .claude/tmp/pebble.lock` while it uses the containers, so runs that
-share them do not stop each other's.
+`test/pebble.sh stop` removes everything. `make e2e-pebble` and `make compat`
+share the containers and serialize on `flock .claude/tmp/pebble.lock`.
 
 `test/e2e/pebble_test.go` (build tag `pebble`) boots the broker with
 `Providers` unset, so `internal/upstream` talks to Pebble (`UpstreamRootCAs`
@@ -162,6 +161,35 @@ test/pebble.sh stop
 
 The same containers serve the upstream adapter's own Pebble test
 (`docs/providers.md`).
+
+### Client compatibility (`make compat`)
+
+`test/compat/run.sh` checks real ACME clients against the shipped image.
+It starts Pebble (`test/pebble.sh`), builds the image as
+`tls-broker:compat` (never `:local`, which a running test deployment
+may use) and runs, on the host network, containers named
+`tlsbroker-e2e-compat-*`:
+
+| Service | Address | Role |
+|---|---|---|
+| broker | 127.0.0.1:18480 | the image, data in `.claude/tmp/compat-data`, one zone `compat.test`, provider `pebble` (configured with `tls-broker config apply`) |
+| r53mock | 127.0.0.1:18454 | `test/compat/r53mock`: the Route53 REST API over `dns01.FakeRoute53` (the broker reaches it through `AWS_ENDPOINT_URL_ROUTE_53`), TXT mirrored to challtestsrv, DoH for TXT |
+| mockdoh | 127.0.0.1:18453 | the gate's public DNS (`TLS_BROKER_DOH_ENDPOINTS`): test names → 127.0.0.1, CAA closing wildcards, the rest forwarded to r53mock |
+| caddy | 127.0.0.1:18443 | `caddy:2-alpine` TLS front (`tls internal`) setting `X-Real-IP` |
+
+Clients: `certbot/certbot:latest`, Ubuntu 20.04's `python3-certbot` (built
+from `test/compat/certbot-focal.Dockerfile`), `certbot/certbot:v0.31.0`
+(Debian 10's version) with `--webroot -w /tmp`, and `neilpang/acme.sh` both
+through the ACME proxy and with the DNS-proxy hook of `docs/dns-proxy.md`
+against Pebble directly. Each issues, the chain is compared with Pebble's
+intermediate and verified against its root, and each renews; the script also
+checks that current certbot fetched `renewalInfo`, that renewals went
+upstream with `replaces`, and that the hook left nothing published. It ends
+with a PASS/FAIL table and exits non-zero on any FAIL; logs stay in
+`.claude/tmp/compat/`. `COMPAT_PLAIN_HTTP=1` points the clients at the broker
+over plain http instead of Caddy. The observed versions and behaviours are
+in `docs/acme-proxy.md`, "Tested clients". A full run takes a few minutes,
+most of it image builds and pulls.
 
 ## Running the broker locally
 
