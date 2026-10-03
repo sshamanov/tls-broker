@@ -151,10 +151,10 @@ func (h *Handler) configTestLDAP(w http.ResponseWriter, r *http.Request, cur *au
 		h.redirect(w, r, back, "error", "LDAP is not configured in the active generation.")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), LDAPCheckTimeout)
 	defer cancel()
 	err := h.LDAP.TestLDAP(ctx, cfg.LDAP)
-	h.recordLDAPTest(err)
+	h.recordLDAPCheck("Test LDAP", err)
 	if err != nil {
 		h.Auditor.Record(r.Context(), core.AuditEvent{
 			Time: h.Clock.Now(), Type: core.AuditError, Mode: core.ModeUI,

@@ -118,10 +118,12 @@ type Handler struct {
 	// keep 405 answers for POST-only paths next to the GET catch-all.
 	patterns []string
 
-	mu       sync.Mutex
-	ldapAt   time.Time // last "Test LDAP" run since start; zero when none
-	ldapErr  string
-	ldapDone bool
+	// The most recent LDAP check since start (see CheckLDAP): a startup or
+	// activation check, a "Test LDAP" run, or a successful LDAP login.
+	mu      sync.Mutex
+	ldapAt  time.Time // zero when there was none
+	ldapVia string    // what produced it, for the warning
+	ldapErr string    // empty when it passed
 }
 
 // New builds the handler.

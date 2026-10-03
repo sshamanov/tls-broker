@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -469,16 +470,17 @@ func TestDashboard(t *testing.T) {
 	lacks(t, r, account, "unprotected", "DNS zones and CAA", "Needs attention", "valid ACME certificates")
 	see(t, r, "letsencrypt", "operational", "www.example.com")
 
-	// LDAP untested -> test -> warning goes away.
-	e.cfg.Activate(bg, []byte(goodYAML+"ldap:\n  url: ldaps://ldap.example.com:636\n  base_dn: dc=example,dc=com\n  user_filter: (uid=%s)\n"))
-	see(t, admin.get("/ui/"), "LDAP has not been tested")
+	// LDAP not checked yet: no warning. A failed "Test LDAP" shows one, a
+	// passing one clears it.
+	e.cfg.Activate(bg, []byte(ldapGoodYAML))
+	lacks(t, admin.get("/ui/"), "LDAP check", "LDAP is not configured")
 	e.ldap.set(errLDAPDown)
 	r = admin.act("/ui/admin/config/test-ldap", nil)
 	see(t, admin.follow(r), "LDAP test failed", "connection refused")
-	see(t, admin.get("/ui/"), "last LDAP test")
+	see(t, admin.get("/ui/"), "The last LDAP check (Test LDAP, 2026-10-02 12:00:00 UTC) failed: dial tcp: connection refused")
 	e.ldap.set(nil)
 	see(t, admin.follow(admin.act("/ui/admin/config/test-ldap", nil)), "LDAP test succeeded")
-	lacks(t, admin.get("/ui/"), "LDAP has not been tested", "last LDAP test")
+	lacks(t, admin.get("/ui/"), "LDAP check")
 	if evs, _ := e.audit.Query(bg, core.AuditQuery{Type: core.AuditError}); len(evs) != 1 {
 		t.Errorf("error events: %d", len(evs))
 	}
@@ -955,4 +957,65 @@ func TestSuggestCAA(t *testing.T) {
 	if got := suggestCAA("example.com", []accountView{{Provider: "le", Err: "down", Honoured: true, Issuers: le.Issuers}}); got != nil {
 		t.Fatalf("%q", got)
 	}
+}
+
+const ldapGoodYAML = goodYAML + "ldap:\n  url: ldaps://ldap.example.com:636\n  base_dn: dc=example,dc=com\n  user_filter: (uid=%s)\n"
+
+// The broker checks LDAP itself (CheckLDAP, run by the app at startup and
+// on activation): the status page warns only after a failed check, with
+// when and what triggered it, and a later passing check or a successful
+// LDAP login clears it. The break-glass login is no evidence.
+func TestLDAPCheck(t *testing.T) {
+	e := newEnv(t)
+	admin := e.login("alice")
+
+	// Not configured: CheckLDAP does nothing; the existing warning stays.
+	e.h.CheckLDAP(bg, "startup")
+	if e.ldap.count() != 0 {
+		t.Fatalf("tested without LDAP settings: %d", e.ldap.count())
+	}
+	see(t, admin.get("/ui/"), "LDAP is not configured")
+
+	if _, chk, err := e.cfg.Activate(bg, []byte(ldapGoodYAML)); err != nil || !chk.OK() {
+		t.Fatalf("activate: %v %+v", err, chk)
+	}
+	calls := e.ldap.count()
+
+	// Success: no warning.
+	e.h.CheckLDAP(bg, "startup")
+	lacks(t, admin.get("/ui/"), "LDAP check", "LDAP is not configured", "has not been tested")
+
+	// Failure: one warning with trigger, time and error.
+	e.ldap.set(errLDAPDown)
+	e.clock.Advance(time.Minute)
+	e.h.CheckLDAP(bg, "generation 3")
+	if e.ldap.count() != calls+2 {
+		t.Fatalf("calls %d, want %d", e.ldap.count(), calls+2)
+	}
+	warn := "The last LDAP check (generation 3, 2026-10-02 12:01:00 UTC) failed: dial tcp: connection refused"
+	see(t, admin.get("/ui/"), warn)
+
+	// The break-glass admin logging in proves nothing about LDAP.
+	e.login("root")
+	see(t, admin.get("/ui/"), warn)
+	// An LDAP user logging in does: the warning is gone, without a test.
+	e.login("bob")
+	lacks(t, admin.get("/ui/"), "LDAP check")
+	if e.ldap.count() != calls+2 {
+		t.Fatalf("login ran a test: %d", e.ldap.count())
+	}
+
+	// Failure again, then a passing check clears it.
+	e.h.CheckLDAP(bg, "startup")
+	see(t, admin.get("/ui/"), "The last LDAP check (startup")
+	e.ldap.set(nil)
+	e.h.CheckLDAP(bg, "startup")
+	lacks(t, admin.get("/ui/"), "LDAP check")
+
+	// A check cut short by shutdown records nothing.
+	e.ldap.set(errLDAPDown)
+	ctx, cancel := context.WithCancel(bg)
+	cancel()
+	e.h.CheckLDAP(ctx, "startup")
+	lacks(t, admin.get("/ui/"), "LDAP check")
 }

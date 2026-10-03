@@ -76,6 +76,17 @@ filter for a probe name. Finding nobody is fine; an unreachable server, a
 rejected service bind, a missing secret, a bad base DN or an invalid filter
 fail the validation and the generation is not activated.
 
+**Health check.** The broker also runs that same test by itself, in the
+background: once at startup and once whenever an activated generation (or a
+rollback) changes the LDAP settings. A successful LDAP user login counts as a
+passing check too; the break-glass login does not. There is no periodic
+re-check, so LDAP sees one extra service bind per start or change. The status
+page shows "The last LDAP check (startup, <time>) failed: <error>" under
+*Needs attention* only while the most recent check failed; the next passing
+check, *Test LDAP* or LDAP login clears it. The error text names the step
+(connect, service bind, search) and never contains the password. A check cut
+short by shutdown, or for settings replaced while it ran, is discarded.
+
 ## Roles and blocked
 
 Roles (`admin` > `wildcard_allowed` > `normal`) and the `blocked` switch are

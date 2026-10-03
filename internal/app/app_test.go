@@ -464,3 +464,61 @@ func TestCLIHelpers(t *testing.T) {
 		t.Fatalf("user_change events: %d %v", len(evs), err)
 	}
 }
+
+// countingTester counts LDAP tests.
+type countingTester struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (c *countingTester) TestLDAP(context.Context, core.LDAPConfig) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.n++
+	return nil
+}
+
+func (c *countingTester) calls() int { c.mu.Lock(); defer c.mu.Unlock(); return c.n }
+
+// The broker checks LDAP by itself once at startup and once per generation
+// that changes the LDAP settings, never for other changes and never when
+// LDAP is not configured.
+func TestLDAPCheckedAtStartupAndOnChange(t *testing.T) {
+	f := newFixture(t)
+	opts := f.options(t)
+	tester := &countingTester{}
+	opts.LDAPTester = tester
+	wait := func(want int) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for tester.calls() < want && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
+		time.Sleep(50 * time.Millisecond) // and no more than that
+		if got := tester.calls(); got != want {
+			t.Fatalf("LDAP tests: %d, want %d", got, want)
+		}
+	}
+	r := start(t, f.env, opts)
+	wait(0) // no LDAP configured
+	ldap := testYAML + "ldap:\n  url: ldaps://ldap.example.com:636\n  base_dn: dc=example,dc=com\n  user_filter: (uid=%s)\n"
+	activate := func(yaml string) {
+		t.Helper()
+		if _, chk, err := r.app.Config().Activate(context.Background(), []byte(yaml)); err != nil || !chk.OK() {
+			t.Fatalf("activate: %v %+v", err, chk)
+		}
+	}
+	activate(ldap)
+	wait(2) // the activation's own test, then the background check
+	activate(strings.Replace(ldap, "trusted_proxies: [127.0.0.1]", "trusted_proxies: [127.0.0.1, 10.0.0.1]", 1))
+	wait(2)
+	activate(strings.Replace(ldap, "(uid=%s)", "(cn=%s)", 1))
+	wait(4)
+	r.stop()
+
+	opts = f.options(t)
+	opts.LDAPTester = tester
+	r = start(t, f.env, opts)
+	defer r.stop()
+	wait(5) // startup
+}

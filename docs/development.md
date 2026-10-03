@@ -258,7 +258,7 @@ zero value is production:
 | `Route53` | `dns01.NewFakeRoute53(clock)` with `AddZone(id, name)` | replaces the AWS client |
 | `Resolver` | `fakeR53.Resolver(coretest.NewFakeResolver())` | public view: the fake resolver plus Route53's published TXT records |
 | `Directory` | `coretest.NewFakeDirectory()` | LDAP logins |
-| `LDAPTester` | any `core.LDAPTester` | config activation and the UI's *Test LDAP* |
+| `LDAPTester` | any `core.LDAPTester` | config activation, the background LDAP check and the UI's *Test LDAP* |
 | `Listener` | `net.Listen("tcp", "127.0.0.1:0")` | `App.Addr()` reports it |
 | `NewDirectKey` | a pre-generated RSA key | RSA generation is slow under `-race` |
 | `HousekeepingInterval` | negative to disable | `App.Housekeep(ctx)` runs one round on demand |

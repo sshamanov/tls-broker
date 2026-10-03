@@ -486,18 +486,14 @@ func (h *Handler) warnings(ctx context.Context, d *dashboardData) []string {
 	if len(cfg.EnabledProviders()) == 0 {
 		w = append(w, "No enabled providers: nothing can be issued.")
 	}
-	switch {
-	case cfg.LDAP.URL == "":
+	if cfg.LDAP.URL == "" {
 		w = append(w, "LDAP is not configured: only the local administrator can log in.")
-	default:
+	} else {
 		h.mu.Lock()
-		done, at, errText := h.ldapDone, h.ldapAt, h.ldapErr
+		at, via, errText := h.ldapAt, h.ldapVia, h.ldapErr
 		h.mu.Unlock()
-		switch {
-		case !done:
-			w = append(w, "LDAP has not been tested since the broker started (Admin, Config, Test LDAP).")
-		case errText != "":
-			w = append(w, "The last LDAP test ("+fmtTime(at)+") failed: "+errText)
+		if errText != "" {
+			w = append(w, "The last LDAP check ("+via+", "+fmtTime(at)+") failed: "+errText)
 		}
 	}
 	for _, z := range d.Zones {
@@ -530,12 +526,40 @@ func (h *Handler) warnings(ctx context.Context, d *dashboardData) []string {
 	return w
 }
 
-// recordLDAPTest remembers the outcome of the last LDAP test for the dashboard.
-func (h *Handler) recordLDAPTest(err error) {
+// LDAPCheckTimeout bounds one background or manual LDAP check.
+const LDAPCheckTimeout = 60 * time.Second
+
+// CheckLDAP runs the LDAP test (connect, service bind, user filter search)
+// against the active configuration and records the outcome for the
+// dashboard; via says what triggered it ("startup", "activation"). Nothing
+// happens when LDAP is not configured. An outcome for settings that were
+// replaced while the test ran, or cut short by ctx ending, is dropped; the
+// check's own timeout counts as a failure. The app calls it in the
+// background at startup and when a generation changes the LDAP settings.
+func (h *Handler) CheckLDAP(ctx context.Context, via string) {
+	cfg := h.Config.Current().LDAP
+	if cfg.URL == "" {
+		return
+	}
+	tctx, cancel := context.WithTimeout(ctx, LDAPCheckTimeout)
+	defer cancel()
+	err := h.LDAP.TestLDAP(tctx, cfg)
+	if ctx.Err() != nil || h.Config.Current().LDAP != cfg {
+		return // shutting down, or the settings changed meanwhile
+	}
+	if err != nil {
+		h.Logger.Warn("ui: LDAP check failed", "via", via, "err", err)
+	} else {
+		h.Logger.Info("ui: LDAP check passed", "via", via)
+	}
+	h.recordLDAPCheck(via, err)
+}
+
+// recordLDAPCheck remembers the outcome of the most recent LDAP check.
+func (h *Handler) recordLDAPCheck(via string, err error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.ldapDone, h.ldapAt = true, h.Clock.Now()
-	h.ldapErr = ""
+	h.ldapAt, h.ldapVia, h.ldapErr = h.Clock.Now(), via, ""
 	if err != nil {
 		h.ldapErr = err.Error()
 	}

@@ -89,8 +89,10 @@ top of every page, the login page included, to every user.
 
 Admins additionally see:
 - Needs attention: problems and warnings of the active configuration, no
-  zones or providers, LDAP not configured, LDAP not tested since start or last
-  test failed, zones without a hosted zone (no `hosted_zone_id` and discovery
+  zones or providers, LDAP not configured, the most recent LDAP check failed
+  (the broker checks at startup and on LDAP setting changes, and counts a
+  successful LDAP login or *Test LDAP* as a check; see
+  `docs/authentication.md`), zones without a hosted zone (no `hosted_zone_id` and discovery
   by name failed), zones whose CAA does not protect wildcards, zones whose CAA
   does not authorize a configured provider, providers whose account URL cannot
   be read, open provider circuits.
@@ -162,8 +164,9 @@ editor (open an older one with "View"). *Validate* shows problems with their
 field paths (`zones[0].hosted_zone_id: ...`), warnings, and the LDAP test when
 LDAP settings changed. *Activate* validates again and stores a new generation;
 on failure nothing is stored and the same problems are shown (HTTP 422).
-*Test LDAP* tests the active generation's LDAP (connect, service bind, filter);
-the result feeds the status page warning. The generation list offers *Roll back*,
+*Test LDAP* tests the active generation's LDAP (connect, service bind, filter)
+on demand; like the broker's own checks, its result feeds the status page
+warning. The generation list offers *Roll back*,
 which makes an old generation's content current again (as a new generation).
 All changes are audited as `config_change`.
 
@@ -242,6 +245,7 @@ and every state also has a word: green *ok*, brass *caution* or *due*, seal red
    `issuewild` records of their own. Reload the status page until each zone
    reads "wildcard protected" and no provider is missing.
 6. **LDAP**: add the `ldap:` section (bind password as a secret). *Validate*
-   tests it; *Activate*; then *Test LDAP* clears the status page warning.
+   tests it; *Activate*. The broker then checks LDAP once in the background;
+   a failure appears under *Needs attention*.
 7. Log in as an LDAP user once, then promote LDAP admins under Users and roles (or
    list them in `TLS_BROKER_ADMINS`). Keep the local admin for emergencies.

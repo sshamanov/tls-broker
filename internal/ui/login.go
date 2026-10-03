@@ -68,6 +68,10 @@ func (h *Handler) loginSubmit(w http.ResponseWriter, r *http.Request, _ *auth.Cu
 			h.Logger.Warn("ui: dropping previous session at login", "err", err)
 		}
 	}
+	if !login.User.Local {
+		// An LDAP user just bound successfully: the directory works.
+		h.recordLDAPCheck("LDAP login", nil)
+	}
 	h.Auth.SetCookie(w, login.Token, login.Session.ExpiresAt, httpsRequest(r))
 	if login.User.Blocked {
 		h.setFlash(w, "warn", "Your account is blocked. You can view your grants and the activity log only.")

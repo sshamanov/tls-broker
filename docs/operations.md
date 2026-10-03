@@ -160,13 +160,15 @@ working), but ACME proxy and direct-API wildcard orders fail at the CA.
 ### LDAP down
 
 Symptoms: LDAP users get 503 "The LDAP directory is unavailable" at login;
-*Test LDAP* fails; existing sessions keep working (sessions do not touch
-LDAP).
+*Test LDAP* fails; the status page says "The last LDAP check (...) failed"
+when the startup or activation check failed; existing sessions keep working
+(sessions do not touch LDAP).
 
 1. Log in as the local break-glass admin (`TLS_BROKER_LOCAL_ADMIN_USER`);
    it never needs LDAP.
 2. Check the LDAP server and the bind password secret; fix the configuration
-   or the secret in the UI and run *Test LDAP*.
+   or the secret in the UI and run *Test LDAP* (or let an LDAP user log in);
+   a passing check clears the status page warning.
 3. Without UI access at all, manage users from the command line:
    `tls-broker user set-role <name> admin`, `tls-broker user block <name>`,
    `tls-broker user unblock <name>` (`--local` for the break-glass record).

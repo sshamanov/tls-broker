@@ -53,6 +53,8 @@ func (l *ldapStub) TestLDAP(context.Context, core.LDAPConfig) error {
 
 func (l *ldapStub) set(err error) { l.mu.Lock(); l.err = err; l.mu.Unlock() }
 
+func (l *ldapStub) count() int { l.mu.Lock(); defer l.mu.Unlock(); return l.calls }
+
 type caaStub struct {
 	mu sync.Mutex
 	m  map[string]core.CAAStatus

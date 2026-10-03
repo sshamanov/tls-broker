@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"slices"
 	"time"
@@ -63,6 +64,18 @@ func (a *App) apply(ctx context.Context, cfg *core.Config) {
 	}
 	h := a.chain(cfg)
 	a.handler.Store(&h)
+
+	if cfg.LDAP.URL != "" && (prev == nil || prev.LDAP != cfg.LDAP) {
+		// One background LDAP check at startup and per change of the LDAP
+		// settings, so the status page reports a broken directory without
+		// waiting for someone to press "Test LDAP". No periodic re-check:
+		// every LDAP login also counts as one.
+		via := "startup"
+		if prev != nil {
+			via = fmt.Sprintf("generation %d", cfg.Generation)
+		}
+		a.goBG(func(ctx context.Context) { a.ui.CheckLDAP(ctx, via) })
+	}
 
 	if prev == nil {
 		return
