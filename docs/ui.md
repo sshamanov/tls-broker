@@ -174,7 +174,8 @@ by themselves.
 
 ## Presentation
 
-The look is an engraved certificate: ink on paper, hairline and double rules,
+The look is an engraved certificate: ink on paper, hairline rules (a double
+frame only around the sign-in panel),
 one intaglio blue for links and the current page. Colour marks state only,
 and every state also has a word: green *ok*, brass *caution* or *due*, seal red
 *failed*, *exhausted* or *expired*.

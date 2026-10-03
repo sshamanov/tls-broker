@@ -106,9 +106,7 @@ time{white-space:nowrap}
 .side-foot .btn{width:100%}
 
 .content{min-width:0;padding:1.75rem 2.25rem 3rem;max-width:84rem;width:100%}
-.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:1rem 2rem;flex-wrap:wrap;padding-bottom:1.1rem;margin-bottom:1.5rem;border-bottom:1px solid var(--rule);
-  /* a double rule, like the border of an engraved certificate */
-  box-shadow:0 3px 0 -2px var(--rule)}
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:1rem 2rem;flex-wrap:wrap;padding-bottom:1.1rem;margin-bottom:1.5rem;border-bottom:1px solid var(--rule)}
 .page-head .lede{margin:.35rem 0 0;color:var(--ink-2);max-width:46rem}
 .page-actions{display:flex;gap:.5rem;flex-wrap:wrap}
 
