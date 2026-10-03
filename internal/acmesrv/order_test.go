@@ -155,6 +155,14 @@ func TestOrderAccessControl(t *testing.T) {
 	if chain, err := coretest.ParseChain(r.body); err != nil || len(chain) != 2 {
 		t.Fatalf("chain %v", err)
 	}
+	// Certbot 0.31 sends the certificate POST-as-GET with Content-Type
+	// application/pem-certificate-chain (seen in make compat). That is
+	// accepted for the certificate resource only.
+	r = a.send(fin.Certificate, signJWS(a.key, a.header(fin.Certificate), encodePayload(nil)), "application/pem-certificate-chain")
+	if r.StatusCode != http.StatusOK || r.Header.Get("Content-Type") != "application/pem-certificate-chain" {
+		t.Fatalf("cert with certbot 0.31 content type: %d %s", r.StatusCode, r.body)
+	}
+	expectProblem(t, a.send(loc, signJWS(a.key, a.header(loc), encodePayload(nil)), "application/pem-certificate-chain"), 415, core.ProblemMalformed)
 	// Unknown resources.
 	expectProblem(t, a.post(e.url(pathOrder+"nope"), nil), 404, core.ProblemMalformed)
 	expectProblem(t, a.post(e.url(pathAuthz+fin.Finalize[len(e.url(pathOrder)):len(e.url(pathOrder))+22]+"/5"), nil), 404, core.ProblemMalformed)

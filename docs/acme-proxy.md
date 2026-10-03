@@ -193,7 +193,11 @@ Encrypt (Boulder) does, so a client that works there works here.
 - **`badNonce` detail** uses Boulder's wording ("JWS has an invalid
   anti-replay nonce"), which acme.sh matches to retry.
 - **`Content-Type`** must be `application/jose+json`; parameters such as
-  `charset` are tolerated. Anything else gets `415`.
+  `charset` are tolerated. Anything else gets `415`, with one exception:
+  the POST-as-GET of a certificate URL may carry
+  `application/pem-certificate-chain`, because Certbot 0.31 (Debian 10's
+  package) sends its `Accept` type there and otherwise fails right after
+  issuance (observed in `make compat`).
 - **Flattened JWS only**, one signature, no unprotected header; exactly one of
   `jwk` (newAccount, inner keyChange) and `kid` (everything else).
 - **POST-as-GET** is an empty payload (`""`). For the account URL `{}` is also
