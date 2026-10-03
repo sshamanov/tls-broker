@@ -15,3 +15,7 @@ deploy/data/
 *.db
 *.db-wal
 *.db-shm
+
+# Local deployment compose files with inline credentials (never commit)
+deploy/compose.test.yaml
+deploy/compose.prod.yaml
