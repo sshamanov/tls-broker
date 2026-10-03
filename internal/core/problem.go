@@ -150,7 +150,9 @@ func AsProblem(err error) *Problem {
 //	                                     present, else serverInternal 500
 //	names.ErrInvalid                  -> rejectedIdentifier
 //	ErrOutsideManagedZones            -> rejectedIdentifier
-//	ErrCSRMismatch                    -> orderNotReady
+//	ErrCSRMismatch                    -> badCSR (a terminal error for the
+//	                                     client: acme.sh retries orderNotReady
+//	                                     ten times, which can never succeed)
 //	ErrExpired, ErrNotFound           -> malformed, 404
 //	anything else                     -> serverInternal, 500
 func ProblemFromError(err error) *Problem {
@@ -195,7 +197,7 @@ func ProblemFromError(err error) *Problem {
 	case errors.Is(err, ErrOutsideManagedZones):
 		return NewProblem(ProblemRejectedIdentifier, "identifier is outside the zones managed by this broker")
 	case errors.Is(err, ErrCSRMismatch):
-		return NewProblem(ProblemOrderNotReady, "order was already finalized with a different CSR; create a new order")
+		return NewProblem(ProblemBadCSR, "the order was already finalized with a different CSR; create a new order for a new key")
 	case errors.Is(err, ErrExpired):
 		return NewProblem(ProblemMalformed, "expired").WithStatus(http.StatusNotFound)
 	case errors.Is(err, ErrNotFound):

@@ -291,7 +291,8 @@ counters, fault injection by operation), `FakeDNSEngine`, `FakeDirectory`,
   `Provider.NewOrder`; the URL is committed right after. Recovery follows
   architecture §20 exactly.
 - **Same-CSR retry** returns existing state; a different CSR is rejected with
-  `orderNotReady`/`malformed` and never reaches upstream.
+  `badCSR` and never reaches upstream (`orderNotReady` would make acme.sh
+  retry ten times; `core.ProblemFromError` and `acmesrv` agree on `badCSR`).
 - **`replaces`.** Taken from the downstream order when it matches a certificate
   the broker issued; otherwise the engine infers it from the newest unreplaced
   certificate of the same lineage and provider. ARI-qualified (priority 1,

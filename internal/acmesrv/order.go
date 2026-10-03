@@ -415,9 +415,6 @@ func (s *Server) finalizeAuthed(x *exchange, a *authed, id string) *core.Problem
 	res, err := s.o.Issuer.Finalize(x.ctx, core.FinalizeRequest{OrderID: o.ID, AccountID: a.account.ID, CSRDER: csrDER, SourceIP: src})
 	switch {
 	case err == nil:
-	case errors.Is(err, core.ErrCSRMismatch):
-		return s.finalizeRejected(x, o, core.NewProblem(core.ProblemBadCSR,
-			"the order was already finalized with a different CSR; create a new order for a new key"))
 	case errors.Is(err, core.ErrExpired):
 		return s.finalizeRejected(x, o, core.NewProblem(core.ProblemOrderNotReady,
 			"order expired before it was finalized; create a new order"))

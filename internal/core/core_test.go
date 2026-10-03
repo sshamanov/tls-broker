@@ -277,7 +277,7 @@ func TestProblemFromError(t *testing.T) {
 		{"name", nameErr, ProblemRejectedIdentifier, 400, 0},
 		{"empty set", names.ErrEmptySet, ProblemRejectedIdentifier, 400, 0},
 		{"zone", fmt.Errorf("x: %w", ErrOutsideManagedZones), ProblemRejectedIdentifier, 400, 0},
-		{"csr mismatch", ErrCSRMismatch, ProblemOrderNotReady, 403, 0},
+		{"csr mismatch", ErrCSRMismatch, ProblemBadCSR, 400, 0},
 		{"not found", ErrNotFound, ProblemMalformed, 404, 0},
 		{"expired", ErrExpired, ProblemMalformed, 404, 0},
 		{"other", errors.New("sql: database is locked at /data/state.db"), ProblemServerInternal, 500, 0},

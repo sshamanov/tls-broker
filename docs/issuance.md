@@ -71,7 +71,7 @@ Rules the diagram relies on:
   continues into finalize when it is ready. Exactly one goroutine owns an
   order at any time; the hand-off is an in-memory `job` per order.
 - **Same CSR again** returns the current state; **a different CSR** is
-  `ErrCSRMismatch` (`orderNotReady` downstream) and never reaches upstream.
+  `ErrCSRMismatch` (`badCSR` downstream) and never reaches upstream.
   A CSR that does not match the order's identifiers exactly (SANs plus common
   name, normalized) is `badCSR` and records nothing.
 - **Once the CSR is recorded the issuance detaches from the request.**

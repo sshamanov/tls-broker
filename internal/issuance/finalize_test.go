@@ -39,7 +39,7 @@ func TestFinalizeDifferentCSRRejected(t *testing.T) {
 	other := coretest.MakeCSR(coretest.GenKey(), "www.example.com")
 	_, err := e.finalize(o, other)
 	isErr(t, err, core.ErrCSRMismatch)
-	if p := core.ProblemFromError(err); p.Type != core.ProblemOrderNotReady {
+	if p := core.ProblemFromError(err); p.Type != core.ProblemBadCSR {
 		t.Fatalf("client problem: %+v", p)
 	}
 	if st := e.primary.Stats(); st.Finalizations != 1 || st.Calls[coretest.OpFinalize] != 1 {
