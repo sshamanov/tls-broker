@@ -53,10 +53,11 @@ e2e-pebble:
 			go test -race -tags pebble -count=1 -run TestPebble -v ./test/e2e/; rc=$$?; \
 		test/pebble.sh stop; exit $$rc'
 
-# PLACEHOLDER: real certbot / acme.sh containers against a Pebble-backed
-# broker. Not implemented until wave 4; prints a notice and exits 0.
+# Real certbot (current and old) and acme.sh containers against the broker
+# image backed by Pebble (test/compat/run.sh).
 compat:
-	@echo "compat: not implemented until wave 4"
+	@mkdir -p .claude/tmp
+	@flock $(PEBBLE_LOCK) test/compat/run.sh
 
 clean:
 	rm -rf bin .cache

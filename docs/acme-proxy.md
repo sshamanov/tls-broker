@@ -20,8 +20,11 @@ https://broker.example.com/acme/directory
 The base is `server.external_url` from the configuration plus `/acme`. Every
 URL the broker returns is absolute and built from that setting, read on every
 request, so it must be the URL clients actually use (the nginx front end's
-name and scheme). The broker must be reached over https: ACME clients refuse
-plain http.
+name and scheme). Serve it over https through the front end: Certbot (0.31,
+0.40, 5.8) and acme.sh (3.1.6) also accept a plain-http directory (checked
+with `COMPAT_PLAIN_HTTP=1 make compat`), but clients built on lego refuse
+it, and responses such as the certificate and `Retry-After` are not
+protected by the JWS signatures.
 
 ## Pointing clients at the broker
 
@@ -57,11 +60,11 @@ certbot certonly --server https://broker.example.com/acme/directory \
 - `--preferred-profile` is accepted and ignored (see "Profiles"); do not use
   `--required-profile`, which fails because the directory advertises no
   profiles.
-- Certbot versions: any ACMEv2 Certbot that still works against Let's
-  Encrypt today (POST-as-GET, `application/jose+json`) is in scope — the
-  0.31 / 1.x packages of older Debian and Ubuntu releases as well as current
-  2.x/3.x/4.x. Versions that only fetch resources with plain GET do not work
-  (they also no longer work with Let's Encrypt).
+- Certbot versions: any ACMEv2 Certbot with POST-as-GET is in scope — the
+  0.31 / 0.40 / 1.x packages of older Debian and Ubuntu releases as well as
+  current releases. Versions that only fetch resources with plain GET
+  (before 0.31) do not work (they also no longer work with Let's Encrypt).
+  See "Tested clients" for what `make compat` verifies.
 
 ### acme.sh
 
@@ -226,10 +229,27 @@ Encrypt (Boulder) does, so a client that works there works here.
 - The inner keyChange JWS should omit `nonce`; one that carries it is accepted
   and the value ignored.
 
-The client invocations above follow from how Certbot and acme.sh treat
-already-valid authorizations; the real-client runs in `test/compat`
-(`make compat`: old and current Certbot, current acme.sh, against a
-Pebble-backed broker) are what confirm them for each client version.
+## Tested clients
+
+`make compat` (`test/compat/run.sh`) runs real clients against the broker
+image backed by Pebble, behind a Caddy TLS front. Each client obtains a
+certificate with the invocation shown above (`--webroot -w /tmp` for
+Certbot, `-w /tmp` for acme.sh), the chain is checked against Pebble's
+intermediate and root, and the certificate is renewed. Results of the run on
+2026-10-03:
+
+| Client | Version | Issue | Renew | Notes |
+|---|---|---|---|---|
+| Certbot, `certbot/certbot:latest` | 5.8.0 | pass | pass (`renew --force-renewal`) | `certbot renew` fetches `renewalInfo` (RFC 9773) before deciding; does not send `replaces` with `--force-renewal` |
+| Certbot, Ubuntu 20.04 `python3-certbot` | 0.40.0 | pass | pass | no ARI, no `replaces` |
+| Certbot, `certbot/certbot:v0.31.0` (as Debian 10) | 0.31.0 | pass | pass | needs the `application/pkix-cert` exception above; no ARI, no `replaces` |
+| acme.sh, `neilpang/acme.sh` | 3.1.6 | pass | pass (`--renew --force`) | fetches `renewalInfo` and sends `replaces` on renewal; logs "already verified, skipping" for the valid authorizations |
+| acme.sh DNS-proxy hook (`docs/dns-proxy.md`, verbatim) against Pebble | 3.1.6 | pass | pass | the hook cleans up every value it presented |
+
+For every renewal the broker sent `replaces` upstream, inferred from the
+lineage where the client sent none. `certbot renew` without a terminal sleeps
+a random delay of up to 8 minutes before renewing (all versions); the suite
+runs it with a TTY.
 
 ## Deliberately unsupported
 
