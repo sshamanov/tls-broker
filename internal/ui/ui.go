@@ -457,16 +457,18 @@ func isNotFound(err error) bool { return errors.Is(err, core.ErrNotFound) }
 
 func (h *Handler) loadTemplates() error {
 	funcs := template.FuncMap{
-		"ts":      tsHTML,
-		"rel":     func(t time.Time) string { return relTime(h.Clock.Now(), t) },
-		"dur":     fmtDur,
-		"join":    strings.Join,
-		"role":    func(r core.Role) string { return strings.ReplaceAll(string(r), "_", " ") },
-		"pct":     pct,
-		"inc":     func(i int) int { return i + 1 },
-		"isZero":  func(t time.Time) bool { return t.IsZero() },
-		"lower":   strings.ToLower,
-		"roleStr": func(r core.Role) string { return string(r) },
+		"ts":        tsHTML,
+		"rel":       func(t time.Time) string { return relTime(h.Clock.Now(), t) },
+		"dur":       fmtDur,
+		"join":      strings.Join,
+		"role":      func(r core.Role) string { return strings.ReplaceAll(string(r), "_", " ") },
+		"pct":       pct,
+		"pctOf":     func(n, p int) int { return n * p / 100 },
+		"exhausted": budgetExhausted,
+		"inc":       func(i int) int { return i + 1 },
+		"isZero":    func(t time.Time) bool { return t.IsZero() },
+		"lower":     strings.ToLower,
+		"roleStr":   func(r core.Role) string { return string(r) },
 	}
 	entries, err := fs.Glob(templateFS, "templates/*.html")
 	if err != nil {
@@ -534,6 +536,9 @@ func fmtDur(d time.Duration) string {
 		return fmt.Sprintf("%dd", int(d.Hours()/24))
 	}
 }
+
+// budgetExhausted reports a budget with nothing left in its window.
+func budgetExhausted(b core.BudgetUsage) bool { return b.Limit > 0 && b.Used >= b.Limit }
 
 func pct(used, limit int) int {
 	if limit <= 0 {

@@ -611,12 +611,24 @@ func TestSecrets(t *testing.T) {
 func TestProvidersPage(t *testing.T) {
 	e := newEnv(t)
 	e.sched.SetSnapshot(core.SchedulerSnapshot{Providers: []core.ProviderSnapshot{{Name: "letsencrypt", Open: false, SlotsTotal: 4, SlotsInUse: 1,
-		State:   core.ProviderState{Name: "letsencrypt", Health: core.ProviderUnavailable, RetryAfter: e.clock.Now().Add(10 * time.Minute), Failures: 3, LastError: "503 upstream"},
-		Budgets: []core.BudgetUsage{{Kind: core.BudgetNewOrder, Used: 150, Limit: 200, Window: 3 * time.Hour}}}}})
-	r := e.login("alice").get("/ui/admin/providers")
+		State: core.ProviderState{Name: "letsencrypt", Health: core.ProviderUnavailable, RetryAfter: e.clock.Now().Add(10 * time.Minute), Failures: 3, LastError: "503 upstream"},
+		Budgets: []core.BudgetUsage{{Kind: core.BudgetNewOrder, Used: 150, Limit: 200, Window: 3 * time.Hour},
+			{Kind: core.BudgetCertSet, Key: "www.example.com", Used: 4, Limit: 4, RenewalOnly: 1, Window: 7 * 24 * time.Hour}}}}})
+	admin := e.login("alice")
+	r := admin.get("/ui/admin/providers")
 	account, _ := e.ca.AccountURL(bg)
-	see(t, r, "letsencrypt", "503 upstream", "150 / 200", "10m", account, "https://acme.example/dir", "circuit open")
+	see(t, r, "letsencrypt", "503 upstream", "150 / 200", "10m", account, "https://acme.example/dir", "circuit open", "<h3>Budgets</h3>")
 	lacks(t, r, "Reset")
+
+	// A used-up budget is marked, and the meter's bands turn it red; a
+	// budget with room is not marked (the meter bands are 50 % and 80 %).
+	exhausted := `4 / 4 <span class="badge bad">exhausted</span> (1 renewals only)`
+	see(t, r, exhausted, `max="4" low="2" high="3" optimum="0" value="4"`, `max="200" low="100" high="160" optimum="0" value="150"`, "150 / 200</td>")
+	if strings.Count(r.body, "exhausted</span>") != 1 {
+		t.Errorf("exhausted badges: %d", strings.Count(r.body, "exhausted</span>"))
+	}
+	// The dashboard shows the same budget table.
+	see(t, admin.get("/ui/"), exhausted)
 }
 
 func TestBanners(t *testing.T) {

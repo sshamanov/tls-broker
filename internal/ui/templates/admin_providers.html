@@ -13,11 +13,12 @@
 <tr><th>Account URL</th><td>{{if $acc.URL}}<code class="wrap">{{$acc.URL}}</code>{{else if $acc.Err}}<span class="bad">{{$acc.Err}}</span>{{else}}-{{end}}</td></tr>
 <tr><th>Capabilities</th><td>ARI {{if $cfg.ARI}}yes{{else}}no{{end}}; accounturi honoured {{if $cfg.AccountURIHonoured}}yes{{else}}no{{end}}; CAA issuers {{join $cfg.CAAIssuers ", "}}</td></tr>
 </table>
+<h3>Budgets</h3>
 {{if .Budgets}}
 <table>
 <tr><th>Budget</th><th>Key</th><th>Used</th><th>Window</th></tr>
 {{range .Budgets}}<tr><td>{{.Kind}}</td><td>{{if .Key}}{{.Key}}{{else}}-{{end}}</td>
-<td><meter min="0" max="{{.Limit}}" value="{{.Used}}"></meter> {{.Used}} / {{.Limit}}{{if .RenewalOnly}} ({{.RenewalOnly}} renewals only){{end}}</td><td>{{dur .Window}}</td></tr>{{end}}
+<td><meter min="0" max="{{.Limit}}" low="{{pctOf .Limit 50}}" high="{{pctOf .Limit 80}}" optimum="0" value="{{.Used}}">{{pct .Used .Limit}}%</meter> {{.Used}} / {{.Limit}}{{if exhausted .}} <span class="badge bad">exhausted</span>{{end}}{{if .RenewalOnly}} ({{.RenewalOnly}} renewals only){{end}}</td><td>{{dur .Window}}</td></tr>{{end}}
 </table>
 {{else}}<p class="muted">No budget usage in the current windows.</p>{{end}}
 </section>

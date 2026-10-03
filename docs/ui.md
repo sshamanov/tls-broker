@@ -70,7 +70,9 @@ top of every page, the login page included, to every user.
   be read, open provider circuits.
 - Counts: valid ACME certificates, orders in flight, direct entries.
 - Providers: health, circuit state, retry-after, slots, last error; budget
-  usage per bucket (`Scheduler.Snapshot()`).
+  usage per bucket (`Scheduler.Snapshot()`). A budget's meter turns yellow at
+  50 % and red at 80 %; a bucket with `Used >= Limit` carries an "exhausted"
+  badge.
 - Admin: the broker's account URL at each enabled provider (copy it into the
   CAA `accounturi` parameter), and per managed zone the hosted zone in effect
   (the configured ID, or the one the DNS-01 engine discovered by name, or why
@@ -130,8 +132,9 @@ Names the broker writes itself (`provider-account-key.*`,
 
 **Admin, Providers** (`/ui/admin/providers`). Per provider: health, retry-after,
 consecutive failures, last error, slots, reservations, directory URL, account
-URL, capabilities and budget usage. There is no circuit reset: `core` exposes
-none, and circuits close by themselves.
+URL, capabilities and budget usage (same meters and "exhausted" marker as the
+dashboard). There is no circuit reset: `core` exposes none, and circuits close
+by themselves.
 
 ## Presentation
 
