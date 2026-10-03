@@ -46,6 +46,10 @@ const (
 	staticPath = "/ui/static/"
 )
 
+// maxForm bounds the body of an ordinary form post (a few short fields). The
+// YAML editor and the secret form set their own, larger limits.
+const maxForm = 64 << 10
+
 // KeyRotator is the hook for direct-mode key rotation. internal/direct is
 // expected to provide it in a later wave; while Deps.Rotator is nil the
 // certificates page shows no rotate button and the route answers 404.
@@ -454,6 +458,25 @@ func formInt(r *http.Request, name string) (int64, bool) {
 }
 
 func isNotFound(err error) bool { return errors.Is(err, core.ErrNotFound) }
+
+// limitForm bounds the request body to limit bytes and parses the form. It
+// answers 413 (body too large) or 400 (malformed form) itself and returns
+// false; the caller then returns. auth.CSRF has usually parsed the form
+// already under its own 1 MiB cap; when the token came in the X-CSRF-Token
+// header the body is still unread and this is the only limit.
+func limitForm(w http.ResponseWriter, r *http.Request, limit int64) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	if err := r.ParseForm(); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+		} else {
+			http.Error(w, "bad form", http.StatusBadRequest)
+		}
+		return false
+	}
+	return true
+}
 
 func (h *Handler) loadTemplates() error {
 	funcs := template.FuncMap{

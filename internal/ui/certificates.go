@@ -127,6 +127,9 @@ func (h *Handler) rotateKey(w http.ResponseWriter, r *http.Request, cur *auth.Cu
 		h.notFound(w, r, cur)
 		return
 	}
+	if !limitForm(w, r, maxForm) {
+		return
+	}
 	id := strings.TrimSpace(r.PostFormValue("identifier"))
 	if _, err := h.Direct.Get(r.Context(), id); err != nil {
 		if isNotFound(err) {

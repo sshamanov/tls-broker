@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"tls-broker/internal/auth"
 	"tls-broker/internal/core"
 	"tls-broker/internal/names"
 )
@@ -680,4 +682,35 @@ func TestNotFoundPageAndFavicon(t *testing.T) {
 		t.Errorf("favicon Cache-Control %q", cc)
 	}
 	see(t, r, "<svg")
+}
+
+func TestFormBodyLimits(t *testing.T) {
+	e := newEnv(t)
+	admin := e.login("alice")
+	tok := admin.csrf()
+	big := strings.Repeat("a", 2<<20)
+	// With the token in the header the CSRF middleware never reads the
+	// body, so the handler's own limit is the only one.
+	post := func(path string, form url.Values) resp {
+		req, _ := http.NewRequest("POST", e.srv.URL+path, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set(auth.CSRFHeader, tok)
+		return admin.send(req)
+	}
+	code(t, post("/ui/admin/config/validate", url.Values{"yaml": {big}}), 413)
+	code(t, post("/ui/admin/config/activate", url.Values{"yaml": {big}}), 413)
+	code(t, post("/ui/admin/config/rollback", url.Values{"gen": {big}}), 413)
+	code(t, post("/ui/admin/secrets", url.Values{"name": {"k"}, "value": {big}}), 413)
+	code(t, post("/ui/admin/secrets/delete", url.Values{"name": {big}}), 413)
+	code(t, post(fmt.Sprintf("/ui/admin/users/%d/role", e.userID("alice")), url.Values{"role": {big}}), 413)
+	// A token in the form field: the middleware's 1 MiB cap refuses it first.
+	code(t, admin.post("/ui/admin/config/validate", url.Values{"yaml": {big}, "csrf_token": {tok}}), 403)
+	// Nothing was stored, and ordinary posts still work.
+	if n, _ := e.secrets.List(bg); len(n) != 0 {
+		t.Errorf("secrets written: %v", n)
+	}
+	if e.cfg.Current().Generation != 2 {
+		t.Errorf("generation %d", e.cfg.Current().Generation)
+	}
+	code(t, post("/ui/admin/config/validate", url.Values{"yaml": {goodYAML}}), 200)
 }

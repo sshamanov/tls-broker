@@ -28,6 +28,10 @@ the route's role check.
   POSTs get 401; a missing role gets a 403 page. Any other `GET` under `/ui/`
   renders the styled 404 page (with the navigation when a session exists; no
   login is required to see it).
+- Form bodies are bounded in the handler, independently of the CSRF
+  middleware's 1 MiB cap (which only applies when the token is in the form
+  field): 64 KiB for ordinary forms, the YAML editor and the secret value
+  allow their own maximum plus 64 KiB. A larger body is answered 413.
 - Flash messages travel in a short-lived `SameSite=Strict` cookie and are
   rendered escaped.
 - Secret values are write-only: no page, flash or audit event ever contains

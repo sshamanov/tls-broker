@@ -57,18 +57,24 @@ func (h *Handler) renderConfig(w http.ResponseWriter, r *http.Request, cur *auth
 	h.render(w, status, "admin_config", h.newPage(w, r, cur, "Configuration", "admin-config", d))
 }
 
-func (h *Handler) formYAML(r *http.Request) (string, bool) {
+// formYAML reads the editor's YAML. It bounds the body itself (the CSRF
+// middleware's cap does not apply when the token travels in a header) and
+// has answered the request when it returns false.
+func (h *Handler) formYAML(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if !limitForm(w, r, maxYAML+maxForm) {
+		return "", false
+	}
 	y := r.PostFormValue("yaml")
 	if len(y) > maxYAML {
+		http.Error(w, "configuration too large", http.StatusRequestEntityTooLarge)
 		return "", false
 	}
 	return strings.ReplaceAll(y, "\r\n", "\n"), true
 }
 
 func (h *Handler) configValidate(w http.ResponseWriter, r *http.Request, cur *auth.Current) {
-	yaml, ok := h.formYAML(r)
+	yaml, ok := h.formYAML(w, r)
 	if !ok {
-		http.Error(w, "configuration too large", http.StatusRequestEntityTooLarge)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
@@ -89,9 +95,8 @@ func selectedGen(r *http.Request, def int) int {
 }
 
 func (h *Handler) configActivate(w http.ResponseWriter, r *http.Request, cur *auth.Current) {
-	yaml, ok := h.formYAML(r)
+	yaml, ok := h.formYAML(w, r)
 	if !ok {
-		http.Error(w, "configuration too large", http.StatusRequestEntityTooLarge)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
@@ -116,6 +121,9 @@ func (h *Handler) configActivate(w http.ResponseWriter, r *http.Request, cur *au
 }
 
 func (h *Handler) configRollback(w http.ResponseWriter, r *http.Request, cur *auth.Current) {
+	if !limitForm(w, r, maxForm) {
+		return
+	}
 	n, err := strconv.Atoi(r.PostFormValue("gen"))
 	if err != nil || n <= 0 {
 		h.redirect(w, r, base+"/admin/config", "error", "Choose a generation to roll back to.")
@@ -220,7 +228,9 @@ func (h *Handler) secretsPage(w http.ResponseWriter, r *http.Request, cur *auth.
 
 func (h *Handler) secretSet(w http.ResponseWriter, r *http.Request, cur *auth.Current) {
 	back := base + "/admin/secrets"
-	r.Body = http.MaxBytesReader(w, r.Body, maxSecret+4096)
+	if !limitForm(w, r, maxSecret+maxForm) {
+		return
+	}
 	name := strings.TrimSpace(r.PostFormValue("name"))
 	value := strings.TrimRight(r.PostFormValue("value"), "\r\n")
 	switch {
@@ -244,6 +254,9 @@ func (h *Handler) secretSet(w http.ResponseWriter, r *http.Request, cur *auth.Cu
 
 func (h *Handler) secretDelete(w http.ResponseWriter, r *http.Request, cur *auth.Current) {
 	back := base + "/admin/secrets"
+	if !limitForm(w, r, maxForm) {
+		return
+	}
 	name := strings.TrimSpace(r.PostFormValue("name"))
 	if !secretNameRe.MatchString(name) || reservedSecret(name) {
 		h.redirect(w, r, back, "error", "That secret cannot be deleted here.")

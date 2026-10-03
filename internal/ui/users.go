@@ -33,6 +33,9 @@ func (h *Handler) userAction(w http.ResponseWriter, r *http.Request, cur *auth.C
 		h.notFound(w, r, cur)
 		return
 	}
+	if !limitForm(w, r, maxForm) {
+		return
+	}
 	u, err := h.Users.Get(r.Context(), id)
 	if err != nil {
 		if isNotFound(err) {
