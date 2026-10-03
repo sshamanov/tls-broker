@@ -22,6 +22,7 @@ func (g *Gate) CheckCAA(ctx context.Context, name string) (core.CAAStatus, error
 // Nothing outlives the call.
 type eval struct {
 	g        *Gate
+	cfg      *core.Config // nil without a config source
 	enabled  []core.Provider
 	rrsets   map[string][]core.CAA
 	accounts map[string]accountResult
@@ -37,7 +38,31 @@ func (g *Gate) newEval() *eval {
 	if g.providers != nil {
 		enabled = g.providers.Enabled()
 	}
-	return &eval{g: g, enabled: enabled, rrsets: map[string][]core.CAA{}, accounts: map[string]accountResult{}}
+	var cfg *core.Config
+	if g.cfg != nil {
+		cfg = g.cfg.Current()
+	}
+	return &eval{g: g, cfg: cfg, enabled: enabled, rrsets: map[string][]core.CAA{}, accounts: map[string]accountResult{}}
+}
+
+// zoneTrust is the managed zone holding a name and the account URLs its
+// operator vouches for.
+type zoneTrust struct {
+	zone     string // "" when the name is in no managed zone
+	accounts []string
+}
+
+// trustFor returns the trusted accounts that apply to name: those of the
+// managed zone the gate matches it to (longest suffix).
+func (e *eval) trustFor(name string) zoneTrust {
+	if e.cfg == nil {
+		return zoneTrust{}
+	}
+	z, ok := e.cfg.ZoneFor(name)
+	if !ok {
+		return zoneTrust{}
+	}
+	return zoneTrust{zone: z.Name, accounts: z.TrustedAccounts}
 }
 
 // effective climbs from name towards the root (RFC 8659 §3) and returns the
@@ -80,11 +105,11 @@ func (e *eval) status(ctx context.Context, name string, withProviders bool) (cor
 	}
 	st.Node, st.Records = node, slices.Clone(rrset)
 
-	protected, detail, err := e.protected(ctx, name, node, rrset)
+	protected, detail, trusted, err := e.protected(ctx, name, node, rrset)
 	if err != nil {
 		return st, err
 	}
-	st.WildcardProtected, st.Detail = protected, detail
+	st.WildcardProtected, st.Detail, st.TrustedAccounts = protected, detail, trusted
 	if withProviders {
 		missing, err := e.missing(ctx, rrset)
 		if err != nil {
@@ -113,80 +138,160 @@ func wildcardSet(rrset []core.CAA) (tag string, values []string) {
 
 // protected is the architecture §3.2 verdict: every value that applies to
 // "*.N" is either ";" (no CA) or names an enabled provider that honours RFC
-// 8657 accounturi and is pinned to the broker's own account there.
-func (e *eval) protected(ctx context.Context, name, node string, rrset []core.CAA) (bool, string, error) {
+// 8657 accounturi and is pinned to the broker's own account there or to
+// accounts the operator vouches for (the trusted accounts of N's managed
+// zone). trusted lists the trusted accounts a positive verdict relied on.
+func (e *eval) protected(ctx context.Context, name, node string, rrset []core.CAA) (ok bool, detail string, trusted []string, err error) {
 	if node == "" {
-		return false, fmt.Sprintf("no CAA records for %s or any parent: any CA may issue *.%s", name, name), nil
+		return false, fmt.Sprintf("no CAA records for %s or any parent: any CA may issue *.%s", name, name), nil, nil
 	}
 	tag, values := wildcardSet(rrset)
 	if tag == "" {
-		return false, fmt.Sprintf("CAA at %s has no issue or issuewild property: any CA may issue *.%s", node, name), nil
+		return false, fmt.Sprintf("CAA at %s has no issue or issuewild property: any CA may issue *.%s", node, name), nil, nil
 	}
-	var pinned []string
+	trust := e.trustFor(name)
+	var issuers []*issuerUse // in order of first appearance
 	for _, raw := range values {
 		v, err := parseIssueValue(raw)
 		if err != nil {
-			return false, fmt.Sprintf("CAA %s %q at %s: %v", tag, raw, node, err), nil
+			return false, fmt.Sprintf("CAA %s %q at %s: %v", tag, raw, node, err), nil, nil
 		}
 		if v.issuer == "" {
 			continue // forbids every CA
 		}
-		ok, why, err := e.pinnedToBroker(ctx, v)
+		use, why, err := e.pinned(ctx, v, trust)
 		if err != nil {
-			return false, "", err
+			return false, "", nil, err
 		}
-		if !ok {
-			return false, fmt.Sprintf("CAA %s %q at %s: %s", tag, raw, node, why), nil
+		if use == nil {
+			return false, fmt.Sprintf("CAA %s %q at %s: %s", tag, raw, node, why), nil, nil
 		}
-		pinned = append(pinned, v.issuer)
+		i := slices.IndexFunc(issuers, func(u *issuerUse) bool { return u.issuer == use.issuer })
+		if i < 0 {
+			issuers = append(issuers, &issuerUse{issuer: use.issuer})
+			i = len(issuers) - 1
+		}
+		issuers[i].broker = issuers[i].broker || use.broker
+		for _, a := range use.trusted {
+			if !slices.Contains(issuers[i].trusted, a) {
+				issuers[i].trusted = append(issuers[i].trusted, a)
+			}
+			if !slices.Contains(trusted, a) {
+				trusted = append(trusted, a)
+			}
+		}
 	}
-	if len(pinned) == 0 {
-		return true, fmt.Sprintf("CAA %s at %s forbids every CA for *.%s", tag, node, name), nil
+	if len(issuers) == 0 {
+		return true, fmt.Sprintf("CAA %s at %s forbids every CA for *.%s", tag, node, name), nil, nil
 	}
-	return true, fmt.Sprintf("CAA %s at %s allows *.%s only to the broker's accounts at %s", tag, node, name, strings.Join(pinned, ", ")), nil
+	parts := make([]string, len(issuers))
+	for i, u := range issuers {
+		parts[i] = u.String()
+	}
+	detail = fmt.Sprintf("CAA %s at %s allows *.%s only to %s", tag, node, name, strings.Join(parts, ", "))
+	if len(trusted) > 0 {
+		detail += fmt.Sprintf(" (trusted accounts of zone %s: %s)", trust.zone, strings.Join(trusted, ", "))
+	}
+	return true, detail, trusted, nil
 }
 
-// pinnedToBroker reports whether a value with an issuer domain can only be
-// used by the broker: the issuer belongs to an enabled provider that honours
-// accounturi, and every accounturi parameter (at least one) equals that
-// provider's account URL.
-func (e *eval) pinnedToBroker(ctx context.Context, v issueValue) (bool, string, error) {
+// issuerUse is who may use an issuer domain according to the accepted
+// values naming it: the broker's account and/or trusted accounts.
+type issuerUse struct {
+	issuer  string
+	broker  bool
+	trusted []string // distinct, in order of appearance
+}
+
+func (u *issuerUse) String() string {
+	var who string
+	switch n := len(u.trusted); {
+	case n == 0:
+		who = "the broker's account"
+	case u.broker:
+		who = "the broker's account and " + countAccounts(n)
+	default:
+		who = countAccounts(n)
+	}
+	return who + " at " + u.issuer
+}
+
+func countAccounts(n int) string {
+	if n == 1 {
+		return "1 trusted account"
+	}
+	return fmt.Sprintf("%d trusted accounts", n)
+}
+
+// pinned reports whether a value with an issuer domain can only be used by
+// the broker or by accounts the operator trusts: the issuer belongs to an
+// enabled provider that honours accounturi, and every accounturi parameter
+// (at least one) equals that provider's account URL or one of the zone's
+// trusted accounts. A nil use comes with the reason.
+func (e *eval) pinned(ctx context.Context, v issueValue, trust zoneTrust) (use *issuerUse, why string, err error) {
 	cands := e.providersFor(v.issuer)
 	if len(cands) == 0 {
-		return false, fmt.Sprintf("issuer %s is not an enabled provider", v.issuer), nil
+		return nil, fmt.Sprintf("issuer %s is not an enabled provider", v.issuer), nil
 	}
 	if v.badAccountTag {
-		return false, "accounturi parameter must be spelled in lower case", nil
+		return nil, "accounturi parameter must be spelled in lower case", nil
 	}
 	if len(v.accountURIs) == 0 {
-		return false, fmt.Sprintf("issuer %s is not pinned with accounturi", v.issuer), nil
+		return nil, fmt.Sprintf("issuer %s is not pinned with accounturi", v.issuer), nil
+	}
+	// Account URIs compare exactly (RFC 8657 §3), as a CA compares them.
+	var foreign []string // neither trusted nor (yet known to be) the broker's
+	trusted := []string{}
+	for _, a := range v.accountURIs {
+		switch {
+		case slices.Contains(trust.accounts, a):
+			if !slices.Contains(trusted, a) {
+				trusted = append(trusted, a)
+			}
+		case !slices.Contains(foreign, a):
+			foreign = append(foreign, a)
+		}
 	}
 	honoured := false
 	var acctErr error
+	bad := "" // reported when nothing matches
+	if len(foreign) > 0 {
+		bad = foreign[0]
+	}
 	for _, p := range cands {
 		if !p.Caps().AccountURIHonoured {
 			continue
 		}
 		honoured = true
+		if len(foreign) == 0 {
+			return &issuerUse{issuer: v.issuer, trusted: trusted}, "", nil
+		}
 		acct, err := e.account(ctx, p)
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
-				return false, "", ctxErr
+				return nil, "", ctxErr
 			}
 			acctErr = err
 			continue
 		}
-		if allEqual(v.accountURIs, acct) {
-			return true, "", nil
+		if allEqual(foreign, acct) {
+			return &issuerUse{issuer: v.issuer, broker: true, trusted: trusted}, "", nil
+		}
+		if i := slices.IndexFunc(foreign, func(a string) bool { return a != acct }); i >= 0 {
+			bad = foreign[i]
 		}
 	}
-	if acctErr != nil {
-		return false, fmt.Sprintf("the broker's account at %s is unknown: %v", v.issuer, acctErr), nil
-	}
 	if !honoured {
-		return false, fmt.Sprintf("provider for issuer %s does not honour accounturi", v.issuer), nil
+		return nil, fmt.Sprintf("provider for issuer %s does not honour accounturi", v.issuer), nil
 	}
-	return false, fmt.Sprintf("accounturi is not the broker's account at %s", v.issuer), nil
+	if acctErr != nil {
+		return nil, fmt.Sprintf("the broker's account at %s is unknown: %v", v.issuer, acctErr), nil
+	}
+	why = fmt.Sprintf("accounturi %s is not the broker's account at %s", bad, v.issuer)
+	if len(trust.accounts) > 0 {
+		why += " nor a trusted account of zone " + trust.zone
+	}
+	return nil, why, nil
 }
 
 func allEqual(list []string, want string) bool {

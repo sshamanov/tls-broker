@@ -103,7 +103,11 @@ Admins additionally see:
 - DNS zones and CAA: per managed zone the hosted zone in effect (the
   configured ID, or the one the DNS-01 engine discovered by name, or why
   discovery failed; see `docs/dns01.md`) and the CAA verdict from
-  `CAAChecker` with ready-to-paste CAA records. CAA and account lookups run in
+  `CAAChecker` (with "relies on N trusted operator accounts" when the verdict
+  needed the zone's `trusted_accounts`) and ready-to-paste CAA records: an
+  unpinned `issue` per CA and one `issuewild` pinned with `accounturi` per
+  account, the broker's at each CA and each trusted account (its CA found by
+  the host of the provider's directory URL). CAA and account lookups run in
   parallel with an 8 s limit, so a slow resolver delays the page, never breaks
   it.
 
@@ -230,8 +234,9 @@ and every state also has a word: green *ok*, brass *caution* or *due*, seal red
 4. *Activate*. The status page now lists providers, and the broker's account URL
    at each provider appears (registered on first use).
 5. **CAA records**: copy the account URLs from the status page into the zones'
-   CAA records (`issue`/`issuewild` with `accounturi`; the status page prints
-   suggested records). Reload the status page until each zone reads "wildcard
+   CAA records (`issuewild` with `accounturi`; the status page prints
+   suggested records). Accounts of your own ACME clients that need wildcards
+   go into the zone's `trusted_accounts` and get `issuewild` records too. Reload the status page until each zone reads "wildcard
    protected" and no provider is missing.
 6. **LDAP**: add the `ldap:` section (bind password as a secret). *Validate*
    tests it; *Activate*; then *Test LDAP* clears the status page warning.

@@ -135,9 +135,12 @@ Symptoms: a status page warning that the zone is unprotected and "no" in its
 *Wildcard protected* column; DNS-proxy requests for wildcard names are denied with
 `wildcard_unprotected`.
 
-1. Copy the suggested CAA records from the status page (`issue` and
-   `issuewild` with `accounturi=<the broker's account URL>`) into the zone in
-   Route53 (or wherever the zone's CAA lives).
+1. Copy the suggested CAA records from the status page (unpinned `issue`,
+   `issuewild` with `accounturi=<the broker's account URL>`, plus one per
+   trusted account) into the zone in Route53 (or wherever the zone's CAA
+   lives). An `issuewild` naming any other account (for example your own
+   certbot) needs that account in the zone's `trusted_accounts`, or the zone
+   stays unprotected.
 2. Reload the status page until the zone's *Wildcard protected* column says
    "yes". Account
    URLs must match exactly (lower-case); a re-created CA account (lost

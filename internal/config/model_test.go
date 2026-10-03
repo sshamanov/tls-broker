@@ -31,6 +31,7 @@ func testConfig() *core.Config {
 	c.Providers[1].EABSecretName = "eab.fallback"
 	c.Providers[1].Profile = "classic"
 	c.Providers[1].Contact = "ops@example.com"
+	c.Zones[0].TrustedAccounts = []string{"https://primary.test/acme/acct/42", "https://primary.test/acme/acct/43"}
 	c.LDAP = core.LDAPConfig{
 		URL: "ldaps://ldap.example.com:636", BindDN: "cn=svc,dc=example,dc=com", BindPasswordSecret: "ldap-bind-password",
 		BaseDN: "ou=people,dc=example,dc=com", UserFilter: "(&(objectClass=person)(uid=%s))", Timeout: 10 * time.Second,
@@ -189,6 +190,8 @@ func TestDocExampleParses(t *testing.T) {
 		t.Fatal(rep.Errors)
 	}
 	if len(cfg.Zones) != 2 || len(cfg.Providers) != 2 || cfg.Providers[0].Name != "letsencrypt" ||
+		!reflect.DeepEqual(cfg.Zones[0].TrustedAccounts, []string{"https://acme-v02.api.letsencrypt.org/acme/acct/111111111"}) ||
+		cfg.Zones[1].TrustedAccounts != nil ||
 		cfg.Providers[1].EABSecretName != "eab.google" || cfg.LDAP.URL == "" || cfg.Sessions.TTL != 30*24*time.Hour {
 		t.Fatalf("%+v", cfg)
 	}

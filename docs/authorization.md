@@ -108,7 +108,9 @@ public CAA already stops every foreign ACME account from obtaining `*.N`:
 3. Every judged value must either forbid issuance (`;`, or an empty issuer)
    or name the CAA issuer domain of an **enabled** provider that honours RFC
    8657 `accounturi`, with every `accounturi` parameter equal to the broker's
-   own account URL at that provider.
+   own account URL at that provider or to one of the trusted operator accounts
+   of the managed zone holding `N` (`zones[].trusted_accounts`, see
+   `configuration.md`).
 4. Otherwise — no CAA anywhere, a set with neither `issue` nor `issuewild`,
    an unpinned issuer, a foreign account, an unknown or disabled provider, a
    provider that does not honour `accounturi`, or a malformed value — the
@@ -121,7 +123,11 @@ Details that matter when writing records:
 - The parameter must be spelled `accounturi` in lower case. Other spellings
   are treated as unpinned, because a CA may not recognize them.
 - The account URL must match byte for byte the URL the CA assigned to the
-  broker's account.
+  broker's account (or the trusted account as configured).
+- A trusted account is the operator vouching for its key holder; the DNS proxy
+  still cannot be used by any account the CAA does not name. The verdict and
+  the UI say when trusted accounts were relied on ("allows *.N only to the
+  broker's account and 2 trusted accounts at letsencrypt.org").
 - A failed CAA lookup denies with `dns_failure`.
 
 Requesters with a `wildcard=true` grant skip this check; they may have the
@@ -133,14 +139,28 @@ Publish at each managed zone apex (it covers every name below unless a lower
 node has its own CAA records). Replace the account URLs with the broker's
 own account URLs at those CAs.
 
-Recommended: normal names from the broker's accounts, wildcards only through
-the broker's account at a CA that honours `accounturi`:
+Recommended (what the status page suggests): normal names from every CA, so
+the broker can fall back and your own clients keep working; wildcards only
+through the broker's account at a CA that honours `accounturi`. The DNS-proxy
+condition only judges `issuewild`, so `issue` stays unpinned:
 
 ```text
-example.com. CAA 0 issue     "letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/123456789"
-example.com. CAA 0 issue     "pki.goog; accounturi=https://dv.acme-v02.api.pki.goog/account/AbCdEf"
+example.com. CAA 0 issue     "letsencrypt.org"
+example.com. CAA 0 issue     "pki.goog"
 example.com. CAA 0 issuewild "letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/123456789"
 ```
+
+With your own ACME clients that also need wildcards: one more pinned
+`issuewild` per account, and the same URLs in the zone's `trusted_accounts`
+(otherwise the zone reads unprotected):
+
+```text
+example.com. CAA 0 issuewild "letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/111111111"
+```
+
+Pinning `issue` as well (`issue "letsencrypt.org; accounturi=..."`) is
+stricter for ordinary names but shuts out every account not listed there,
+including your own clients.
 
 Strictest: no wildcard certificates from any CA (wildcards then cannot be
 issued for this zone at all, not even through the broker):

@@ -81,6 +81,11 @@ type BootstrapConfig struct {
 type ZoneConfig struct {
 	Name         string // normalized zone name, for example "example.com"
 	HostedZoneID string // Route53 hosted zone ID, for example "Z123ABC"; empty: discovered by name (dns01)
+	// TrustedAccounts are ACME account URLs the operator vouches for (their
+	// own clients outside the broker). The DNS-proxy CAA condition
+	// (architecture §3.2) accepts an accounturi naming one of them, for
+	// names in this zone, as it accepts the broker's own account.
+	TrustedAccounts []string
 }
 
 // Route53Config configures the DNS-01 engine (architecture §17).

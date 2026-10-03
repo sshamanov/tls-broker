@@ -48,13 +48,16 @@ Prefer the ACME proxy or the direct API wherever possible.
 when public CAA already stops every foreign ACME account from obtaining
 `*.N`: the effective CAA RRset of `N` must have `issuewild` values that are
 `;` or name an enabled provider pinned with `accounturi` to the broker's own
-account (or, with no `issuewild`, `issue` values judged the same way). That
-is what makes it safe to publish a TXT the broker cannot attribute to `N` or
-`*.N`. Ready-to-publish records are in `authorization.md`. Note the
+account or to one of the zone's trusted operator accounts
+(`zones[].trusted_accounts`, see `configuration.md`) (or, with no
+`issuewild`, `issue` values judged the same way). That is what makes it safe
+to publish a TXT the broker cannot attribute to `N` or `*.N`: only accounts
+the CAA names can use it for `*.N`, and the operator vouches for each of
+them. Ready-to-publish records are in `authorization.md`. Note the
 consequence for your own client: with such CAA records a client of this mode
-can only get a certificate from the CA account the broker pins, so a client
-needing its own account needs a `wildcard=true` grant and a matching CAA
-policy of its own.
+can only get a wildcard certificate from an account the CAA pins, so a client
+needing its own account for `*.N` needs that account in the zone's CAA (and in
+`trusted_accounts`, or the zone is unprotected) or a `wildcard=true` grant.
 
 Hooks for `*.N` certificates normally pass the base name `N` (acme.sh and
 Certbot both give the base name, and the fqdn form can only express `N`); the

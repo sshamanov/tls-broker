@@ -53,7 +53,7 @@ func (a *App) apply(ctx context.Context, cfg *core.Config) {
 	prev := a.lastCfg
 	a.lastCfg = cfg
 
-	if prev == nil || !slices.Equal(prev.Zones, cfg.Zones) || prev.DNSProxy != cfg.DNSProxy {
+	if prev == nil || zonesChanged(prev.Zones, cfg.Zones) || prev.DNSProxy != cfg.DNSProxy {
 		// The DNS proxy takes its zones and limits by value. Rebuilding it
 		// resets its in-memory per-source counters.
 		a.dnsproxy.Store(dnsproxy.New(dnsproxy.Options{
@@ -77,9 +77,18 @@ func (a *App) apply(ctx context.Context, cfg *core.Config) {
 	if a.r53 != nil {
 		a.r53.update(ctx, cfg.Route53, true)
 	}
-	if r53Changed || !slices.Equal(prev.Zones, cfg.Zones) {
+	if r53Changed || zonesChanged(prev.Zones, cfg.Zones) {
 		go a.verifyZones(a.bgCtx)
 	}
+}
+
+// zonesChanged reports whether the zones differ in what the DNS proxy and
+// the Route53 engine are built from (names and hosted zone IDs). Trusted
+// accounts are read by the gate per call and need no rebuild.
+func zonesChanged(a, b []core.ZoneConfig) bool {
+	return !slices.EqualFunc(a, b, func(x, y core.ZoneConfig) bool {
+		return x.Name == y.Name && x.HostedZoneID == y.HostedZoneID
+	})
 }
 
 func (a *App) lastConfig() *core.Config {

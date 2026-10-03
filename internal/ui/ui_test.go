@@ -887,3 +887,27 @@ func TestFormBodyLimits(t *testing.T) {
 	}
 	code(t, post("/ui/admin/config/validate", url.Values{"yaml": {goodYAML}}), 200)
 }
+
+// The zones section with trusted operator accounts: the verdict says it
+// relied on them, and the suggested records keep ordinary names open to every
+// CA (unpinned issue) while pinning issuewild to the broker's account and to
+// each trusted account.
+func TestDashboardTrustedAccounts(t *testing.T) {
+	e := newEnv(t)
+	y := strings.Replace(goodYAML, "    hosted_zone_id: Z0123456789ABC\n",
+		"    hosted_zone_id: Z0123456789ABC\n    trusted_accounts:\n      - https://acme.example/acme/acct/77\n      - https://elsewhere.example/acct/5\n", 1)
+	if _, chk, err := e.cfg.Activate(bg, []byte(y)); err != nil || !chk.OK() {
+		t.Fatalf("activate: %v %+v", err, chk)
+	}
+	e.caa.m["example.com"] = core.CAAStatus{Name: "example.com", Node: "example.com", WildcardProtected: true,
+		TrustedAccounts: []string{"https://acme.example/acme/acct/77"},
+		Detail:          "CAA issuewild at example.com allows *.example.com only to the broker's account and 1 trusted account at letsencrypt.org"}
+	account, _ := e.ca.AccountURL(bg)
+	r := e.login("alice").get("/ui/")
+	see(t, r, "relies on 1 trusted operator account", "the broker&#39;s account and 1 trusted account at letsencrypt.org", "trusted_accounts",
+		`example.com. CAA 0 issue &#34;letsencrypt.org&#34;`,
+		`example.com. CAA 0 issuewild &#34;letsencrypt.org; accounturi=`+account+`&#34;`,
+		`example.com. CAA 0 issuewild &#34;letsencrypt.org; accounturi=https://acme.example/acme/acct/77&#34;`,
+		"; trusted account https://elsewhere.example/acct/5: no enabled provider has its host")
+	lacks(t, r, `CAA 0 issue &#34;letsencrypt.org; accounturi`, "is unprotected")
+}

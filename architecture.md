@@ -167,14 +167,27 @@ already prevents a foreign ACME account from obtaining `*.N`:
 
 - look up the effective CAA RRset for `N` over DoH (climb the tree, RFC 8659);
 - every `issuewild` value must be either `;` or name a configured provider that
-  honours RFC 8657 `accounturi`, with `accounturi` equal to the broker's own
-  upstream account at that provider;
+  honours RFC 8657 `accounturi`, with every `accounturi` equal to the broker's
+  own upstream account at that provider or to an account the operator trusts
+  for the managed zone holding `N` (`zones[].trusted_accounts`);
 - if there is no `issuewild` property, `issue` values are judged the same way;
 - otherwise deny with reason `wildcard_unprotected`.
 
+Trusted accounts exist because the operator also runs ACME clients of their
+own that legitimately obtain wildcards for the same zones. Listing such an
+account is the operator vouching for whoever holds its key, exactly as they
+vouch for the broker; the argument is unchanged: a TXT record the DNS proxy
+publishes for `N` can only help an account the CAA names, and every account
+it names is the broker's or one the operator chose to trust. A foreign account
+still cannot use the DNS proxy to obtain `*.N`. The list is per managed zone
+(longest-suffix match, the same zone the gate uses), configuration rather than
+code, and changes with a generation, without a restart.
+
 Requesters with a `wildcard=true` grant skip this check. Operators are expected
 to publish such CAA records at each managed zone apex; the UI shows the CAA
-status of every managed zone.
+status of every managed zone, says when the verdict relied on trusted
+accounts, and suggests records: an unpinned `issue` per CA and one pinned
+`issuewild` per account (the broker's and each trusted one).
 
 Suggested API:
 
@@ -663,6 +676,9 @@ CAA policy for managed zones (decided October 2026):
   broker's own account. Wildcards therefore never fall back to another CA, and
   the DNS-proxy wildcard protection (section 3.2) holds even for providers
   whose `accounturi` support is unconfirmed.
+- The operator's own Let's Encrypt accounts (their certbot hosts) get
+  `issuewild` values of their own, pinned with `accounturi`, and are listed in
+  the zone's `trusted_accounts` so the zone stays protected (section 3.2).
 
 Revisit when every configured provider demonstrably honours `accounturi`
 (mandatory for all CAs from 2027-03-15).

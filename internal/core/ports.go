@@ -88,7 +88,11 @@ type CAAStatus struct {
 	// MissingProviders lists configured, enabled providers that the CAA
 	// set does not allow to issue (which would break fallback).
 	MissingProviders []string
-	Detail           string // operator-readable explanation of the verdict
+	// TrustedAccounts lists the zone's operator-trusted accounts (see
+	// ZoneConfig.TrustedAccounts) the verdict relied on: accounturi values
+	// in the wildcard set that are not the broker's own account.
+	TrustedAccounts []string
+	Detail          string // operator-readable explanation of the verdict
 }
 
 // CAAChecker reports CAA status for the UI. Implemented by internal/gate.
