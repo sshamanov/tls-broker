@@ -33,6 +33,7 @@
 {{end}}
 </header>
 <main>
+{{range .Banners}}<p class="flash error banner" role="alert">{{.}}</p>{{end}}
 {{if .Flash}}<p class="flash {{.Flash.Kind}}" role="status">{{.Flash.Text}}</p>{{end}}
 {{if and .User .Blocked}}<p class="flash error" role="alert">Your account is blocked. You have no issuance or control rights; you can still see your grants and the public audit log. Ask an administrator.</p>{{end}}
 <h1>{{.Title}}</h1>

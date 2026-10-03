@@ -55,6 +55,10 @@ in force (grants are independent of their owner).
 LDAP down or unconfigured (and not the local admin): 503 with a clear message.
 Five failures per minute lock the pair out (429). Logout is a POST.
 
+**Banners.** `Deps.Banners` are process-level warnings the app passes in,
+such as a development build whose DNS gate is mocked. They are shown at the
+top of every page, the login page included, to every user.
+
 **Dashboard** (`/ui/`).
 - Warnings (admin): problems and warnings of the active configuration, no
   zones or providers, LDAP not configured, LDAP not tested since start or last

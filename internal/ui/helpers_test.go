@@ -93,6 +93,7 @@ type env struct {
 
 type envOpts struct {
 	rotator KeyRotator
+	banners []string
 	noYAML  bool
 }
 
@@ -132,7 +133,7 @@ func newEnv(t *testing.T, o ...envOpts) *env {
 		Auth: e.auth, Config: e.cfg, Admin: e.cfg, Secrets: e.secrets, LDAP: e.ldap, CAA: e.caa,
 		Providers: coretest.NewFakeProviders(e.ca), Scheduler: e.sched, Audit: e.audit, Auditor: e.audit,
 		Users: e.store.Users(), Grants: e.store.Grants(), Certs: e.store.Certificates(), Orders: e.store.Orders(),
-		Direct: e.store.Direct(), Lineages: e.store.Lineages(), Clock: e.clock, Rotator: opt.rotator,
+		Direct: e.store.Direct(), Lineages: e.store.Lineages(), Clock: e.clock, Rotator: opt.rotator, Banners: opt.banners,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {

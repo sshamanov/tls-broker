@@ -78,6 +78,9 @@ type Deps struct {
 
 	// Rotator is optional; see KeyRotator.
 	Rotator KeyRotator
+	// Banners are process-level warnings shown at the top of every page,
+	// logged in or not (for example "the DNS gate is mocked"). Optional.
+	Banners []string
 	Logger  *slog.Logger
 }
 
@@ -260,6 +263,7 @@ type page struct {
 	Blocked bool
 	Admin   bool
 	Assets  string
+	Banners []string
 	Data    any
 }
 
@@ -299,7 +303,7 @@ func (h *Handler) takeFlash(w http.ResponseWriter, r *http.Request) *flash {
 }
 
 func (h *Handler) newPage(w http.ResponseWriter, r *http.Request, cur *auth.Current, title, nav string, data any) *page {
-	p := &page{Title: title, Nav: nav, Assets: h.assets, Data: data}
+	p := &page{Title: title, Nav: nav, Assets: h.assets, Banners: h.Banners, Data: data}
 	if cur != nil {
 		p.User = cur.User
 		p.CSRF = cur.Session.CSRFToken

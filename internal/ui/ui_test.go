@@ -590,3 +590,14 @@ func TestProvidersPage(t *testing.T) {
 	see(t, r, "letsencrypt", "503 upstream", "150 / 200", "10m", account, "https://acme.example/dir")
 	lacks(t, r, "Reset")
 }
+
+func TestBanners(t *testing.T) {
+	e := newEnv(t, envOpts{banners: []string{"DNS gate is mocked: <dev>"}})
+	// Shown before login and on every page after it, escaped.
+	see(t, e.client().get("/ui/login"), "DNS gate is mocked: &lt;dev&gt;")
+	bob := e.login("bob")
+	see(t, bob.get("/ui/"), "DNS gate is mocked")
+	see(t, bob.get("/ui/grants"), "DNS gate is mocked")
+
+	lacks(t, newEnv(t).client().get("/ui/login"), "DNS gate is mocked")
+}
