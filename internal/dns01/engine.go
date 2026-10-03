@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -66,6 +67,10 @@ type Options struct {
 	// CallTimeout bounds one Route53 API call before it is retried; 0 means
 	// 30 s. Every write is still bounded by Route53Config.ChangeTimeout.
 	CallTimeout time.Duration
+	// Logger receives one debug line per challenge step (created, change
+	// submitted, INSYNC, visible, cleaned) and warnings for failures; nil
+	// means slog.Default().
+	Logger *slog.Logger
 }
 
 // Engine implements core.DNSEngine over Route53. Create it with New; it is
@@ -77,6 +82,7 @@ type Engine struct {
 	api         Route53API
 	clock       core.Clock
 	callTimeout time.Duration
+	log         *slog.Logger
 
 	base     context.Context // parent of all Route53 writes; cancelled at the end of Close
 	cancel   context.CancelFunc
@@ -122,11 +128,14 @@ func New(o Options) (*Engine, error) {
 	if o.CallTimeout <= 0 {
 		o.CallTimeout = defaultCallTimeout
 	}
+	if o.Logger == nil {
+		o.Logger = slog.Default()
+	}
 	base, cancel := context.WithCancel(context.Background())
 	stopping, stop := context.WithCancelCause(context.Background())
 	return &Engine{
 		cfg: o.Config, store: o.Store, resolver: o.Resolver, api: o.API, clock: o.Clock,
-		callTimeout: o.CallTimeout, base: base, cancel: cancel, stopping: stopping, stop: stop,
+		callTimeout: o.CallTimeout, log: o.Logger, base: base, cancel: cancel, stopping: stopping, stop: stop,
 		writers: map[string]*zoneWriter{}, locks: map[string]*sync.Mutex{},
 		inflight: map[string]int{}, lastChange: map[string]string{},
 		zoneIDs: map[string]string{}, zoneErrs: map[string]string{},
@@ -437,6 +446,9 @@ func (e *Engine) Present(ctx context.Context, owner, record, value string) (stri
 	if err != nil {
 		return "", err
 	}
+	started := e.clock.Now()
+	e.log.Debug("dns01: presenting", "challenge", ch.ID, "owner", owner, "record", rec, "zone", zone.Name,
+		"hosted_zone", zone.HostedZoneID, "state", ch.State)
 	err = e.present(ctx, ch)
 
 	e.mu.Lock()
@@ -448,11 +460,15 @@ func (e *Engine) Present(ctx context.Context, owner, record, value string) (stri
 	e.mu.Unlock()
 
 	if err == nil {
+		e.log.Debug("dns01: value visible", "challenge", ch.ID, "record", rec,
+			"duration_ms", e.clock.Now().Sub(started).Milliseconds())
 		return ch.ID, nil
 	}
 	if ctx.Err() != nil && errors.Is(context.Cause(ctx), ErrClosed) {
 		err = ErrClosed
 	}
+	e.log.Warn("dns01: present failed", "challenge", ch.ID, "owner", owner, "record", rec,
+		"duration_ms", e.clock.Now().Sub(started).Milliseconds(), "err", err)
 	if last && !errors.Is(err, errCleanedUp) {
 		e.abandon(ctx, ch, err)
 	}
@@ -521,10 +537,13 @@ func (e *Engine) present(ctx context.Context, ch *core.Challenge) error {
 	if err := e.advance(ctx, ch, core.ChallengePresenting); err != nil {
 		return err
 	}
+	t0 := e.clock.Now()
 	changeID, err := e.write(ctx, ch.ZoneID, ch.RecordName)
 	if err != nil {
 		return err
 	}
+	e.log.Debug("dns01: route53 change submitted", "challenge", ch.ID, "record", ch.RecordName,
+		"hosted_zone", ch.ZoneID, "change", changeID, "duration_ms", e.clock.Now().Sub(t0).Milliseconds())
 	if err := e.advance(ctx, ch, core.ChallengeWaitingDNS); err != nil {
 		return err
 	}
@@ -559,6 +578,8 @@ func (e *Engine) waitVisible(ctx context.Context, ch *core.Challenge, changeID s
 			case err == nil && st == "INSYNC":
 				insync, insyncAt = true, now
 				delay = cfg.PollInterval
+				e.log.Debug("dns01: route53 change INSYNC", "challenge", ch.ID, "record", rec, "change", changeID,
+					"duration_ms", now.Sub(start).Milliseconds())
 			case now.Sub(start) >= cfg.ChangeTimeout:
 				if err != nil {
 					return fmt.Errorf("%w: change %s: %v", ErrChangeTimeout, changeID, err)
@@ -684,10 +705,12 @@ func (e *Engine) Cleanup(ctx context.Context, challengeID string) error {
 		return fmt.Errorf("dns01: challenge %s: %w", challengeID, err)
 	}
 	if _, err := e.write(ctx, ch.ZoneID, ch.RecordName); err != nil {
+		e.log.Warn("dns01: cleanup failed; left for reconcile", "challenge", ch.ID, "record", ch.RecordName, "err", err)
 		e.setCleaningError(context.WithoutCancel(ctx), ch, cleanupErrPrefix+err.Error())
 		return err
 	}
 	e.finish(context.WithoutCancel(ctx), ch, core.ChallengeDone, "")
+	e.log.Debug("dns01: value removed", "challenge", ch.ID, "owner", ch.Owner, "record", ch.RecordName)
 	return nil
 }
 
@@ -756,7 +779,11 @@ func (e *Engine) Reconcile(ctx context.Context) error {
 		})
 	}
 	wg.Wait()
-	return errors.Join(errs...)
+	err = errors.Join(errs...)
+	if len(list) > 0 {
+		e.log.Info("dns01: reconciled active challenges", "challenges", len(list), "records", len(order), "err", err)
+	}
+	return err
 }
 
 // VerifyZones discovers the hosted zone IDs that are not configured

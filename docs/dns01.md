@@ -249,6 +249,13 @@ proxy after `dns_proxy.challenge_ttl` (it lists stale rows and calls
 
 ## Troubleshooting
 
+Run with `TLS_BROKER_LOG_LEVEL=debug` and follow one challenge by its ID
+(`challenge=<id>`): the engine logs `presenting` (owner, record, hosted
+zone), `route53 change submitted` (change ID), `route53 change INSYNC` (how
+long Route53 took), `value visible` (how long until public DNS showed it) and
+`value removed`; a failed present logs a warning with the cause and the time
+spent. The issuance engine logs the same order's steps with `order=<id>`.
+
 | Symptom | Likely cause and fix |
 |---|---|
 | `AccessDenied` on `ChangeResourceRecordSets` | IAM policy missing the zone ARN, or the record is not `_acme-challenge.*` TXT. Check the policy above. |

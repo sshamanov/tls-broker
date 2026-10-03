@@ -1,9 +1,11 @@
 package dns01
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -32,6 +34,25 @@ type env struct {
 	store *memStore
 	cfg   *coretest.FakeConfig
 	eng   *Engine
+	logs  *logSink
+}
+
+// logSink collects the engine's log lines at debug level.
+type logSink struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (l *logSink) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.Write(p)
+}
+
+func (l *logSink) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.String()
 }
 
 func newEnv(t *testing.T) *env {
@@ -45,7 +66,7 @@ func newEnv(t *testing.T) *env {
 	r53.AddZone(zoneCom, "example.com")
 	r53.AddZone(zoneOrg, "example.org")
 	r53.AddZone("/hostedzone/"+zoneSub, "sub.example.com")
-	e := &env{t: t, clock: clock, r53: r53, store: newMemStore(), cfg: coretest.NewFakeConfig(c)}
+	e := &env{t: t, clock: clock, r53: r53, store: newMemStore(), cfg: coretest.NewFakeConfig(c), logs: &logSink{}}
 	e.eng = e.newEngine(time.Hour)
 	return e
 }
@@ -54,7 +75,8 @@ func newEnv(t *testing.T) *env {
 func (e *env) newEngine(callTimeout time.Duration) *Engine {
 	e.t.Helper()
 	eng, err := New(Options{Config: e.cfg, Store: e.store, Resolver: e.r53.Resolver(nil), API: e.r53,
-		Clock: e.clock, CallTimeout: callTimeout})
+		Clock: e.clock, CallTimeout: callTimeout,
+		Logger: slog.New(slog.NewTextHandler(e.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))})
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -154,6 +176,15 @@ func TestPresentPublishesAndCleanupRemoves(t *testing.T) {
 	}
 	if got := e.state(id).State; got != core.ChallengeDone {
 		t.Fatalf("state after cleanup = %s", got)
+	}
+	// Each step is logged with the challenge ID so a slow present can be
+	// attributed to Route53 propagation or to public DNS.
+	logs := e.logs.String()
+	for _, want := range []string{"dns01: presenting", "dns01: route53 change submitted", "dns01: route53 change INSYNC",
+		"dns01: value visible", "dns01: value removed"} {
+		if !strings.Contains(logs, want) || !strings.Contains(logs, "challenge="+id) {
+			t.Errorf("log line %q with the challenge ID missing in:\n%s", want, logs)
+		}
 	}
 }
 

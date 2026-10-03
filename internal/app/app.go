@@ -266,7 +266,7 @@ func New(ctx context.Context, env config.Env, opts Options) (_ *App, err error) 
 		api = a.r53
 	}
 	if a.dnsEngine, err = dns01.New(dns01.Options{
-		Config: a.cfg, Store: a.store.Challenges(), Resolver: a.resolver, API: api, Clock: a.clock,
+		Config: a.cfg, Store: a.store.Challenges(), Resolver: a.resolver, API: api, Clock: a.clock, Logger: a.log,
 	}); err != nil {
 		return nil, fmt.Errorf("dns-01 engine: %w", err)
 	}
