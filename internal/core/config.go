@@ -182,7 +182,44 @@ type LDAPConfig struct {
 type SessionConfig struct {
 	TTL          time.Duration // lifetime of a session from login
 	CookieName   string
-	CookieSecure bool // set the Secure attribute (true behind TLS)
+	CookieSecure CookieSecureMode // when the cookie gets the Secure attribute
+}
+
+// CookieSecureMode says when the session cookie carries the Secure
+// attribute. The zero value is CookieSecureAuto.
+type CookieSecureMode string
+
+const (
+	// CookieSecureAuto: Secure when the login request arrived over HTTPS
+	// (directly, or through a trusted proxy that says so); a plain-HTTP
+	// deployment then works without configuration.
+	CookieSecureAuto CookieSecureMode = "auto"
+	// CookieSecureAlways: Secure on every cookie. Over plain HTTP the
+	// browser drops it and every login appears to fail.
+	CookieSecureAlways CookieSecureMode = "always"
+	// CookieSecureNever: never Secure, even behind TLS.
+	CookieSecureNever CookieSecureMode = "never"
+)
+
+// Secure resolves the mode for a request that arrived over HTTPS or not.
+func (m CookieSecureMode) Secure(https bool) bool {
+	switch m {
+	case CookieSecureAlways:
+		return true
+	case CookieSecureNever:
+		return false
+	}
+	return https
+}
+
+// Valid reports whether m is one of the three modes (the empty string counts
+// as auto).
+func (m CookieSecureMode) Valid() bool {
+	switch m {
+	case "", CookieSecureAuto, CookieSecureAlways, CookieSecureNever:
+		return true
+	}
+	return false
 }
 
 // SchedulerConfig holds the admission and order timing knobs.
@@ -304,7 +341,7 @@ func DefaultConfig() *Config {
 			PollInterval:       2 * time.Second,
 		},
 		LDAP:     LDAPConfig{Timeout: 10 * time.Second},
-		Sessions: SessionConfig{TTL: 30 * 24 * time.Hour, CookieName: "tls_broker_session", CookieSecure: true},
+		Sessions: SessionConfig{TTL: 30 * 24 * time.Hour, CookieName: "tls_broker_session", CookieSecure: CookieSecureAuto},
 		Scheduler: SchedulerConfig{
 			AdmitWait:            20 * time.Second,
 			FinalizeWait:         20 * time.Second,

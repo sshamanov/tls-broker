@@ -13,7 +13,7 @@ import (
 
 func TestCookieAttributes(t *testing.T) {
 	e := newEnv(t)
-	e.cfg.Update(func(c *core.Config) { c.Sessions.CookieSecure = false; c.Sessions.CookieName = "sid" })
+	e.cfg.Update(func(c *core.Config) { c.Sessions.CookieSecure = core.CookieSecureAuto; c.Sessions.CookieName = "sid" })
 	exp := e.clock.Now().Add(time.Hour)
 
 	get := func(secure bool) *http.Cookie {
@@ -32,9 +32,17 @@ func TestCookieAttributes(t *testing.T) {
 	if get(false).Secure {
 		t.Fatal("Secure set for plain http")
 	}
-	e.cfg.Update(func(c *core.Config) { c.Sessions.CookieSecure = true })
+	e.cfg.Update(func(c *core.Config) { c.Sessions.CookieSecure = core.CookieSecureAlways })
 	if !get(false).Secure {
-		t.Fatal("configured Secure ignored")
+		t.Fatal("always: Secure missing over plain http")
+	}
+	e.cfg.Update(func(c *core.Config) { c.Sessions.CookieSecure = core.CookieSecureNever })
+	if get(true).Secure {
+		t.Fatal("never: Secure set behind TLS")
+	}
+	e.cfg.Update(func(c *core.Config) { c.Sessions.CookieSecure = "" })
+	if c := get(true); !c.Secure || get(false).Secure {
+		t.Fatal("zero mode is not auto")
 	}
 
 	w := httptest.NewRecorder()

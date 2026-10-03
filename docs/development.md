@@ -200,11 +200,9 @@ TLS_BROKER_DATA_DIR=$PWD/.claude/tmp/data TLS_BROKER_LOCAL_ADMIN_USER=admin \
   TLS_BROKER_LOCAL_ADMIN_PASSWORD=admin bin/tls-broker
 ```
 
-Then open <http://127.0.0.1:8080/ui/> and log in as `admin`. On plain HTTP
-set `sessions.cookie_secure: false` in the configuration first (for example
-with `bin/tls-broker config apply <file>` before the start), or the browser
-drops the session cookie. `bin/tls-broker help` lists the maintenance
-subcommands.
+Then open <http://127.0.0.1:8080/ui/> and log in as `admin`; the session
+cookie is not marked Secure for a plain-HTTP login (`sessions.cookie_secure:
+auto`). `bin/tls-broker help` lists the maintenance subcommands.
 
 ## Mock DNS gate (`mockdoh`, development only)
 

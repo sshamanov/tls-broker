@@ -33,8 +33,9 @@ state in `deploy/data`. Put nginx (`deploy/nginx.example.conf`) or Caddy in
 front for TLS and the real client address. On first start the broker writes a
 default configuration; log in at `/ui/` as the break-glass admin to add
 secrets, Route53 zones, providers and LDAP settings, then copy the account
-URLs from the dashboard into your CAA records. Reaching the UI over plain
-HTTP? Set `sessions.cookie_secure: false` first.
+URLs from the dashboard into your CAA records. The session cookie is marked
+Secure only for logins that arrived over HTTPS, so a plain-HTTP test box
+works without configuration (`sessions.cookie_secure: auto`).
 
 From source: `make image` builds `tls-broker:local`; `make build`
 builds `bin/tls-broker`. Inside the container `tls-broker help` lists the

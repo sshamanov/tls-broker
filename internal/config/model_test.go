@@ -196,3 +196,35 @@ func TestDocExampleParses(t *testing.T) {
 		t.Fatal(rep)
 	}
 }
+
+// sessions.cookie_secure defaults to auto (Secure when the login came over
+// HTTPS), accepts the three modes, still reads the booleans of earlier
+// generations, and rejects anything else with a path.
+func TestCookieSecureModes(t *testing.T) {
+	cases := map[string]core.CookieSecureMode{
+		"": core.CookieSecureAuto, "auto": core.CookieSecureAuto, "Always": core.CookieSecureAlways,
+		"never": core.CookieSecureNever, "true": core.CookieSecureAlways, "false": core.CookieSecureNever,
+	}
+	for in, want := range cases {
+		yaml := ""
+		if in != "" {
+			yaml = "sessions:\n  cookie_secure: " + in + "\n"
+		}
+		cfg, rep := Parse([]byte(yaml), testEnv(), 1)
+		if !rep.OK() {
+			t.Fatalf("%q: %v", in, rep.Errors)
+		}
+		if cfg.Sessions.CookieSecure != want {
+			t.Errorf("%q: mode %q, want %q", in, cfg.Sessions.CookieSecure, want)
+		}
+	}
+	_, rep := Parse([]byte("sessions:\n  cookie_secure: sometimes\n"), testEnv(), 1)
+	if rep.OK() || !strings.Contains(strings.Join(rep.Errors.Strings(), "\n"), "sessions.cookie_secure") {
+		t.Fatalf("bad mode accepted: %+v", rep)
+	}
+	// A generation written by this version round-trips as the mode word.
+	out, err := Marshal(testEnv().Apply(core.DefaultConfig()))
+	if err != nil || !strings.Contains(string(out), "cookie_secure: auto") {
+		t.Fatalf("rendered default:\n%s", out)
+	}
+}

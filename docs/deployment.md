@@ -105,10 +105,15 @@ The directory must be writable by the container user (`PUID:PGID`, default
    docker compose restart tls-broker
    ```
 
-**`sessions.cookie_secure` must be `false` when the UI is reached over plain
-HTTP** (a test box without a TLS front): the default `true` marks the session
-cookie Secure, the browser never sends it back over HTTP, and every login
-appears to fail silently. Behind nginx/Caddy with HTTPS keep it `true`.
+**`sessions.cookie_secure`** defaults to `auto`: the session cookie is marked
+Secure when the login arrived over HTTPS (directly, or through a trusted
+proxy whose `X-Forwarded-Proto` says so), and not when it arrived over plain
+HTTP, so a test box without a TLS front works out of the box. Set `always`
+behind nginx/Caddy with HTTPS if you want the cookie Secure even when a
+request slips in over HTTP (with `always` on plain HTTP the browser never
+sends the cookie back and every login appears to fail silently). `never` is
+for debugging only. Generations written by earlier versions with `true` /
+`false` are read as `always` / `never`.
 
 ## Reverse proxy
 

@@ -120,7 +120,7 @@ ldap:
 sessions:
   ttl: 720h                # 5m..365d
   cookie_name: tls_broker_session
-  cookie_secure: true
+  cookie_secure: auto      # auto | always | never (true/false still read)
 
 scheduler:
   admit_wait: 20s              # wait for a slot before "busy" (1s..5m)

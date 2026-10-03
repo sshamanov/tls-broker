@@ -27,8 +27,6 @@ const testYAML = `server:
   external_url: http://broker.test
   trusted_proxies: [127.0.0.1]
   real_ip_header: X-Real-IP
-sessions:
-  cookie_secure: false
 zones:
   - name: example.com
     hosted_zone_id: Z1EXAMPLE

@@ -315,8 +315,12 @@ func (v *validator) sessions() {
 	if !cookieNameRe.MatchString(s.CookieName) {
 		v.errf("sessions.cookie_name", "%q must consist of letters, digits, '_' and '-'", s.CookieName)
 	}
-	if !s.CookieSecure {
-		v.warnf("sessions.cookie_secure", "session cookies are sent over plain http")
+	switch s.CookieSecure {
+	case core.CookieSecureNever:
+		v.warnf("sessions.cookie_secure", "never: session cookies are sent over plain http even behind TLS")
+	case core.CookieSecureAuto, core.CookieSecureAlways:
+	default:
+		v.errf("sessions.cookie_secure", "%q must be auto, always or never", string(s.CookieSecure))
 	}
 }
 
@@ -413,8 +417,8 @@ func (v *validator) crossChecks() {
 			v.errf("server.write_timeout", "must exceed %s (%s): a held request would be cut off", k, FormatDuration(held[k]))
 		}
 	}
-	if c.Sessions.CookieSecure && strings.HasPrefix(c.Server.ExternalURL, "http://") {
-		v.warnf("sessions.cookie_secure", "true while external_url is http: browsers will not send the cookie back")
+	if c.Sessions.CookieSecure == core.CookieSecureAlways && strings.HasPrefix(c.Server.ExternalURL, "http://") {
+		v.warnf("sessions.cookie_secure", "always while external_url is http: browsers will not send the cookie back")
 	}
 }
 

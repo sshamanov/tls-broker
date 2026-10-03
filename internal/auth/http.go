@@ -34,26 +34,26 @@ func From(ctx context.Context) *Current {
 	return c
 }
 
-// SetCookie sets the session cookie. secure says the request arrived over
-// TLS (directly, or via the trusted proxy with https). The cookie is also
-// Secure when Sessions.CookieSecure is configured. The cookie lasts until
-// expires.
-func (s *Service) SetCookie(w http.ResponseWriter, token string, expires time.Time, secure bool) {
-	c := s.cookie(token, secure)
+// SetCookie sets the session cookie. https says the request arrived over TLS
+// (directly, or via the trusted proxy with https); Sessions.CookieSecure
+// decides whether that, always or never makes the cookie Secure. The cookie
+// lasts until expires.
+func (s *Service) SetCookie(w http.ResponseWriter, token string, expires time.Time, https bool) {
+	c := s.cookie(token, https)
 	c.Expires = expires
 	c.MaxAge = max(int(expires.Sub(s.Clock.Now())/time.Second), 1)
 	http.SetCookie(w, c)
 }
 
 // ClearCookie tells the browser to drop the session cookie.
-func (s *Service) ClearCookie(w http.ResponseWriter, secure bool) {
-	c := s.cookie("", secure)
+func (s *Service) ClearCookie(w http.ResponseWriter, https bool) {
+	c := s.cookie("", https)
 	c.MaxAge = -1
 	c.Expires = time.Unix(0, 0)
 	http.SetCookie(w, c)
 }
 
-func (s *Service) cookie(token string, secure bool) *http.Cookie {
+func (s *Service) cookie(token string, https bool) *http.Cookie {
 	cfg := s.Config.Current().Sessions
 	name := cfg.CookieName
 	if name == "" {
@@ -65,7 +65,7 @@ func (s *Service) cookie(token string, secure bool) *http.Cookie {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
-		Secure:   secure || cfg.CookieSecure,
+		Secure:   cfg.CookieSecure.Secure(https),
 	}
 }
 

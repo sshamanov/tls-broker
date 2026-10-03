@@ -113,9 +113,10 @@ in compose) or the value single-quoted.
 ## Sessions
 
 - A successful login returns an opaque random token (256 bits) set in an
-  `HttpOnly`, `SameSite=Strict` cookie, `Path=/`. `Secure` is set when the
-  request arrived over TLS (directly, or through the trusted proxy with
-  https), and always when `sessions.cookie_secure` is true.
+  `HttpOnly`, `SameSite=Strict` cookie, `Path=/`. `Secure` follows
+  `sessions.cookie_secure`: `auto` (default) sets it when the request arrived
+  over TLS (directly, or through the trusted proxy with https), `always`
+  sets it on every cookie, `never` on none.
 - Only the SHA-256 of the token is stored. There is no signing secret.
 - The session expires `sessions.ttl` after login (default 30 days); it is
   deleted when found expired and a periodic purge removes the rest.

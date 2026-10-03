@@ -183,6 +183,7 @@ func TestWarnings(t *testing.T) {
 	c := testConfig()
 	c.Server.ExternalURL = "http://broker.test"
 	c.LDAP.InsecureSkipVerify = true
+	c.Sessions.CookieSecure = core.CookieSecureAlways // while external_url is http
 	c.Zones = append(c.Zones, core.ZoneConfig{Name: "example.net", HostedZoneID: c.Zones[0].HostedZoneID})
 	rep := Validate(c)
 	if !rep.OK() {

@@ -103,9 +103,11 @@ type ldapDoc struct {
 }
 
 type sessionsDoc struct {
-	TTL          Duration `yaml:"ttl"`
-	CookieName   string   `yaml:"cookie_name"`
-	CookieSecure bool     `yaml:"cookie_secure"`
+	TTL        Duration `yaml:"ttl"`
+	CookieName string   `yaml:"cookie_name"`
+	// CookieSecure is auto | always | never; the booleans true and false
+	// of earlier generations are read as always and never.
+	CookieSecure string `yaml:"cookie_secure"`
 }
 
 type schedulerDoc struct {
@@ -188,7 +190,7 @@ func docFromConfig(c *core.Config) *document {
 			BaseDN: c.LDAP.BaseDN, UserFilter: c.LDAP.UserFilter, StartTLS: c.LDAP.StartTLS,
 			InsecureSkipVerify: c.LDAP.InsecureSkipVerify, Timeout: Duration(c.LDAP.Timeout),
 		},
-		Sessions: sessionsDoc{TTL: Duration(c.Sessions.TTL), CookieName: c.Sessions.CookieName, CookieSecure: c.Sessions.CookieSecure},
+		Sessions: sessionsDoc{TTL: Duration(c.Sessions.TTL), CookieName: c.Sessions.CookieName, CookieSecure: string(c.Sessions.CookieSecure)},
 		Scheduler: schedulerDoc{
 			AdmitWait: Duration(c.Scheduler.AdmitWait), FinalizeWait: Duration(c.Scheduler.FinalizeWait),
 			OrderTTL: Duration(c.Scheduler.OrderTTL), BusyRetryAfter: Duration(c.Scheduler.BusyRetryAfter),
@@ -319,7 +321,7 @@ func configFromDoc(d *document, env Env, generation int) (*core.Config, Problems
 		UserFilter: strings.TrimSpace(l.UserFilter), StartTLS: l.StartTLS, InsecureSkipVerify: l.InsecureSkipVerify,
 		Timeout: l.Timeout.std(),
 	}
-	cfg.Sessions = core.SessionConfig{TTL: d.Sessions.TTL.std(), CookieName: strings.TrimSpace(d.Sessions.CookieName), CookieSecure: d.Sessions.CookieSecure}
+	cfg.Sessions = core.SessionConfig{TTL: d.Sessions.TTL.std(), CookieName: strings.TrimSpace(d.Sessions.CookieName), CookieSecure: cookieSecureMode(d.Sessions.CookieSecure)}
 	s := d.Scheduler
 	cfg.Scheduler = core.SchedulerConfig{
 		AdmitWait: s.AdmitWait.std(), FinalizeWait: s.FinalizeWait.std(), OrderTTL: s.OrderTTL.std(),
@@ -342,6 +344,22 @@ func configFromDoc(d *document, env Env, generation int) (*core.Config, Problems
 	cfg.Resolver = core.ResolverConfig{Timeout: d.Resolver.Timeout.std(), MaxCNAMEHops: d.Resolver.MaxCNAMEHops}
 	cfg.Audit = core.AuditConfig{MaxFileBytes: d.Audit.MaxFileBytes, MaxFiles: d.Audit.MaxFiles}
 	return cfg, c.problems
+}
+
+// cookieSecureMode reads sessions.cookie_secure: the three modes, or the
+// booleans earlier generations used. Anything else is passed through for the
+// validator to reject.
+func cookieSecureMode(s string) core.CookieSecureMode {
+	switch v := strings.ToLower(strings.TrimSpace(s)); v {
+	case "", "auto":
+		return core.CookieSecureAuto
+	case "true", "always":
+		return core.CookieSecureAlways
+	case "false", "never":
+		return core.CookieSecureNever
+	default:
+		return core.CookieSecureMode(v)
+	}
 }
 
 var yamlLineRe = regexp.MustCompile(`^line (\d+): (.*)$`)
