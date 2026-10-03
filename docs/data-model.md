@@ -166,8 +166,14 @@ transaction that makes the order valid. Columns: `order_id` (not a foreign
 key — orders are pruned, certificates are kept), `mode`, `set_key`,
 `provider`, `account_url` (upstream account), `serial`, `ari_cert_id` (RFC 9773;
 unique when non-empty), `not_before`, `not_after`, `issued_at`, `chain_pem`,
-`replaces_id`, `replaced_by_id`.
+`replaces_id`, `replaced_by_id`, `source_ip`, `grant_id`.
 
+- Ownership: `source_ip` and `grant_id` are copied from the order by
+  `Complete` (the order is pruned later, the certificate is kept). `grant_id`
+  is the grant that authorized the order, `0` when every name resolved to the
+  requester (`dns_ip_match`). The UI shows the owner of that grant as the
+  certificate's owner. Migration 2 added both columns and backfilled them from
+  orders that still existed; older certificates read `''`/`0` (unknown).
 - `chain_pem` is stored for ACME-mode certificates only (the downstream client
   fetches it from here). It is `NULL` for direct-mode certificates, whose files
   on disk are the truth, and after `DropChains(before)` clears expired chains.

@@ -21,16 +21,16 @@ var (
 type certificateStore struct{ s *Store }
 
 const certMetaCols = `id, order_id, mode, set_key, provider, account_url, serial, ari_cert_id,
-	not_before, not_after, issued_at, replaces_id, replaced_by_id`
+	not_before, not_after, issued_at, replaces_id, replaced_by_id, source_ip, grant_id`
 
 const certCols = certMetaCols + `, chain_pem`
 
 func scanCertMeta(r scanner, extra ...any) (*core.Certificate, error) {
 	var c core.Certificate
-	var mode, setKey string
+	var mode, setKey, ip string
 	var nb, na, issued int64
 	dest := []any{&c.ID, &c.OrderID, &mode, &setKey, &c.Provider, &c.AccountURL, &c.Serial, &c.ARICertID,
-		&nb, &na, &issued, &c.ReplacesID, &c.ReplacedByID}
+		&nb, &na, &issued, &c.ReplacesID, &c.ReplacedByID, &ip, &c.GrantID}
 	if err := r.Scan(append(dest, extra...)...); err != nil {
 		return nil, err
 	}
@@ -39,6 +39,9 @@ func scanCertMeta(r scanner, extra ...any) (*core.Certificate, error) {
 		return nil, err
 	}
 	c.Names, c.Mode = set, core.Mode(mode)
+	if c.SourceIP, err = parseAddr(ip); err != nil {
+		return nil, err
+	}
 	c.NotBefore, c.NotAfter, c.IssuedAt = tm(nb), tm(na), tm(issued)
 	return &c, nil
 }
@@ -68,9 +71,10 @@ func insertCertificate(ctx context.Context, tx *sql.Tx, c *core.Certificate, ord
 		chain = c.ChainPEM
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO certificates (`+certCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.ID, c.OrderID, string(c.Mode), c.Names.Key(), c.Provider, c.AccountURL, c.Serial, c.ARICertID,
-		ts(c.NotBefore), ts(c.NotAfter), ts(c.IssuedAt), c.ReplacesID, c.ReplacedByID, chain)
+		ts(c.NotBefore), ts(c.NotAfter), ts(c.IssuedAt), c.ReplacesID, c.ReplacedByID,
+		addrText(c.SourceIP), c.GrantID, chain)
 	return err
 }
 

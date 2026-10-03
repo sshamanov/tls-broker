@@ -161,7 +161,8 @@ type OrderStore interface {
 	BeginFinalize(ctx context.Context, id, csrHash string, csrDER []byte, now time.Time) (o *Order, first bool, err error)
 	// Complete stores the issued certificate and finishes the order in
 	// one transaction: inserts cert (cert.OrderID must be id; for Mode
-	// direct the chain is not stored), sets Status valid and
+	// direct the chain is not stored; cert.SourceIP and cert.GrantID are
+	// set from the order, whatever the caller put there), sets Status valid and
 	// CertificateID, clears CSRDER, and, when cert.ReplacesID is set and
 	// that certificate has no ReplacedByID yet, sets its ReplacedByID to
 	// cert.ID. ErrConflict unless Status is processing; also when the

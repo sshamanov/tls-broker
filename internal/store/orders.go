@@ -337,6 +337,8 @@ func (st *orderStore) Complete(ctx context.Context, id string, cert *core.Certif
 		if o.Status != core.OrderProcessing {
 			return conflict("order %q: cannot complete in status %s", id, o.Status)
 		}
+		// Ownership comes from the order: who asked, and which grant let them.
+		cert.SourceIP, cert.GrantID = o.SourceIP, o.GrantID
 		if err := insertCertificate(ctx, tx, cert, o.Mode); err != nil {
 			return err
 		}

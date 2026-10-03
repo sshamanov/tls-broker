@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -75,6 +76,44 @@ func TestOpenMigratesEmptyDatabase(t *testing.T) {
 		if n != 1 {
 			t.Errorf("table %s missing", table)
 		}
+	}
+}
+
+// A version 1 database gains the certificate owner columns; certificates whose
+// order still exists are backfilled from it, the others stay unknown.
+func TestMigrationBackfillsCertificateOwner(t *testing.T) {
+	path := dbPath(t)
+	ms, err := migrations()
+	must(t, err)
+	if err := ensureFileMode(path); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	must(t, err)
+	_, err = db.Exec(ms[0].sql + `;
+		INSERT INTO orders (id, mode, set_key, source_ip, grant_id, status, prep, provider, created_at, expires_at, updated_at)
+			VALUES ('o1', 'acme', 'a.example.com', '10.0.0.5', 7, 'processing', 'prepared', 'le', 1, 2, 3);
+		INSERT INTO certificates (id, order_id, mode, set_key, provider, not_before, not_after, issued_at)
+			VALUES ('c1', 'o1', 'acme', 'a.example.com', 'le', 1, 2, 3),
+			       ('c2', 'pruned', 'acme', 'b.example.com', 'le', 1, 2, 3);
+		UPDATE orders SET status = 'valid', certificate_id = 'c1' WHERE id = 'o1';
+		PRAGMA user_version = 1;`)
+	must(t, err)
+	must(t, db.Close())
+
+	s := openAt(t, path)
+	if v, _ := s.SchemaVersion(ctx); v != len(ms) {
+		t.Fatalf("schema version %d", v)
+	}
+	c1, err := s.Certificates().Get(ctx, "c1")
+	must(t, err)
+	if c1.SourceIP != netip.MustParseAddr("10.0.0.5") || c1.GrantID != 7 {
+		t.Fatalf("backfilled c1: %v %d", c1.SourceIP, c1.GrantID)
+	}
+	c2, err := s.Certificates().Get(ctx, "c2")
+	must(t, err)
+	if c2.SourceIP.IsValid() || c2.GrantID != 0 {
+		t.Fatalf("c2 without order: %v %d", c2.SourceIP, c2.GrantID)
 	}
 }
 

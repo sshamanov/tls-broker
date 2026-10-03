@@ -97,9 +97,10 @@ Domain types:
   CSRHash, CSRDER (kept until terminal, for restart), CertificateID,
   `Error *Problem`, CreatedAt, ExpiresAt, UpdatedAt.
 - `Certificate{ID, OrderID, Mode, names.Set, Provider, AccountURL, Serial,
-  ARICertID, NotBefore, NotAfter, IssuedAt, ChainPEM, ReplacesID, ReplacedByID}`
-  — ACME-mode chains are stored; direct-mode key material and chain live on
-  disk only. `core.ARICertID(leaf)` computes the RFC 9773 identifier.
+  ARICertID, NotBefore, NotAfter, IssuedAt, SourceIP, GrantID, ChainPEM,
+  ReplacesID, ReplacedByID}` — ACME-mode chains are stored; direct-mode key
+  material and chain live on disk only. `SourceIP`/`GrantID` are the order's,
+  copied by `OrderStore.Complete` (who obtained the certificate). `core.ARICertID(leaf)` computes the RFC 9773 identifier.
 - `Lineage{Key, LastRequestAt, ObservedInterval, Samples}` keyed by
   `names.Set.Key()`. `Lineage.Observe(at)` is the one definition of interval
   tracking (requests closer than `MinLineageGap` = 1 h are one visit; later

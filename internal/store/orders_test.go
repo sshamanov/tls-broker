@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -83,6 +84,7 @@ func TestOrderLifecycle(t *testing.T) {
 	wantErr(t, err, core.ErrCSRMismatch)
 
 	c := newCert("c1", "o1", o.Names, t0)
+	c.SourceIP, c.GrantID = netip.MustParseAddr("192.0.2.99"), 99 // overridden by the order
 	must(t, os.Complete(ctx, "o1", c, t0.Add(5*time.Second)))
 	got, _ = os.Get(ctx, "o1")
 	if got.Status != core.OrderValid || got.CertificateID != "c1" || got.CSRDER != nil || got.CSRHash != "h1" ||
@@ -93,6 +95,10 @@ func TestOrderLifecycle(t *testing.T) {
 	must(t, err)
 	if !reflect.DeepEqual(gc, c) {
 		t.Fatalf("certificate\n%+v\nwant\n%+v", gc, c)
+	}
+	// Ownership is the order's, whatever the caller passed.
+	if gc.SourceIP != o.SourceIP || gc.GrantID != 7 {
+		t.Fatalf("certificate owner: source %v grant %d", gc.SourceIP, gc.GrantID)
 	}
 	wantErr(t, os.Complete(ctx, "o1", newCert("c2", "o1", o.Names, t0), t0), core.ErrConflict)
 	wantErr(t, os.Fail(ctx, "o1", core.NewProblem(core.ProblemServerInternal, "x"), t0), core.ErrConflict)

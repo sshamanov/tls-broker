@@ -349,6 +349,13 @@ This is the relaxed trust model, not an oversight.
 
 Do not reintroduce tokens. Machine gating is IP-based.
 
+Certificate ownership follows from this: every certificate records the
+requesting source IP and the grant that authorized its order (none when the
+names resolved to the requester). Its owner is the owner of that grant. A
+certificate authorized by DNS match has no owner and is shown as such, with
+its source IP; it is never attributed to the owner of an unrelated grant
+(§14).
+
 ## 4.3 Bootstrap administrators
 
 Roles are local state, so something must create the first admin. Two
@@ -859,7 +866,7 @@ SQLite is justified because the service has mutable application state:
 - downstream ACME accounts;
 - downstream ACME orders;
 - upstream order mapping;
-- certificate/ARI mappings;
+- certificate/ARI mappings, with the source IP and authorizing grant of each certificate;
 - direct-cache metadata;
 - challenge state;
 - provider/rate-limit state.

@@ -356,6 +356,14 @@ type Certificate struct {
 	NotAfter  time.Time
 	IssuedAt  time.Time // when the broker stored it
 
+	// SourceIP and GrantID record who obtained the certificate: the
+	// requesting address of the order that produced it and the grant that
+	// authorized that order (0 when the names resolved to the requester).
+	// OrderStore.Complete copies both from the order. Both are zero for
+	// certificates stored before schema version 2 whose order was pruned.
+	SourceIP netip.Addr
+	GrantID  int64
+
 	// ChainPEM is the leaf followed by intermediates, without the root, as
 	// returned by the CA. It is stored for ACME-mode certificates. For
 	// direct-mode certificates the store saves no chain (the files on disk
