@@ -57,7 +57,10 @@ func QuoteTXT(v string) string {
 // UnquoteTXT parses one Route53 TXT value (one or more quoted
 // character-strings, or a single unquoted word) and returns the strings
 // concatenated, which is what a resolver returns for the record. Escapes
-// "\X" and "\DDD" (decimal) are decoded.
+// are decoded as in RFC 1035 master format, which is what Route53 returns:
+// "\X" stands for X, and "\DDD" is one byte given as exactly three octal
+// digits (\052 is '*'). A backslash followed by a digit that is not such an
+// escape is malformed.
 func UnquoteTXT(s string) (string, error) {
 	var out strings.Builder
 	i := 0
@@ -89,17 +92,20 @@ func UnquoteTXT(s string) (string, error) {
 				break
 			}
 			if c == '\\' {
-				if i+3 < len(s) && isDigit(s[i+1]) && isDigit(s[i+2]) && isDigit(s[i+3]) {
-					n := int(s[i+1]-'0')*100 + int(s[i+2]-'0')*10 + int(s[i+3]-'0')
+				if i+1 >= len(s) {
+					return "", fmt.Errorf("dangling escape in TXT string %q", s)
+				}
+				if isDigit(s[i+1]) {
+					if i+3 >= len(s) || !isOctal(s[i+1]) || !isOctal(s[i+2]) || !isOctal(s[i+3]) {
+						return "", fmt.Errorf("bad escape in TXT string %q", s)
+					}
+					n := int(s[i+1]-'0')*64 + int(s[i+2]-'0')*8 + int(s[i+3]-'0')
 					if n > 255 {
 						return "", fmt.Errorf("bad escape in TXT string %q", s)
 					}
 					out.WriteByte(byte(n))
 					i += 4
 					continue
-				}
-				if i+1 >= len(s) {
-					return "", fmt.Errorf("dangling escape in TXT string %q", s)
 				}
 				out.WriteByte(s[i+1])
 				i += 2
@@ -117,3 +123,4 @@ func UnquoteTXT(s string) (string, error) {
 }
 
 func isDigit(c byte) bool { return c >= '0' && c <= '9' }
+func isOctal(c byte) bool { return c >= '0' && c <= '7' }

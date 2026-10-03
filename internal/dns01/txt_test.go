@@ -31,15 +31,21 @@ func TestQuoteUnquoteTXT(t *testing.T) {
 	for in, want := range map[string]string{
 		`"a" "b"`:   "ab",
 		`plain`:     "plain",
-		`"\065BC"`:  "ABC",
 		`"x\"y"`:    `x"y`,
 		` "spaced"`: "spaced",
+		// \DDD is octal, as Route53 and RFC 1035 write it.
+		`"\101BC"`:   "ABC",
+		`"\052.x"`:   "*.x",
+		`"\300"`:     "\xc0",
+		`"\000\377"`: "\x00\xff",
 	} {
 		if got, err := UnquoteTXT(in); err != nil || got != want {
 			t.Errorf("UnquoteTXT(%q) = %q, %v; want %q", in, got, err, want)
 		}
 	}
-	for _, bad := range []string{`"open`, ``, `"\`, `"\999"`} {
+	// A backslash followed by a digit must be exactly three octal digits
+	// (\065 was once read as decimal 65 and \8ab as "8ab").
+	for _, bad := range []string{`"open`, ``, `"\`, `"\999"`, `"\8ab"`, `"\400"`, `"\12"`, `"\12x"`, `"\0"`} {
 		if _, err := UnquoteTXT(bad); err == nil {
 			t.Errorf("UnquoteTXT(%q) succeeded", bad)
 		}
