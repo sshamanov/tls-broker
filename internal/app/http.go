@@ -28,7 +28,7 @@ func (a *App) buildMux() {
 	m.Handle("/ui/", a.ui)
 	m.Handle("/ui", a.ui)
 	m.Handle("/metrics", a.metrics.Handler())
-	m.Handle("/healthz", a.health)
+	m.Handle(httpx.HealthPath, a.health)
 	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
@@ -88,8 +88,11 @@ func (a *App) lastConfig() *core.Config {
 	return a.lastCfg
 }
 
-// chain wraps the mux in the middleware every front end relies on. RealIP
-// sits before the access log so the log carries the real source address.
+// chain wraps the mux in the middleware every front end relies on, in the
+// order httpx documents: RealIP, RequestID, Recover, AccessLog. RealIP runs
+// before RequestID (so a trusted proxy's X-Request-ID is kept) and before the
+// access log (so it carries the real source address); Recover runs inside
+// RequestID so a panic is logged with the request's ID.
 func (a *App) chain(cfg *core.Config) http.Handler {
 	acmeHold := max(cfg.Scheduler.AdmitWait, cfg.Scheduler.FinalizeWait) + holdSlack
 	h := httpx.PathTimeouts(0,
@@ -99,11 +102,11 @@ func (a *App) chain(cfg *core.Config) http.Handler {
 	)(a.mux)
 	h = a.readiness(h)
 	h = httpx.AccessLog(a.log)(h)
-	h = httpx.RealIP(httpx.NewResolver(httpx.Options{
+	h = httpx.Recover(a.log)(h)
+	h = httpx.RequestID(h)
+	return httpx.RealIP(httpx.NewResolver(httpx.Options{
 		TrustedProxies: cfg.Server.TrustedProxies, RealIPHeader: cfg.Server.RealIPHeader,
 	}))(h)
-	h = httpx.Recover(a.log)(h)
-	return httpx.RequestID(h)
 }
 
 // readiness answers 503 for everything but /healthz and /metrics while the

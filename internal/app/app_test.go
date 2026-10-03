@@ -205,6 +205,11 @@ func TestBootServeAndShutdown(t *testing.T) {
 	if hdr.Get("X-Request-ID") == "" {
 		t.Error("no X-Request-ID")
 	}
+	// The peer is a trusted proxy, so its request ID is kept: RealIP must
+	// run before RequestID in the chain.
+	if _, hdr, _ := r.get("/acme/directory", "X-Request-ID", "proxy-id-42"); hdr.Get("X-Request-ID") != "proxy-id-42" {
+		t.Errorf("trusted proxy request ID replaced by %q", hdr.Get("X-Request-ID"))
+	}
 	if code, _, body := r.get("/ui/login"); code != 200 || !strings.Contains(body, "Log in") || strings.Contains(body, "DNS gate is mocked") {
 		t.Fatalf("login page: %d", code)
 	}

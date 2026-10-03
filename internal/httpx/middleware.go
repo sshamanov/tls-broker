@@ -106,8 +106,9 @@ func (s *statusWriter) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
 // AccessLog logs one structured line per request after it finishes: method,
 // path (never the query string), status, bytes, duration, source IP, request
-// ID and user agent. 5xx logs at error level, 4xx at warn, the rest at info.
-// logger nil means slog.Default().
+// ID and user agent. 5xx logs at error level, 4xx at warn, successful
+// HealthPath probes at debug, the rest at info. logger nil means
+// slog.Default().
 func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -134,6 +135,9 @@ func AccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 					level = slog.LevelError
 				case sw.status >= 400:
 					level = slog.LevelWarn
+				case r.URL.Path == HealthPath:
+					// Liveness probes every few seconds are noise at info.
+					level = slog.LevelDebug
 				}
 				log.Log(r.Context(), level, "request", attrs...)
 			}()

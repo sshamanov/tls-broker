@@ -185,6 +185,24 @@ func TestAccessLog(t *testing.T) {
 	if strings.Contains(buf.String(), "secret") {
 		t.Fatal("query logged")
 	}
+	// Successful liveness probes log at debug; failed ones keep their level.
+	for _, c := range []struct {
+		status int
+		level  string
+	}{{200, "DEBUG"}, {503, "ERROR"}} {
+		buf.Reset()
+		log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		h := AccessLog(log)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(c.status) }))
+		r := req("1.2.3.4:5")
+		r.URL.Path = HealthPath
+		h.ServeHTTP(httptest.NewRecorder(), r)
+		if err := json.Unmarshal(buf.Bytes(), &m); err != nil {
+			t.Fatal(err)
+		}
+		if m["level"] != c.level {
+			t.Fatalf("healthz %d logged at %v, want %s", c.status, m["level"], c.level)
+		}
+	}
 }
 
 func TestMaxBody(t *testing.T) {

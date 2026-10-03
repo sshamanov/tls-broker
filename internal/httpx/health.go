@@ -7,6 +7,10 @@ import (
 	"time"
 )
 
+// HealthPath is where the app mounts Health; AccessLog logs successful
+// requests to it at debug.
+const HealthPath = "/healthz"
+
 // Health serves /healthz: process readiness, not upstream CA health.
 //
 // 200 {"status":"ok"} once SetReady(true) was called and Ping (if any)

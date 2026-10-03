@@ -2,8 +2,11 @@
 // source IPv4 (architecture §19), request ID, panic recovery, access logging,
 // body and time limits, RFC 7807 / ACME problem responses and /healthz.
 //
-// Middleware order, outermost first: Recover, RealIP, RequestID, AccessLog,
-// then per-route MaxBody and PathTimeouts.
+// Middleware order, outermost first: RealIP, RequestID, Recover, AccessLog,
+// then per-route MaxBody and PathTimeouts. RealIP must precede RequestID
+// (which trusts X-Request-ID only from a trusted proxy) and AccessLog (which
+// logs the real source); Recover sits inside RequestID so panics are logged
+// with the request's ID.
 package httpx
 
 import (

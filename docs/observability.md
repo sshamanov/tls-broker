@@ -183,8 +183,11 @@ carries `ip_flag=header_missing`: fix the proxy configuration.
 
 The access log (`log/slog`, JSON or text per the app) has one line per request
 with method, path (never the query string), status, bytes, duration,
-`source_ip`, `request_id` and user agent. `X-Request-ID` is returned on every
-response; a well-formed inbound one is kept only from a trusted proxy.
+`source_ip`, `request_id` and user agent. 5xx lines are at error level, 4xx
+at warn, successful `/healthz` probes at debug (so a liveness check every few
+seconds does not fill the log at the default `info` level), everything else
+at info. `X-Request-ID` is returned on every response; a well-formed inbound
+one is kept only from a trusted proxy.
 
 ## nginx
 
