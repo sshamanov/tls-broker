@@ -220,8 +220,17 @@ func TestFinalizeErrors(t *testing.T) {
 	expectProblem(t, c.post(o.Finalize, csrPayload(coretest.MakeCSR(coretest.GenKey(), "a.example.com"))), 403, core.ProblemUnauthorized)
 	e.gate.DecideFunc(nil)
 
+	before := len(e.gate.Calls())
 	if r := c.post(o.Finalize, csrPayload(coretest.MakeCSR(coretest.GenKey(), "a.example.com"))); r.StatusCode != http.StatusOK {
 		t.Fatalf("finalize %d %s", r.StatusCode, r.body)
+	}
+	// The server asks the gate once and hands the decision to the issuer, so
+	// the issuer does not ask again.
+	if len(e.gate.Calls()) != before+1 {
+		t.Fatalf("gate asked %d times for one finalize", len(e.gate.Calls())-before)
+	}
+	if fin := e.iss.Finalizes(); len(fin) == 0 || !fin[len(fin)-1].Decision.Allowed {
+		t.Fatalf("finalize request without the gate decision: %+v", fin)
 	}
 	// A different CSR after the first: badCSR, gate not asked again.
 	calls := len(e.gate.Calls())

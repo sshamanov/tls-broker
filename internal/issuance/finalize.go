@@ -26,12 +26,16 @@ func (e *Engine) Finalize(ctx context.Context, req core.FinalizeRequest) (*core.
 		return nil, fmt.Errorf("order %q for account %q: %w", req.OrderID, req.AccountID, core.ErrNotFound)
 	}
 
-	// 1. The gate again, for the address finalizing now.
-	d, err := e.gate.Authorize(ctx, core.ModeACME, req.SourceIP, o.Names)
-	if err != nil {
-		return nil, fmt.Errorf("issuance: gate: %w", err)
+	// 1. The gate again, for the address finalizing now: the front end's
+	// decision when it ran the gate, otherwise the engine asks — except for
+	// a retry of an already accepted CSR, which is a poll.
+	d := req.Decision
+	if !o.Finalized() && !d.Allowed && d.Reason == "" {
+		if d, err = e.gate.Authorize(ctx, core.ModeACME, req.SourceIP, o.Names); err != nil {
+			return nil, fmt.Errorf("issuance: gate: %w", err)
+		}
 	}
-	if !d.Allowed {
+	if !o.Finalized() && !d.Allowed {
 		ev := orderEvent(core.AuditGate, o)
 		ev.SourceIP, ev.Visibility = ipString(req.SourceIP), core.AuditVisibilityAdmin
 		ev.Decision, ev.Reason, ev.Result, ev.Detail = core.AuditDecisionDeny, d.Reason, core.AuditResultDenied, "finalize: "+d.Detail

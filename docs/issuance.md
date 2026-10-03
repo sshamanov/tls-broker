@@ -12,8 +12,11 @@ state is the `core` stores. Design background: architecture §7, §8, §9, §10,
 
 The engine does not authorize. Front ends run the gate and pass the
 `Decision`; the engine only verifies it (and runs the gate itself when a
-caller passes a zero decision). `Finalize` re-runs the gate for the address
-that finalizes, which may differ from the one that created the order.
+caller passes a zero decision). The same holds for `Finalize`: the gate is
+checked again for the address that finalizes, which may differ from the one
+that created the order — by the front end, which passes
+`FinalizeRequest.Decision`, or by the engine when that is zero. A retry of an
+already accepted CSR is a poll and is not gated by either.
 
 ## Order state machine
 

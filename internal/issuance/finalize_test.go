@@ -177,6 +177,46 @@ func TestFinalizeRechecksGate(t *testing.T) {
 	}
 }
 
+// A front end that ran the gate hands its decision over; the engine must not
+// ask again (two DoH lookups per finalize), and a same-CSR retry is a poll
+// that is not gated at all.
+func TestFinalizeTakesFrontEndDecision(t *testing.T) {
+	e := newEnv(t, nil)
+	o := e.admit("acct", "www.example.com")
+	e.waitPrepared(o.ID)
+	calls := len(e.gate.Calls())
+	req := core.FinalizeRequest{OrderID: o.ID, AccountID: "acct", CSRDER: e.csr(o), SourceIP: srcIP,
+		Decision: core.Decision{Allowed: true, Reason: core.ReasonIPGrant, GrantID: 7}}
+	got, err := e.eng.Finalize(e.ctx, req)
+	if err != nil || got.Status != core.OrderValid {
+		t.Fatalf("finalize with a decision: %v %+v", err, got)
+	}
+	if n := len(e.gate.Calls()); n != calls {
+		t.Fatalf("engine asked the gate %d times although the front end decided", n-calls)
+	}
+	// Retry of the accepted CSR from an address the gate would now deny.
+	e.gate.Decide(core.Decision{Allowed: false, Reason: core.ReasonDNSMismatch})
+	req.Decision = core.Decision{}
+	if got, err = e.eng.Finalize(e.ctx, req); err != nil || got.Status != core.OrderValid {
+		t.Fatalf("same-CSR retry gated: %v %+v", err, got)
+	}
+	if n := len(e.gate.Calls()); n != calls {
+		t.Fatalf("gate asked %d times for a retry of an accepted CSR", n-calls)
+	}
+	// A denied decision from the front end is honoured without asking.
+	o2 := e.admit("acct", "www2.example.com")
+	e.waitPrepared(o2.ID)
+	calls = len(e.gate.Calls())
+	_, err = e.eng.Finalize(e.ctx, core.FinalizeRequest{OrderID: o2.ID, AccountID: "acct", CSRDER: e.csr(o2), SourceIP: srcIP,
+		Decision: core.Decision{Allowed: false, Reason: core.ReasonDNSMismatch, Name: "www2.example.com"}})
+	if p := asProblem(t, err); p.Type != core.ProblemUnauthorized {
+		t.Fatalf("denied decision: %v", p)
+	}
+	if n := len(e.gate.Calls()); n != calls {
+		t.Fatal("engine asked the gate despite a denied decision")
+	}
+}
+
 func TestFinalizeExpiredOrder(t *testing.T) {
 	e := newEnv(t, nil)
 	o := e.admit("acct", "www.example.com")

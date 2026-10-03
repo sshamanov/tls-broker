@@ -477,6 +477,11 @@ type FinalizeRequest struct {
 	AccountID string // must own the order, otherwise ErrNotFound
 	CSRDER    []byte
 	SourceIP  netip.Addr
+	// Decision is the gate's decision for SourceIP and the order's names
+	// (architecture §7.2 step 1), when the front end ran the gate. Zero
+	// means it did not: the engine then runs the gate itself, unless the
+	// order already holds a CSR (a retry of an accepted finalize is a poll).
+	Decision Decision
 }
 
 // IssueRequest is a gate-approved direct-mode issuance.
@@ -523,8 +528,10 @@ type Issuer interface {
 	// Finalize handles a downstream finalize (architecture §7.2 steps
 	// 2–9).
 	//
-	// It validates the CSR (parses, signature, no extra names, names
-	// equal to the order's set; violations are *Problem badCSR), records
+	// It re-checks the gate for the finalizing address (or takes the
+	// front end's Decision), validates the CSR (parses, signature, no
+	// extra names, names equal to the order's set; violations are *Problem
+	// badCSR), records
 	// it (idempotency by CSR hash: the same CSR again reuses the existing
 	// state, a different CSR gives ErrCSRMismatch and never reaches
 	// upstream), then waits up to SchedulerConfig.FinalizeWait for the

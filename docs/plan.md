@@ -219,7 +219,10 @@ type SecretStore interface { Get; Put; Delete; List }                          /
 ```
 
 Front ends call `Gate.Authorize` themselves and pass the `Decision` to the
-`Issuer`; the gate does not write audit records, its callers do.
+`Issuer` (`AdmitRequest.Decision`, `FinalizeRequest.Decision`,
+`IssueRequest.Decision`); the engine runs the gate only for a zero decision,
+so no request is gated twice. The gate does not write audit records, its
+callers do.
 
 Configuration view (`core/config.go`): `Config{Generation, DataDir, Server,
 Bootstrap, Zones, Route53, Providers, LDAP, Sessions, Scheduler, Emergency,

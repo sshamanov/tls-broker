@@ -400,19 +400,24 @@ func (s *Server) finalizeAuthed(x *exchange, a *authed, id string) *core.Problem
 	if p != nil {
 		return s.finalizeRejected(x, o, p)
 	}
+	var dec core.Decision
 	switch status, _ := effectiveStatus(o, s.clock.Now()); {
 	case status == core.OrderInvalid && !o.Finalized():
 		return s.finalizeRejected(x, o, core.NewProblem(core.ProblemOrderNotReady,
 			"order is invalid and cannot be finalized; create a new order"))
 	case status == core.OrderReady:
 		// Architecture §7.2 step 1: the gate is asked again for the source
-		// that sends the CSR. Retries of an accepted CSR skip this.
-		if _, _, p := s.authorize(x, o.Names, o.ID); p != nil {
+		// that sends the CSR; the decision is handed to the issuer so it is
+		// not asked twice. Retries of an accepted CSR skip this.
+		var p *core.Problem
+		if dec, _, p = s.authorize(x, o.Names, o.ID); p != nil {
 			return p
 		}
 	}
 	src, _ := httpx.SourceIP(x.ctx)
-	res, err := s.o.Issuer.Finalize(x.ctx, core.FinalizeRequest{OrderID: o.ID, AccountID: a.account.ID, CSRDER: csrDER, SourceIP: src})
+	res, err := s.o.Issuer.Finalize(x.ctx, core.FinalizeRequest{
+		OrderID: o.ID, AccountID: a.account.ID, CSRDER: csrDER, SourceIP: src, Decision: dec,
+	})
 	switch {
 	case err == nil:
 	case errors.Is(err, core.ErrExpired):
