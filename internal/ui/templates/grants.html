@@ -1,17 +1,27 @@
 {{define "content"}}
 {{if .Data.Error}}<p class="flash error" role="alert">{{.Data.Error}}</p>{{end}}
-<p class="muted">A grant lets clients at an IPv4 address or CIDR use the broker. Grants stay in force when their owner is later blocked or demoted; disable or delete them to revoke.</p>
+<p class="muted">A grant lets clients at an IPv4 address or CIDR use the broker. Grants stay in force when their owner is later blocked or demoted; disable or delete them to revoke.{{if not .Blocked}} Everyone sees all grants; you change your own{{if .Admin}}, and as an admin any other{{end}}.{{end}}</p>
+{{if not .Blocked}}
+<form method="get" action="/ui/grants" class="filters">
+<label>Owner <select name="owner">{{$o := .Data.Owner}}
+<option value="all"{{if or (eq $o "") (eq $o "all")}} selected{{end}}>everyone</option>
+<option value="mine"{{if eq $o "mine"}} selected{{end}}>mine</option>
+{{range .Data.Owners}}<option value="{{.}}"{{if eq . $o}} selected{{end}}>{{.}}</option>{{end}}
+</select></label>
+<button type="submit">Filter</button>
+</form>
+{{end}}
 <table>
-<tr><th>Network</th><th>Wildcards</th><th>Status</th><th>Note</th><th>Created</th><th><span class="sr">Actions</span></th></tr>
-{{range .Data.Grants}}
-<tr><td><code>{{.Prefix}}</code></td><td>{{if .Wildcard}}allowed{{else}}no{{end}}</td>
+<tr><th>Network</th><th>Owner</th><th>Wildcards</th><th>Status</th><th>Note</th><th>Created</th><th><span class="sr">Actions</span></th></tr>
+{{range .Data.Rows}}
+<tr><td><code>{{.Prefix}}</code></td><td>{{.Owner}}{{if .Mine}} <span class="badge">you</span>{{end}}</td><td>{{if .Wildcard}}allowed{{else}}no{{end}}</td>
 <td><span class="badge {{if .Enabled}}good{{else}}warn{{end}}">{{if .Enabled}}enabled{{else}}disabled{{end}}</span></td>
 <td>{{.Note}}</td><td>{{ts .CreatedAt}}</td>
-<td class="actions">{{if not $.Blocked}}
-<form method="post" action="/ui/grants/{{.ID}}/{{if .Enabled}}disable{{else}}enable{{end}}">{{template "csrf" $}}<button type="submit">{{if .Enabled}}Disable{{else}}Enable{{end}}</button></form>
-<form method="post" action="/ui/grants/{{.ID}}/delete" data-confirm="Delete grant {{.Prefix}}?">{{template "csrf" $}}<button type="submit" class="danger">Delete</button></form>
+<td class="actions">{{if .CanEdit}}
+<form method="post" action="/ui/grants/{{.ID}}/{{if .Enabled}}disable{{else}}enable{{end}}">{{template "csrf" $}}<input type="hidden" name="owner" value="{{$.Data.Owner}}"><button type="submit">{{if .Enabled}}Disable{{else}}Enable{{end}}</button></form>
+<form method="post" action="/ui/grants/{{.ID}}/delete" data-confirm="Delete grant {{.Prefix}} of {{.Owner}}?">{{template "csrf" $}}<input type="hidden" name="owner" value="{{$.Data.Owner}}"><button type="submit" class="danger">Delete</button></form>
 {{end}}</td></tr>
-{{else}}<tr><td colspan="6" class="muted">You have no grants.</td></tr>{{end}}
+{{else}}<tr><td colspan="7" class="muted">No grants{{if .Data.Owner}} match the filter{{end}}.</td></tr>{{end}}
 </table>
 {{if not .Blocked}}
 <h2>New grant</h2>
@@ -22,5 +32,6 @@
 {{else}}<p class="muted">Wildcard grants need the wildcard_allowed or admin role.</p>{{end}}
 <button type="submit">Create grant</button>
 </form>
+<p class="muted">The grant is yours; only you and administrators can change it.</p>
 {{end}}
 {{end}}

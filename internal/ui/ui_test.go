@@ -25,7 +25,6 @@ var allPages = []pageSpec{
 	{"/ui/audit", ""},
 	{"/ui/certificates", core.RoleNormal},
 	{"/ui/admin/users", core.RoleAdmin},
-	{"/ui/admin/grants", core.RoleAdmin},
 	{"/ui/admin/config", core.RoleAdmin},
 	{"/ui/admin/secrets", core.RoleAdmin},
 	{"/ui/admin/providers", core.RoleAdmin},
@@ -111,7 +110,7 @@ func TestAnonymousAndMethods(t *testing.T) {
 func TestRoleGatedPosts(t *testing.T) {
 	e := newEnv(t)
 	bob := e.login("bob")
-	for _, p := range []string{"/ui/admin/users/1/block", "/ui/admin/grants/1/delete", "/ui/admin/config/activate", "/ui/admin/config/rollback", "/ui/admin/secrets", "/ui/admin/secrets/delete", "/ui/admin/config/test-ldap", "/ui/certificates/rotate"} {
+	for _, p := range []string{"/ui/admin/users/1/block", "/ui/admin/config/activate", "/ui/admin/config/rollback", "/ui/admin/secrets", "/ui/admin/secrets/delete", "/ui/admin/config/test-ldap", "/ui/certificates/rotate"} {
 		code(t, bob.act(p, url.Values{"name": {"x"}, "value": {"y"}}), 403)
 	}
 	if n, _ := e.secrets.List(bg); len(n) != 0 {
@@ -225,29 +224,56 @@ func TestGrantRules(t *testing.T) {
 	if g, _ := e.store.Grants().Get(bg, id); !g.Enabled {
 		t.Error("not enabled")
 	}
-	// Someone else's grant is invisible to a normal user.
-	code(t, bob.act("/ui/grants/"+itoa(cg[0].ID)+"/delete", nil), 404)
+	// Everyone sees every grant with its owner, but changes only their own:
+	// someone else's grant answers 403 and stays as it is.
+	page = bob.get("/ui/grants")
+	see(t, page, "10.9.9.0/24", "carol", "10.8.0.0/16", "alice", "10.1.2.3/32")
+	if strings.Count(page.body, `action="/ui/grants/`) != 2 {
+		t.Errorf("bob gets action forms for grants he does not own:\n%s", trim(page.body))
+	}
+	for _, a := range []string{"disable", "enable", "delete"} {
+		code(t, bob.act("/ui/grants/"+itoa(cg[0].ID)+"/"+a, nil), 403)
+	}
+	if g, err := e.store.Grants().Get(bg, cg[0].ID); err != nil || !g.Enabled {
+		t.Errorf("carol's grant changed by bob: %+v %v", g, err)
+	}
 	code(t, bob.act(path+"/explode", nil), 404)
-	code(t, bob.act(path+"/delete", nil), 303)
+	code(t, bob.act("/ui/grants/9999/delete", nil), 404)
+	r = bob.act(path+"/delete", url.Values{"owner": {"mine"}})
+	code(t, r, 303)
+	if loc := r.hdr.Get("Location"); loc != "/ui/grants?owner=mine" {
+		t.Errorf("redirect keeps the filter: %q", loc)
+	}
 	if _, err := e.store.Grants().Get(bg, id); !isNotFound(err) {
 		t.Errorf("not deleted: %v", err)
 	}
-	// Admin sees and manages everyone's grants.
-	ag := admin.get("/ui/admin/grants")
-	see(t, ag, "carol", "10.9.9.0/24", "10.8.0.0/16")
-	code(t, admin.act("/ui/admin/grants/"+itoa(cg[0].ID)+"/disable", nil), 303)
+	// The owner filter: everyone, mine, one owner.
+	code(t, bob.act("/ui/grants", url.Values{"prefix": {"10.1.2.4"}}), 303)
+	mine := bob.get("/ui/grants?owner=mine")
+	see(t, mine, "10.1.2.4/32")
+	lacks(t, mine, "10.9.9.0/24", "10.8.0.0/16")
+	byCarol := bob.get("/ui/grants?owner=carol")
+	see(t, byCarol, "10.9.9.0/24")
+	lacks(t, byCarol, "10.1.2.4/32", "10.8.0.0/16")
+	see(t, bob.get("/ui/grants?owner=all"), "10.9.9.0/24", "10.1.2.4/32", "10.8.0.0/16")
+	// An admin manages everyone's grants on the same page.
+	code(t, admin.act("/ui/grants/"+itoa(cg[0].ID)+"/disable", nil), 303)
 	if g, _ := e.store.Grants().Get(bg, cg[0].ID); g.Enabled {
 		t.Error("admin disable failed")
 	}
-	code(t, admin.act("/ui/admin/grants/"+itoa(cg[0].ID)+"/delete", nil), 303)
-	code(t, bob.act("/ui/admin/grants/1/delete", nil), 403)
+	code(t, admin.act("/ui/grants/"+itoa(cg[0].ID)+"/delete", nil), 303)
+	if _, err := e.store.Grants().Get(bg, cg[0].ID); !isNotFound(err) {
+		t.Errorf("admin delete failed: %v", err)
+	}
+	// The old admin page is gone.
+	code(t, admin.get("/ui/admin/grants"), 404)
 
 	// Audit: grant changes are recorded and part of everyone's activity log.
 	evs, _ := e.audit.Query(bg, core.AuditQuery{Type: core.AuditGrantChange})
 	if len(evs) < 5 {
 		t.Errorf("grant audit events: %d", len(evs))
 	}
-	see(t, bob.get("/ui/audit"), "Created grant 10.9.9.0/24 (wildcards allowed).", "Deleted grant 10.1.2.3/32.", "carol")
+	see(t, bob.get("/ui/audit"), "Created grant 10.9.9.0/24 (wildcards allowed).", "Deleted grant 10.1.2.3/32.", "Disabled grant 10.9.9.0/24.", "carol")
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
@@ -692,11 +718,11 @@ func TestNotFoundPageAndFavicon(t *testing.T) {
 		t.Errorf("content type %q", ct)
 	}
 	see(t, r, "<title>Not found - TLS broker</title>", `class="brand"`, "There is nothing here", `href="/ui/static/ui.css?v=`)
-	lacks(t, r, "My grants")
+	lacks(t, r, `href="/ui/grants"`)
 	bob := e.login("bob")
 	r = bob.get("/ui/admin/nope/")
 	code(t, r, 404)
-	see(t, r, "There is nothing here", "My grants", "Log out")
+	see(t, r, "There is nothing here", `href="/ui/grants"`, "Log out")
 	// The exact routes still win over the catch-all, and a wrong method on
 	// a known path stays a 405.
 	code(t, bob.get("/ui/"), 200)

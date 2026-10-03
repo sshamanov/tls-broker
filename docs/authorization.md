@@ -37,6 +37,11 @@ A grant is an IPv4 address or CIDR with two switches, `enabled` and
   identifier). Give grants only to hosts you trust with every managed zone.
 - `wildcard=true` additionally permits wildcard identifiers and skips the
   DNS-proxy CAA check below.
+- Every user who is not blocked sees all grants with their owner. A user
+  creates grants owned by themselves and enables, disables or deletes only
+  those; an admin may change any grant. Only `wildcard_allowed` users and
+  admins may create wildcard grants. The server enforces all of it (someone
+  else's grant answers 403), not just the page.
 
 When several enabled grants cover an address, a wildcard grant wins over an
 ordinary one, then the longest prefix, then the lowest ID. That grant's ID is

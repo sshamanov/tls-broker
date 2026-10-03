@@ -1,9 +1,12 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/netip"
+	"net/url"
+	"slices"
 	"strings"
 
 	"tls-broker/internal/auth"
@@ -13,10 +16,21 @@ import (
 const maxNote = 200
 
 type grantsData struct {
-	Grants      []core.Grant
+	Rows        []grantRow
+	Owners      []string // usernames that own a grant, for the filter
+	Owner       string   // filter: "" (all), "mine" or a username
 	CanWildcard bool
 	Form        grantForm
 	Error       string
+}
+
+// grantRow is a grant with its owner's name and whether the viewer may
+// change it (their own grant, or any grant for an admin).
+type grantRow struct {
+	core.Grant
+	Owner   string
+	Mine    bool
+	CanEdit bool
 }
 
 type grantForm struct {
@@ -28,14 +42,68 @@ func (h *Handler) grantsPage(w http.ResponseWriter, r *http.Request, cur *auth.C
 	h.renderGrants(w, r, cur, http.StatusOK, grantForm{}, "")
 }
 
+// renderGrants lists every grant with its owner, filtered by the "owner"
+// query parameter. A blocked user sees only their own grants, read-only.
 func (h *Handler) renderGrants(w http.ResponseWriter, r *http.Request, cur *auth.Current, status int, form grantForm, errMsg string) {
-	grants, err := h.Grants.List(r.Context(), cur.User.ID)
+	ctx := r.Context()
+	var owner int64
+	if cur.User.Blocked {
+		owner = cur.User.ID
+	}
+	grants, err := h.Grants.List(ctx, owner)
 	if err != nil {
 		h.serverError(w, r, cur, "list grants", err)
 		return
 	}
-	d := &grantsData{Grants: grants, CanWildcard: cur.User.Can(core.RoleWildcardAllowed), Form: form, Error: errMsg}
-	h.render(w, status, "grants", h.newPage(w, r, cur, "My grants", "grants", d))
+	names, err := h.userNames(ctx)
+	if err != nil {
+		h.serverError(w, r, cur, "list users", err)
+		return
+	}
+	admin := cur.User.Can(core.RoleAdmin)
+	d := &grantsData{CanWildcard: cur.User.Can(core.RoleWildcardAllowed), Form: form, Error: errMsg}
+	if !cur.User.Blocked {
+		d.Owner = r.URL.Query().Get("owner")
+	}
+	seen := map[string]bool{}
+	for _, g := range grants {
+		row := grantRow{Grant: g, Owner: names.name(g.OwnerUserID), Mine: g.OwnerUserID == cur.User.ID}
+		row.CanEdit = !cur.User.Blocked && (row.Mine || admin)
+		if !seen[row.Owner] {
+			seen[row.Owner] = true
+			d.Owners = append(d.Owners, row.Owner)
+		}
+		switch {
+		case d.Owner == "" || d.Owner == "all":
+		case d.Owner == "mine" && !row.Mine, d.Owner != "mine" && row.Owner != d.Owner:
+			continue
+		}
+		d.Rows = append(d.Rows, row)
+	}
+	slices.Sort(d.Owners)
+	h.render(w, status, "grants", h.newPage(w, r, cur, "Grants", "grants", d))
+}
+
+// userNames maps user IDs to usernames.
+type userNames map[int64]string
+
+func (h *Handler) userNames(ctx context.Context) (userNames, error) {
+	users, err := h.Users.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	m := userNames{}
+	for _, u := range users {
+		m[u.ID] = u.Username
+	}
+	return m, nil
+}
+
+func (m userNames) name(id int64) string {
+	if n, ok := m[id]; ok {
+		return n
+	}
+	return fmt.Sprintf("user #%d", id)
 }
 
 // parseGrantPrefix accepts an IPv4 address (a /32) or an IPv4 CIDR.
@@ -118,15 +186,17 @@ func (h *Handler) applyGrantAction(r *http.Request, cur *auth.Current, g *core.G
 
 var errUnknownAction = fmt.Errorf("unknown action")
 
+// grantAction enables, disables or deletes a grant. Users change their own
+// grants; admins change any. Someone else's grant answers 403: every user
+// sees all grants, so its existence is no secret.
 func (h *Handler) grantAction(w http.ResponseWriter, r *http.Request, cur *auth.Current) {
-	h.doGrantAction(w, r, cur, base+"/grants", false)
-}
-
-func (h *Handler) adminGrantAction(w http.ResponseWriter, r *http.Request, cur *auth.Current) {
-	h.doGrantAction(w, r, cur, base+"/admin/grants", true)
-}
-
-func (h *Handler) doGrantAction(w http.ResponseWriter, r *http.Request, cur *auth.Current, back string, anyOwner bool) {
+	if !limitForm(w, r, maxForm) {
+		return
+	}
+	back := base + "/grants"
+	if o := r.PostFormValue("owner"); o != "" {
+		back += "?owner=" + url.QueryEscape(o)
+	}
 	id, ok := formInt(r, "id")
 	if !ok {
 		h.notFound(w, r, cur)
@@ -141,9 +211,8 @@ func (h *Handler) doGrantAction(w http.ResponseWriter, r *http.Request, cur *aut
 		}
 		return
 	}
-	// Someone else's grant looks like it does not exist.
-	if !anyOwner && g.OwnerUserID != cur.User.ID {
-		h.notFound(w, r, cur)
+	if g.OwnerUserID != cur.User.ID && !cur.User.Can(core.RoleAdmin) {
+		h.forbidden(w, r, cur)
 		return
 	}
 	msg, err := h.applyGrantAction(r, cur, g, r.PathValue("action"))
@@ -157,37 +226,4 @@ func (h *Handler) doGrantAction(w http.ResponseWriter, r *http.Request, cur *aut
 	default:
 		h.redirect(w, r, back, "ok", msg)
 	}
-}
-
-type adminGrantRow struct {
-	core.Grant
-	Owner string
-}
-
-type adminGrantsData struct{ Rows []adminGrantRow }
-
-func (h *Handler) adminGrants(w http.ResponseWriter, r *http.Request, cur *auth.Current) {
-	grants, err := h.Grants.List(r.Context(), 0)
-	if err != nil {
-		h.serverError(w, r, cur, "list grants", err)
-		return
-	}
-	users, err := h.Users.List(r.Context())
-	if err != nil {
-		h.serverError(w, r, cur, "list users", err)
-		return
-	}
-	owners := map[int64]string{}
-	for _, u := range users {
-		owners[u.ID] = u.Username
-	}
-	d := &adminGrantsData{}
-	for _, g := range grants {
-		o := owners[g.OwnerUserID]
-		if o == "" {
-			o = fmt.Sprintf("user #%d", g.OwnerUserID)
-		}
-		d.Rows = append(d.Rows, adminGrantRow{Grant: g, Owner: o})
-	}
-	h.render(w, http.StatusOK, "admin_grants", h.newPage(w, r, cur, "All grants", "admin-grants", d))
 }

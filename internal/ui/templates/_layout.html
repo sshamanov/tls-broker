@@ -16,13 +16,12 @@
 {{if .User}}
 <nav>
 <a href="/ui/"{{if eq .Nav "dashboard"}} class="on"{{end}}>Dashboard</a>
-<a href="/ui/grants"{{if eq .Nav "grants"}} class="on"{{end}}>My grants</a>
+<a href="/ui/grants"{{if eq .Nav "grants"}} class="on"{{end}}>Grants</a>
 {{if not .Blocked}}<a href="/ui/certificates"{{if eq .Nav "certificates"}} class="on"{{end}}>Certificates</a>{{end}}
 <a href="/ui/audit"{{if eq .Nav "audit"}} class="on"{{end}}>Activity</a>
 {{if and .Admin (not .Blocked)}}
 <span class="sep">Admin</span>
 <a href="/ui/admin/users"{{if eq .Nav "admin-users"}} class="on"{{end}}>Users</a>
-<a href="/ui/admin/grants"{{if eq .Nav "admin-grants"}} class="on"{{end}}>Grants</a>
 <a href="/ui/admin/config"{{if eq .Nav "admin-config"}} class="on"{{end}}>Config</a>
 <a href="/ui/admin/secrets"{{if eq .Nav "admin-secrets"}} class="on"{{end}}>Secrets</a>
 <a href="/ui/admin/providers"{{if eq .Nav "admin-providers"}} class="on"{{end}}>Providers</a>

@@ -45,7 +45,7 @@ the route's role check.
 |---|---|---|---|---|
 | Log in, see banner | yes | yes | yes | yes |
 | Dashboard | banner only | counts, providers, budgets, recent issuance activity | same | plus accounts, zones, warnings, all recent events |
-| My grants | read only | create, enable, disable, delete own | plus `wildcard` | same |
+| Grants | own, read only | see all with owner; create, enable, disable, delete own | plus `wildcard` | plus change anyone's |
 | Certificates | no | yes | yes | yes (plus rotate hook) |
 | Activity log | issuance activity | issuance activity | issuance activity | all events, with detail |
 | Admin pages | no | no | no | yes |
@@ -88,11 +88,14 @@ top of every page, the login page included, to every user.
   it.
 - Recent activity (the activity log's first ten events for the viewer).
 
-**My grants** (`/ui/grants`). Lists your grants; create one from an IPv4
-address (stored as /32) or IPv4 CIDR (stored masked) with a note. `/0` and IPv6
-are refused. The wildcard checkbox appears only for `wildcard_allowed` and
-`admin`; the server enforces it too. Enable, disable and delete act on your own
-grants only (someone else's grant answers 404).
+**Grants** (`/ui/grants`). One page for everyone: every grant with its owner,
+filtered by owner (everyone, mine, or one user). Create one from an IPv4
+address (stored as /32) or IPv4 CIDR (stored masked) with a note; it is owned
+by you. `/0` and IPv6 are refused. The wildcard checkbox appears only for
+`wildcard_allowed` and `admin`; the server enforces it too. Enable, disable and
+delete appear on your own grants, and on all grants for an admin; posting an
+action on someone else's grant answers 403. A blocked user sees only their own
+grants, read-only. Changes are audited as `grant_change`.
 
 **Certificates** (`/ui/certificates`). ACME-mode certificates (identifiers,
 provider, serial, validity, issue time, observed client check interval of the
@@ -119,9 +122,6 @@ Admins see every event type with the detail column. See
 state and last login. Set role, block, unblock. The local break-glass admin and
 your own account cannot be changed here. Each change is audited as
 `user_change`.
-
-**Admin, Grants** (`/ui/admin/grants`). All grants with their owner; enable,
-disable, delete. Audited as `grant_change`.
 
 **Admin, Config** (`/ui/admin/config`). The active generation's YAML in an
 editor (open an older one with "View"). *Validate* shows problems with their

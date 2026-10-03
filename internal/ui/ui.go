@@ -180,8 +180,8 @@ const (
 	// accessAnon: no login needed.
 	accessAnon access = iota
 	// accessAny: any logged-in user, blocked ones included (views the
-	// architecture allows blocked users: own grants read-only, public
-	// audit, dashboard banner).
+	// architecture allows blocked users: own grants read-only, the
+	// activity log, dashboard banner).
 	accessAny
 	// accessUser: logged in and not blocked.
 	accessUser
@@ -252,8 +252,6 @@ func (h *Handler) routes() {
 
 	h.route("GET /ui/admin/users", accessAdmin, h.usersPage)
 	h.route("POST /ui/admin/users/{id}/{action}", accessAdmin, h.userAction)
-	h.route("GET /ui/admin/grants", accessAdmin, h.adminGrants)
-	h.route("POST /ui/admin/grants/{id}/{action}", accessAdmin, h.adminGrantAction)
 
 	h.route("GET /ui/admin/config", accessAdmin, h.configPage)
 	h.route("POST /ui/admin/config/validate", accessAdmin, h.configValidate)
