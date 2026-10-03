@@ -1,10 +1,14 @@
 {{define "content"}}
-{{if .Data.Error}}<p class="flash error" role="alert">{{.Data.Error}}</p>{{end}}
-<form method="post" action="/ui/login" class="stack narrow">
+<div class="signin">
+<a class="brand" href="/ui/">{{template "brandmark"}}<span>TLS broker</span></a>
+<h1>Sign in</h1>
+<p class="lede">Use your directory (LDAP) account. If the directory is down, the local administrator account still works.</p>
+{{if .Data.Error}}<div class="notice error" role="alert"><p>{{.Data.Error}}</p></div>{{end}}
+<form method="post" action="/ui/login" class="form">
 <input type="hidden" name="next" value="{{.Data.Next}}">
-<label>Username <input name="username" value="{{.Data.Username}}" autocomplete="username" autofocus required></label>
+<label>Username <input name="username" value="{{.Data.Username}}" autocomplete="username" autocapitalize="none" spellcheck="false" autofocus required></label>
 <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
-<button type="submit">Log in</button>
+<button type="submit" class="primary">Sign in</button>
 </form>
-<p class="muted">Use your directory (LDAP) account, or the local administrator account if LDAP is unavailable.</p>
+</div>
 {{end}}

@@ -18,11 +18,13 @@ type certRow struct {
 	core.Certificate
 	Interval time.Duration // lineage observed interval; 0 when unknown
 	Owner    ownerView
+	Life     lifetime
 }
 
 type directRow struct {
 	core.DirectEntry
 	Owner ownerView // of the active generation's certificate
+	Life  lifetime
 }
 
 // ownerView says who obtained a certificate: the owner of the grant that
@@ -128,7 +130,10 @@ func (h *Handler) certificates(w http.ResponseWriter, r *http.Request, cur *auth
 			certs = certs[:certPageSize]
 		}
 		for _, c := range certs {
-			row := certRow{Certificate: c, Owner: owners.owner(&c)}
+			row := certRow{Certificate: c, Owner: owners.owner(&c), Life: newLifetime(now, c.NotBefore, c.NotAfter, time.Time{})}
+			if c.ReplacedByID != "" && row.Life.State != "expired" {
+				row.Life.State = "replaced"
+			}
 			if l, err := h.Lineages.Get(ctx, c.Names.Key()); err == nil && l.Samples > 0 {
 				row.Interval = l.ObservedInterval
 			}
@@ -158,7 +163,7 @@ func (h *Handler) certificates(w http.ResponseWriter, r *http.Request, cur *auth
 			if !d.Expired && !e.NotAfter.IsZero() && !e.NotAfter.After(now) {
 				continue
 			}
-			row := directRow{DirectEntry: e, Owner: ownerView{Kind: "unknown"}}
+			row := directRow{DirectEntry: e, Owner: ownerView{Kind: "unknown"}, Life: newLifetime(now, e.NotBefore, e.NotAfter, e.RenewAt)}
 			if e.CertificateID != "" {
 				if c, err := h.Certs.Get(ctx, e.CertificateID); err == nil {
 					row.Owner = owners.owner(c)

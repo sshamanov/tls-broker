@@ -1,37 +1,43 @@
+{{define "lede"}}<p class="lede">Networks allowed to request certificates. A machine at a listed address may request any name in the managed zones; without an entry, a name must resolve to the requesting machine.</p>{{end}}
+{{define "actions"}}{{if not .Blocked}}<a class="btn primary" href="#add">Add network</a>{{end}}{{end}}
+
 {{define "content"}}
-{{if .Data.Error}}<p class="flash error" role="alert">{{.Data.Error}}</p>{{end}}
-<p class="muted">A grant lets clients at an IPv4 address or CIDR use the broker. Grants stay in force when their owner is later blocked or demoted; disable or delete them to revoke.{{if not .Blocked}} Everyone sees all grants; you change your own{{if .Admin}}, and as an admin any other{{end}}.{{end}}</p>
+{{if .Data.Error}}<div class="notice error" role="alert"><p>{{.Data.Error}}</p></div>{{end}}
 {{if not .Blocked}}
-<form method="get" action="/ui/grants" class="filters">
+<form method="get" action="/ui/grants" class="filters" aria-label="Filter by owner">
 <label>Owner <select name="owner">{{$o := .Data.Owner}}
-<option value="all"{{if or (eq $o "") (eq $o "all")}} selected{{end}}>everyone</option>
-<option value="mine"{{if eq $o "mine"}} selected{{end}}>mine</option>
+<option value="all"{{if or (eq $o "") (eq $o "all")}} selected{{end}}>Everyone</option>
+<option value="mine"{{if eq $o "mine"}} selected{{end}}>Mine</option>
 {{range .Data.Owners}}<option value="{{.}}"{{if eq . $o}} selected{{end}}>{{.}}</option>{{end}}
 </select></label>
-<button type="submit">Filter</button>
+<button type="submit">Show</button>
 </form>
 {{end}}
 <table>
-<tr><th>Network</th><th>Owner</th><th>Wildcards</th><th>Status</th><th>Note</th><th>Created</th><th><span class="sr">Actions</span></th></tr>
+<tr><th>Network</th><th>Owner</th><th>Wildcards</th><th>State</th><th>Note</th><th>Added</th><th><span class="sr">Actions</span></th></tr>
+
 {{range .Data.Rows}}
-<tr><td><code>{{.Prefix}}</code></td><td>{{.Owner}}{{if .Mine}} <span class="badge">you</span>{{end}}</td><td>{{if .Wildcard}}allowed{{else}}no{{end}}</td>
-<td><span class="badge {{if .Enabled}}good{{else}}warn{{end}}">{{if .Enabled}}enabled{{else}}disabled{{end}}</span></td>
-<td>{{.Note}}</td><td>{{ts .CreatedAt}}</td>
+<tr><td><code>{{.Prefix}}</code></td><td class="nowrap">{{.Owner}}{{if .Mine}} <span class="pill info plain">you</span>{{end}}</td><td>{{if .Wildcard}}allowed{{else}}<span class="muted">no</span>{{end}}</td>
+<td><span class="pill {{if .Enabled}}ok{{else}}quiet{{end}}">{{if .Enabled}}enabled{{else}}disabled{{end}}</span></td>
+<td class="wrap">{{.Note}}</td><td>{{ts .CreatedAt}}</td>
 <td class="actions">{{if .CanEdit}}
-<form method="post" action="/ui/grants/{{.ID}}/{{if .Enabled}}disable{{else}}enable{{end}}">{{template "csrf" $}}<input type="hidden" name="owner" value="{{$.Data.Owner}}"><button type="submit">{{if .Enabled}}Disable{{else}}Enable{{end}}</button></form>
-<form method="post" action="/ui/grants/{{.ID}}/delete" data-confirm="Delete grant {{.Prefix}} of {{.Owner}}?">{{template "csrf" $}}<input type="hidden" name="owner" value="{{$.Data.Owner}}"><button type="submit" class="danger">Delete</button></form>
+<form method="post" action="/ui/grants/{{.ID}}/{{if .Enabled}}disable{{else}}enable{{end}}">{{template "csrf" $}}<input type="hidden" name="owner" value="{{$.Data.Owner}}"><button type="submit" class="small">{{if .Enabled}}Disable{{else}}Enable{{end}}</button></form>
+<form method="post" action="/ui/grants/{{.ID}}/delete" data-confirm="Delete network {{.Prefix}} of {{.Owner}}? Machines there lose access unless their names resolve to them.">{{template "csrf" $}}<input type="hidden" name="owner" value="{{$.Data.Owner}}"><button type="submit" class="small danger">Delete</button></form>
 {{end}}</td></tr>
-{{else}}<tr><td colspan="7" class="muted">No grants{{if .Data.Owner}} match the filter{{end}}.</td></tr>{{end}}
+{{else}}<tr><td colspan="7" class="empty">{{if and .Data.Owner (ne .Data.Owner "all")}}No networks match the filter. <a href="/ui/grants">Show everyone's</a>.{{else if .Blocked}}You have no networks.{{else}}No networks yet. Add the address of a machine that runs certbot or acme.sh, and it can request certificates for any name in the managed zones.{{end}}</td></tr>{{end}}
+
 </table>
+
 {{if not .Blocked}}
-<h2>New grant</h2>
-<form method="post" action="/ui/grants" class="stack narrow">{{template "csrf" .}}
-<label>IPv4 address or CIDR <input name="prefix" value="{{.Data.Form.Prefix}}" placeholder="10.1.2.3 or 10.1.2.0/24" required></label>
-<label>Note <input name="note" value="{{.Data.Form.Note}}" maxlength="200"></label>
-{{if .Data.CanWildcard}}<label class="check"><input type="checkbox" name="wildcard" value="true"{{if .Data.Form.Wildcard}} checked{{end}}> Allow wildcard certificates</label>
-{{else}}<p class="muted">Wildcard grants need the wildcard_allowed or admin role.</p>{{end}}
-<button type="submit">Create grant</button>
+<section class="panel add" id="add" aria-labelledby="h-add"><h2 id="h-add">Add a network</h2>
+<form method="post" action="/ui/grants" class="form">{{template "csrf" .}}
+<label>IPv4 address or network <input name="prefix" value="{{.Data.Form.Prefix}}" placeholder="10.1.2.3 or 10.1.2.0/24" required spellcheck="false" autocomplete="off"><span class="hint">A single address is stored as /32.</span></label>
+<label>Note <input name="note" value="{{.Data.Form.Note}}" maxlength="200" placeholder="build server"><span class="hint">Optional; helps others know what the machine is.</span></label>
+{{if .Data.CanWildcard}}<label class="check"><input type="checkbox" name="wildcard" value="true"{{if .Data.Form.Wildcard}} checked{{end}}> Allow wildcard certificates (<code>*.example.com</code>)</label>
+{{else}}<p class="muted small">Wildcard certificates need the wildcard role; ask an administrator.</p>{{end}}
+<div class="buttons"><button type="submit" class="primary">Add network</button></div>
+<p class="muted small">The network is yours: you and administrators can disable or delete it.</p>
 </form>
-<p class="muted">The grant is yours; only you and administrators can change it.</p>
+</section>
 {{end}}
 {{end}}

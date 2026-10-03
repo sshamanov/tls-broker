@@ -1,13 +1,14 @@
+{{define "lede"}}<p class="lede">{{if .Data.CanAdmin}}Every event the broker recorded, with the operator detail. Users who are not administrators see only issuance requests and their outcome, DNS proxy publications and changes to client access, without the detail.{{else}}Certificate requests and their outcome, DNS proxy publications, and changes to client access.{{end}}</p>{{end}}
+
 {{define "content"}}
-<form method="get" action="/ui/audit" class="filters">
-<label>Type <select name="type"><option value="">any</option>{{$t := .Data.Type}}{{range .Data.Types}}<option{{if eq . $t}} selected{{end}}>{{.}}</option>{{end}}</select></label>
-<label>Mode <select name="mode"><option value="">any</option>{{$m := .Data.Mode}}{{range .Data.Modes}}<option{{if eq (printf "%s" .) $m}} selected{{end}}>{{.}}</option>{{end}}</select></label>
-<label>Contains <input name="q" value="{{.Data.Q}}" placeholder="IP, name, user, reason"></label>
+<form method="get" action="/ui/audit" class="filters" role="search" aria-label="Filter events">
+<label>Event <select name="type"><option value="">Any</option>{{$t := .Data.Type}}{{range .Data.Types}}<option value="{{.}}"{{if eq . $t}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+<label>Mode <select name="mode"><option value="">Any</option>{{$m := .Data.Mode}}{{range .Data.Modes}}<option value="{{.}}"{{if eq (printf "%s" .) $m}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+<label>Contains <input name="q" value="{{.Data.Q}}" placeholder="name, address or user" spellcheck="false"></label>
 <label>From <input type="date" name="since" value="{{.Data.Since}}"></label>
 <label>To <input type="date" name="until" value="{{.Data.Until}}"></label>
-<button type="submit">Filter</button>
+<button type="submit">Show</button>
 </form>
-<p class="muted">{{if .Data.CanAdmin}}All events. Users who are not administrators see issuance requests and their outcome, DNS proxy publications and grant changes, without the detail column.{{else}}Issuance requests and their outcome, DNS proxy publications and grant changes.{{end}}</p>
 {{template "events" (events .Data.Events .Admin)}}
-<p>{{if .Data.Newer}}<a href="/ui/audit">Newest</a>{{end}} {{if .Data.Older}}<a href="/ui/audit{{.Data.Older}}">Older</a>{{end}}</p>
+{{if or .Data.Newer .Data.Older}}<p class="pager">{{if .Data.Newer}}<a href="/ui/audit">Newest</a>{{end}}{{if .Data.Older}}<a href="/ui/audit{{.Data.Older}}">Older</a>{{end}}</p>{{end}}
 {{end}}

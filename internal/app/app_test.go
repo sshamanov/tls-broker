@@ -208,7 +208,7 @@ func TestBootServeAndShutdown(t *testing.T) {
 	if _, hdr, _ := r.get("/acme/directory", "X-Request-ID", "proxy-id-42"); hdr.Get("X-Request-ID") != "proxy-id-42" {
 		t.Errorf("trusted proxy request ID replaced by %q", hdr.Get("X-Request-ID"))
 	}
-	if code, _, body := r.get("/ui/login"); code != 200 || !strings.Contains(body, "Log in") || strings.Contains(body, "DNS gate is mocked") {
+	if code, _, body := r.get("/ui/login"); code != 200 || !strings.Contains(body, "Sign in") || strings.Contains(body, "DNS gate is mocked") {
 		t.Fatalf("login page: %d", code)
 	}
 	if code, hdr, _ := r.get("/"); code != http.StatusFound || hdr.Get("Location") != "/ui/" {

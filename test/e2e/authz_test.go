@@ -311,7 +311,7 @@ func testUI(t *testing.T) {
 		t.Fatalf("admin activity page: %d", code)
 	}
 	code, body := bob.do(http.MethodGet, "/ui/audit", nil)
-	if code != http.StatusOK || !strings.Contains(body, "Created grant 10.0.3.0/24.") || !strings.Contains(body, "lab.example.com") ||
+	if code != http.StatusOK || !strings.Contains(body, "Added network 10.0.3.0/24.") || !strings.Contains(body, "lab.example.com") ||
 		strings.Contains(body, "created grant 10.0.3.0/24") || strings.Contains(body, "<td>login</td>") {
 		t.Fatalf("user activity page: %d", code)
 	}

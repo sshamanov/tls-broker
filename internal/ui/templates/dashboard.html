@@ -1,94 +1,82 @@
+{{define "lede"}}<p class="lede">{{if .Blocked}}Your account is blocked, so there is nothing to show here.{{else if .Admin}}Whether certificates can be issued right now, what needs renewing soon, and what needs your attention.{{else}}Whether certificates can be issued right now, and what needs renewing soon.{{end}}</p>{{end}}
+
 {{define "content"}}
 {{if .Blocked}}
-<p>Nothing to show while your account is blocked. See <a href="/ui/grants">your grants</a> or the <a href="/ui/audit">activity log</a>.</p>
+<div class="panel"><p>You can still see <a href="/ui/grants">your networks</a> and the <a href="/ui/audit">activity log</a>.</p></div>
 {{else}}
 {{if .Data.Warnings}}
-<section><h2>Needs attention</h2><ul class="warnings">{{range .Data.Warnings}}<li>{{.}}</li>{{end}}</ul></section>
+<section class="panel attention" aria-labelledby="h-attention"><h2 id="h-attention">Needs attention</h2>
+<ul class="attention-list">{{range .Data.Warnings}}<li>{{.}}</li>{{end}}</ul></section>
 {{end}}
 
-<section><h2>Certificate authorities</h2>
-<ul class="states">
-{{range .Data.CAs}}<li>{{.Name}} <span class="badge {{if eq .State "operational"}}good{{else if eq .State "degraded"}}warn{{else}}bad{{end}}">{{.State}}</span>{{if eq .State "unavailable"}} <span class="muted">retry {{rel .RetryAt}}</span>{{end}}</li>
-{{else}}<li class="muted">No certificate authority is enabled.</li>{{end}}
+<div class="grid{{if .Data.Warnings}} after-attention{{end}}">
+<div class="stack">
+<section class="panel" aria-labelledby="h-cas"><h2 id="h-cas">Certificate authorities{{if .Admin}} <a class="more" href="/ui/admin/providers">Details</a>{{end}}</h2>
+<ul class="rows">
+{{range .Data.CAs}}<li><span class="name">{{.Name}}{{if $.Admin}}<span class="sub">{{.Snap.State.Health}}{{if .Snap.State.Failures}}, {{.Snap.State.Failures}} failures in a row{{end}}{{if .Snap.State.LastError}}: {{.Snap.State.LastError}}{{end}}</span>{{end}}</span>
+<span class="end"><span class="pill {{if eq .State "operational"}}ok{{else if eq .State "degraded"}}caution{{else}}bad{{end}}">{{.State}}</span>{{if eq .State "unavailable"}}<span class="sub">retry {{rel .RetryAt}}</span>{{end}}</span></li>
+{{else}}<li class="muted">No certificate authority is enabled{{if .Admin}}: add one under <a href="/ui/admin/config">Configuration</a>{{end}}.</li>{{end}}
 </ul>
-{{if .Admin}}
-<table>
-<tr><th>Provider</th><th>Health</th><th>Retry after</th><th>Slots</th><th>Waiting</th><th>Last error</th></tr>
-{{range .Data.Snapshot.Providers}}
-<tr><td>{{.Name}}</td>
-<td><span class="badge {{if not .Open}}bad{{else if eq (printf "%s" .State.Health) "healthy"}}good{{else}}warn{{end}}">{{.State.Health}}</span>{{if not .Open}} circuit open{{end}}</td>
-<td>{{if not .Open}}{{ts .State.RetryAfter}} ({{rel .State.RetryAfter}}){{else}}-{{end}}</td>
-<td>{{.SlotsInUse}}/{{.SlotsTotal}}</td><td>{{.Waiting}}</td><td>{{if .State.LastError}}{{.State.LastError}}{{else}}-{{end}}</td></tr>
-{{else}}<tr><td colspan="6" class="muted">No providers.</td></tr>{{end}}
-</table>
-{{end}}
+<div class="stats" aria-label="Issuance queue">
+<div><b>{{.Data.Queue.InFlight}}</b><span>orders in flight</span></div>
+<div><b>{{.Data.Queue.Waiting}}</b><span>waiting for a slot</span></div>
+<div><b>{{.Data.Queue.SlotsInUse}} of {{.Data.Queue.SlotsTotal}}</b><span>slots in use</span></div>
+</div>
 </section>
 
-<section><h2>Queue</h2>
-<p>{{.Data.Queue.InFlight}} orders in flight, {{.Data.Queue.Waiting}} waiting for a slot ({{.Data.Queue.SlotsInUse}} of {{.Data.Queue.SlotsTotal}} slots in use).</p>
-</section>
-
-<section><h2>Rate-limit headroom</h2>
-{{range .Data.Headroom}}<h3>{{.Provider}}</h3>
-<ul class="gauges">{{range .Gauges}}<li class="gauge {{.Level}}"><span>{{.Label}}</span> <meter min="0" max="{{.Limit}}" low="{{pctOf .Limit 50}}" high="{{pctOf .Limit 75}}" optimum="0" value="{{.Used}}">{{.Pct}}%</meter> {{.Used}} / {{.Limit}} <span class="badge {{if eq .Level "ok"}}good{{else if eq .Level "caution"}}warn{{else}}bad{{end}}">{{.Level}}</span></li>{{end}}</ul>
+<section class="panel" aria-labelledby="h-headroom"><h2 id="h-headroom">Rate-limit headroom</h2>
+{{range .Data.Headroom}}{{if gt (len $.Data.Headroom) 1}}<h3 class="provider-name">{{.Provider}}</h3>{{end}}
+{{range .Gauges}}{{template "gauge" .}}{{else}}<p class="muted">Nothing used in the current windows.</p>{{end}}
 {{else}}<p class="muted">No certificate authority is enabled.</p>{{end}}
 </section>
+</div>
 
-<section><h2>Recent issuance</h2>
-<table>
-<tr><th>Time</th><th>Names</th><th>Outcome</th><th>What happened</th></tr>
-{{range .Data.Recent}}<tr><td>{{ts .Time}}</td><td>{{join .Names ", "}}</td><td>{{outcome .}}</td><td class="wrap">{{summary .}}</td></tr>
-{{else}}<tr><td colspan="4" class="muted">No issuance yet.</td></tr>{{end}}
-</table>
-<p><a href="/ui/audit">Activity log</a></p>
+<div class="stack">
+<section class="panel" aria-labelledby="h-expiring"><h2 id="h-expiring">Expiring next <a class="more" href="/ui/certificates">All certificates</a></h2>
+<ul class="rows expiring">
+{{range .Data.Expiring}}<li><div class="line"><span class="name">{{range $i, $n := .Names}}{{if $i}}, {{end}}<code>{{$n}}</code>{{end}}</span><span class="muted small">{{if eq .Mode "direct"}}direct, {{end}}{{.Provider}}</span></div>{{template "life" .Life}}</li>
+{{else}}<li class="empty-state"><p class="muted">No valid certificates yet. Point an ACME client such as certbot or acme.sh at this broker from a machine listed under <a href="/ui/grants">Client access</a>.</p></li>{{end}}
+</ul>
 </section>
 
-<section><h2>Expiring next</h2>
-<table>
-<tr><th>Names</th><th>Kind</th><th>Expires</th><th>State</th></tr>
-{{range .Data.Expiring}}<tr><td>{{join .Names ", "}}</td><td>{{.Mode}}</td><td>{{ts .NotAfter}} <span class="muted">({{rel .NotAfter}})</span></td><td>{{.Life.State}}</td></tr>
-{{else}}<tr><td colspan="4" class="muted">No valid certificates.</td></tr>{{end}}
-</table>
-<p><a href="/ui/certificates">All certificates</a></p>
+<section class="panel" aria-labelledby="h-recent"><h2 id="h-recent">Recent issuance <a class="more" href="/ui/audit">Activity log</a></h2>
+<ul class="rows">
+{{range .Data.Recent}}<li><span class="name">{{if .Names}}{{range $i, $n := .Names}}{{if $i}}, {{end}}<code>{{$n}}</code>{{end}}{{else}}{{.Type}}{{end}}<span class="sub">{{summary .}}</span></span><span class="end">{{template "outcome" .}}<span class="sub">{{rel .Time}}</span></span></li>
+{{else}}<li class="muted">No issuance yet.</li>{{end}}
+</ul>
 </section>
+</div>
+</div>
 
 {{if .Admin}}
-<section><h2>Budgets</h2>
-<p class="muted">{{.Data.Counts.ACMECerts}} valid ACME certificates; {{.Data.Counts.Direct}} direct entries ({{.Data.Counts.DirectLive}} valid).</p>
-{{range .Data.Snapshot.Providers}}{{if .Budgets}}
-<h3>{{.Name}}</h3>
+<div class="grid admin-grid">
+<section class="panel span" aria-labelledby="h-accounts"><h2 id="h-accounts">CA accounts for CAA</h2>
+<p class="muted">Put each account URL into the <code>accounturi</code> parameter of the CAA records of your zones, so no other ACME account can obtain wildcards for them. {{.Data.Counts.ACMECerts}} valid ACME certificates; {{.Data.Counts.Direct}} direct entries ({{.Data.Counts.DirectLive}} valid).</p>
 <table>
-<tr><th>Budget</th><th>Key</th><th>Used</th><th>Window</th></tr>
-{{range .Budgets}}<tr><td>{{.Kind}}</td><td>{{if .Key}}{{.Key}}{{else}}-{{end}}</td>
-<td><meter min="0" max="{{.Limit}}" low="{{pctOf .Limit 50}}" high="{{pctOf .Limit 80}}" optimum="0" value="{{.Used}}">{{pct .Used .Limit}}%</meter> {{.Used}} / {{.Limit}}{{if exhausted .}} <span class="badge bad">exhausted</span>{{end}}{{if .RenewalOnly}} ({{.RenewalOnly}} renewals only){{end}}</td><td>{{dur .Window}}</td></tr>{{end}}
-</table>
-{{end}}{{end}}
-</section>
-
-<section><h2>CA accounts for CAA</h2>
-<p class="muted">Put these account URLs into the CAA <code>accounturi</code> parameter of your zones.</p>
-<table>
-<tr><th>Provider</th><th>Account URL</th><th>Issuers</th><th>accounturi honoured</th></tr>
-{{range .Data.Accounts}}<tr><td>{{.Provider}}</td><td>{{if .URL}}<code class="wrap">{{.URL}}</code>{{else}}<span class="bad">{{.Err}}</span>{{end}}</td><td>{{join .Issuers ", "}}</td><td>{{if .Honoured}}yes{{else}}no{{end}}</td></tr>
-{{else}}<tr><td colspan="4" class="muted">No enabled providers.</td></tr>{{end}}
+<tr><th>Provider</th><th>Account URL</th><th>CAA issuer</th><th>Honours accounturi</th></tr>
+{{range .Data.Accounts}}<tr><td>{{.Provider}}</td><td>{{if .URL}}<code class="wrap">{{.URL}}</code>{{else}}<span class="t-bad">{{.Err}}</span>{{end}}</td><td>{{range .Issuers}}<code>{{.}}</code> {{end}}</td><td>{{if .Honoured}}yes{{else}}no{{end}}</td></tr>
+{{else}}<tr><td colspan="4" class="empty">No enabled providers.</td></tr>{{end}}
 </table>
 </section>
 
-<section><h2>DNS zones and CAA</h2>
+<section class="panel span" aria-labelledby="h-zones"><h2 id="h-zones">DNS zones and CAA</h2>
 <table>
-<tr><th>Zone</th><th>Hosted zone</th><th>CAA node</th><th>Wildcard protected</th><th>Detail</th></tr>
+<tr><th>Zone</th><th>Hosted zone</th><th>CAA node</th><th>Wildcards</th><th>Detail</th></tr>
+
 {{range .Data.Zones}}
-<tr><td>{{.Zone.Name}}</td>
-<td>{{if .Hosted.HostedZoneID}}<code>{{.Hosted.HostedZoneID}}</code> <span class="muted">{{if .Hosted.Resolved}}discovered by name{{else}}configured{{end}}</span>{{else}}<span class="bad">not discovered: {{.Hosted.Err}}</span>{{end}}</td>
-{{if .Err}}<td colspan="3"><span class="bad">CAA lookup failed: {{.Err}}</span></td>
-{{else}}<td>{{if .Status.Node}}{{.Status.Node}}{{else}}none{{end}}</td>
-<td><span class="badge {{if .Status.WildcardProtected}}good{{else}}bad{{end}}">{{if .Status.WildcardProtected}}yes{{else}}no{{end}}</span></td>
-<td>{{.Status.Detail}}{{if .Status.MissingProviders}} Missing providers: {{join .Status.MissingProviders ", "}}.{{end}}</td>{{end}}</tr>
+<tr><td><code>{{.Zone.Name}}</code></td>
+<td>{{if .Hosted.HostedZoneID}}<code>{{.Hosted.HostedZoneID}}</code><span class="cell-sub">{{if .Hosted.Resolved}}discovered by name{{else}}configured{{end}}</span>{{else}}<span class="t-bad">not discovered: {{.Hosted.Err}}</span>{{end}}</td>
+{{if .Err}}<td colspan="3"><span class="t-bad">CAA lookup failed: {{.Err}}</span></td>
+{{else}}<td>{{if .Status.Node}}<code>{{.Status.Node}}</code>{{else}}none{{end}}</td>
+<td><span class="pill {{if .Status.WildcardProtected}}ok{{else}}bad{{end}}">{{if .Status.WildcardProtected}}protected{{else}}unprotected{{end}}</span></td>
+<td class="wrap">{{.Status.Detail}}{{if .Status.MissingProviders}} Missing providers: {{join .Status.MissingProviders ", "}}.{{end}}</td>{{end}}</tr>
 {{if .Suggest}}<tr><td></td><td colspan="4"><details><summary>CAA records for this zone</summary><pre>{{range .Suggest}}{{.}}
 {{end}}</pre></details></td></tr>{{end}}
-{{else}}<tr><td colspan="5" class="muted">No zones configured.</td></tr>{{end}}
+{{else}}<tr><td colspan="5" class="empty">No zones configured. Add one under <a href="/ui/admin/config">Configuration</a>.</td></tr>{{end}}
+
 </table>
 </section>
+</div>
 {{end}}
 {{end}}
 {{end}}

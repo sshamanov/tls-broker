@@ -55,7 +55,7 @@ func TestPagesPerRole(t *testing.T) {
 				if res.code != 200 {
 					t.Errorf("%s %s: %d", name, p.path, res.code)
 				}
-				if !strings.Contains(res.body, `<nav>`) || !strings.Contains(res.body, "alice") && name == "admin" {
+				if !strings.Contains(res.body, `<nav class="nav" aria-label="Main">`) || !strings.Contains(res.body, "alice") && name == "admin" {
 					t.Errorf("%s %s: layout missing", name, p.path)
 				}
 			} else if res.code != 403 {
@@ -68,7 +68,13 @@ func TestPagesPerRole(t *testing.T) {
 	}
 	// Blocked users see the banner.
 	see(t, dave.get("/ui/grants"), "Your account is blocked")
-	see(t, bob.get("/ui/"), "bob", "normal")
+	see(t, bob.get("/ui/"), "<b>bob</b><span>user</span>")
+	see(t, carol.get("/ui/"), "<b>carol</b><span>user with wildcards</span>")
+	see(t, admin.get("/ui/"), "<b>alice</b><span>administrator</span>", `id="nav-admin">Administration</div>`)
+	lacks(t, bob.get("/ui/"), "Administration")
+	see(t, dave.get("/ui/"), "<b>dave</b><span>Blocked</span>")
+	// The page in the navigation is marked for assistive technology.
+	see(t, bob.get("/ui/grants"), `<a href="/ui/grants" aria-current="page">Client access</a>`)
 }
 
 func TestAnonymousAndMethods(t *testing.T) {
@@ -100,6 +106,9 @@ func TestAnonymousAndMethods(t *testing.T) {
 		}
 	}
 	if csp := h.Get("Content-Security-Policy"); strings.Contains(csp, "unsafe-inline") || strings.Contains(csp, "unsafe-eval") {
+		t.Errorf("csp %q", csp)
+	}
+	if csp := h.Get("Content-Security-Policy"); !strings.Contains(csp, "font-src 'self'") || !strings.Contains(csp, "default-src 'none'") {
 		t.Errorf("csp %q", csp)
 	}
 	r = c.get("/ui/login")
@@ -192,7 +201,7 @@ func TestGrantRules(t *testing.T) {
 	code(t, bob.act("/ui/grants", url.Values{"prefix": {"10.1.2.3"}, "note": {"<b>laptop</b>"}}), 303)
 	r := bob.act("/ui/grants", url.Values{"prefix": {"10.1.3.0/24"}, "wildcard": {"true"}})
 	code(t, r, 403)
-	see(t, r, "may not create wildcard grants")
+	see(t, r, "may not allow wildcard certificates")
 	// Invalid input.
 	for _, bad := range []string{"nonsense", "2001:db8::1", "10.0.0.0/33", "0.0.0.0/0", "::ffff:10.0.0.1"} {
 		code(t, bob.act("/ui/grants", url.Values{"prefix": {bad}}), 400)
@@ -274,7 +283,7 @@ func TestGrantRules(t *testing.T) {
 	if len(evs) < 5 {
 		t.Errorf("grant audit events: %d", len(evs))
 	}
-	see(t, bob.get("/ui/audit"), "Created grant 10.9.9.0/24 (wildcards allowed).", "Deleted grant 10.1.2.3/32.", "Disabled grant 10.9.9.0/24.", "carol")
+	see(t, bob.get("/ui/audit"), "Added network 10.9.9.0/24 (wildcards allowed).", "Deleted network 10.1.2.3/32.", "Disabled network 10.9.9.0/24.", "carol")
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
@@ -292,7 +301,7 @@ func TestBlockedUserCannotCreate(t *testing.T) {
 	// Block takes effect immediately for the live session.
 	r := admin.act("/ui/admin/users/"+itoa(bid)+"/block", nil)
 	code(t, r, 303)
-	see(t, admin.follow(r), "bob: blocked=true")
+	see(t, admin.follow(r), "Blocked bob.")
 	r = bob.act("/ui/grants", url.Values{"prefix": {"10.0.0.2"}})
 	code(t, r, 403)
 	code(t, bob.act("/ui/grants/"+itoa(g[0].ID)+"/disable", nil), 403)
@@ -380,7 +389,7 @@ func TestActivityLog(t *testing.T) {
 		lacks(t, c.get("/ui/audit?type=config_change"), "activated generation")
 		lacks(t, c.get("/ui/audit?q=doh.internal"), "denied.example.com")
 		see(t, c.get("/ui/audit?q=DENIED.example"), "denied.example.com")
-		see(t, c.get("/ui/audit?scope=all&q=loginuser"), "No events.")
+		see(t, c.get("/ui/audit?scope=all&q=loginuser"), "No events match.")
 		lacks(t, c.get("/ui/"), "loginuser", "doh.internal")
 	}
 	r := admin.get("/ui/audit")
@@ -428,7 +437,7 @@ func TestDashboard(t *testing.T) {
 	admin := e.login("alice")
 	r := admin.get("/ui/")
 	account, _ := e.ca.AccountURL(bg)
-	see(t, r, "Needs attention", "CA accounts for CAA", "DNS zones and CAA", account, "example.com", "wide open zone", "is unprotected", "accounturi=", "LDAP is not configured", "circuit open", "too many")
+	see(t, r, "Needs attention", "CA accounts for CAA", "DNS zones and CAA", account, "example.com", "wide open zone", "is unprotected", "accounturi=", "LDAP is not configured", "unavailable", "retry in 1h00m", "too many")
 	see(t, r, "1 valid ACME certificates; 1 direct entries (1 valid)", "is rate_limited until")
 	// Without a zone status source the configured hosted zone ID is shown.
 	see(t, r, "<code>Z0123456789ABC</code>", "configured")
@@ -449,9 +458,9 @@ func TestDashboard(t *testing.T) {
 	e.sched.SetSnapshot(core.SchedulerSnapshot{Providers: []core.ProviderSnapshot{{Name: "letsencrypt", Open: true,
 		State: core.ProviderState{Name: "letsencrypt", Health: core.ProviderHealthy}}}})
 	r = admin.get("/ui/")
-	see(t, r, `<span class="badge good">healthy</span>`)
-	lacks(t, r, "circuit open", "is healthy until")
-	see(t, admin.get("/ui/admin/providers"), `<span class="badge good">healthy</span>`)
+	see(t, r, `<span class="pill ok">operational</span>`)
+	lacks(t, r, "unavailable", "is healthy until")
+	see(t, admin.get("/ui/admin/providers"), `<span class="pill ok">healthy</span>`)
 	lacks(t, admin.get("/ui/admin/providers"), "circuit open")
 
 	bob := e.login("bob")
@@ -494,10 +503,11 @@ func TestStatusForUsers(t *testing.T) {
 	bob := e.login("bob")
 	r := bob.get("/ui/")
 	code(t, r, 200)
-	see(t, r, "letsencrypt", "operational", "2 waiting for a slot", "1 of 4 slots",
-		"New orders", "150 / 200", "caution", "Certificates for example.com", "50 / 50", "exhausted", "Renewals of www.example.com", "1 / 5",
+	see(t, r, "letsencrypt", "operational", "<b>2</b><span>waiting for a slot", "<b>1 of 4</b><span>slots in use",
+		"New orders", "150 of 200 used", "Caution", "Certificates for example.com", "50 of 50 used", "Exhausted", "Renewals of www.example.com", "1 of 5 used",
+		`<div class="gauge caution">`, `<div class="gauge exhausted">`, `<div class="gauge ok">`, `width="75"`,
 		"broken.example.com", "Issuance failed.", "www.example.com", "api.example.com", "Expiring next")
-	lacks(t, r, "quiet.example.com", "admitted.example.com", "upstream acct/99", "secret upstream text", "Needs attention", "DNS zones and CAA", "CA accounts for CAA", "<h2>Budgets</h2>")
+	lacks(t, r, "quiet.example.com", "admitted.example.com", "upstream acct/99", "secret upstream text", "Needs attention", "DNS zones and CAA", "CA accounts for CAA")
 
 	// A provider that answered with errors is degraded; one whose circuit is
 	// open is unavailable with its retry time.
@@ -580,8 +590,8 @@ func TestCertificates(t *testing.T) {
 	lacks(t, r, "Rotate key", "boom")
 	// Owners: the grant's owner and network, a deleted grant with the
 	// requesting address, or no owner for a DNS match.
-	see(t, r, "carol<br><span class=\"muted\">grant <code>10.0.0.0/24</code>", "deleted grant<br><span class=\"muted\">requested from 10.0.0.5", "no owner<br><span class=\"muted\">DNS match from 10.0.0.5")
-	if n := strings.Count(r.body, "grant <code>10.0.0.0/24</code>"); n != 3 { // c3, c5 and the direct entry
+	see(t, r, `carol<span class="cell-sub">via <code>10.0.0.0/24</code>`, `network removed</span><span class="cell-sub">requested from <code>10.0.0.5</code>`, `no owner</span><span class="cell-sub">DNS match from <code>10.0.0.5</code>`)
+	if n := strings.Count(r.body, "via <code>10.0.0.0/24</code>"); n != 3 { // c3, c5 and the direct entry
 		t.Errorf("carol owns %d rows, want 3", n)
 	}
 	lacks(t, bob.get("/ui/certificates?q=api"), "www.example.com", "svc.example.com")
@@ -643,7 +653,7 @@ func TestConfigFlow(t *testing.T) {
 
 	// History and rollback.
 	r = admin.get("/ui/admin/config")
-	see(t, r, "active", "Rollback")
+	see(t, r, "active", "Roll back")
 	r = admin.act("/ui/admin/config/rollback", url.Values{"gen": {"2"}})
 	see(t, admin.follow(r), "Rolled back")
 	if e.cfg.Current().Sessions.TTL == 48*time.Hour {
@@ -751,17 +761,17 @@ func TestProvidersPage(t *testing.T) {
 	admin := e.login("alice")
 	r := admin.get("/ui/admin/providers")
 	account, _ := e.ca.AccountURL(bg)
-	see(t, r, "letsencrypt", "503 upstream", "150 / 200", "10m", account, "https://acme.example/dir", "circuit open", "<h3>Budgets</h3>")
+	see(t, r, "letsencrypt", "503 upstream", "150 of 200 used", "10m", account, "https://acme.example/dir", "circuit open", ">Budgets</h3>")
 	lacks(t, r, "Reset")
 
-	// A used-up budget is marked, and the meter's bands turn it red; a
-	// budget with room is not marked (the meter bands are 50 % and 80 %).
-	exhausted := `4 / 4 <span class="badge bad">exhausted</span> (1 renewals only)`
-	see(t, r, exhausted, `max="4" low="2" high="3" optimum="0" value="4"`, `max="200" low="100" high="160" optimum="0" value="150"`, "150 / 200</td>")
-	if strings.Count(r.body, "exhausted</span>") != 1 {
-		t.Errorf("exhausted badges: %d", strings.Count(r.body, "exhausted</span>"))
+	// A used-up budget is marked exhausted and drawn full; a budget with
+	// room is at caution from 75 % used, ok below.
+	exhausted := `<div class="gauge exhausted"><div class="gauge-head"><span class="label">Renewals of www.example.com</span><span class="num">4 of 4 used</span>`
+	see(t, r, exhausted, `width="100" height="8" rx="1"/></svg>`, "1 kept for renewals", `<div class="gauge caution"><div class="gauge-head"><span class="label">New orders</span><span class="num">150 of 200 used</span>`)
+	if n := strings.Count(r.body, `<div class="gauge exhausted">`); n != 1 {
+		t.Errorf("exhausted gauges: %d", n)
 	}
-	// The dashboard shows the same budget table.
+	// The status page shows every budget to an admin.
 	see(t, admin.get("/ui/"), exhausted)
 }
 
@@ -775,7 +785,7 @@ func TestBanners(t *testing.T) {
 	// A persistent banner is a status region, not an alert that interrupts
 	// screen-reader users on every page.
 	r := bob.get("/ui/")
-	see(t, r, `class="flash error banner" role="status"`)
+	see(t, r, `class="notice error banner" role="status"`)
 	lacks(t, r, `role="alert"`)
 
 	lacks(t, newEnv(t).client().get("/ui/login"), "DNS gate is mocked")
@@ -790,7 +800,7 @@ func TestNotFoundPageAndFavicon(t *testing.T) {
 	if ct := r.hdr.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
 		t.Errorf("content type %q", ct)
 	}
-	see(t, r, "<title>Not found - TLS broker</title>", `class="brand"`, "There is nothing here", `href="/ui/static/ui.css?v=`)
+	see(t, r, "<title>Page not found – TLS broker</title>", `class="brand"`, "There is nothing here", `href="/ui/static/ui.css?v=`)
 	lacks(t, r, `href="/ui/grants"`)
 	bob := e.login("bob")
 	r = bob.get("/ui/admin/nope/")
@@ -814,6 +824,37 @@ func TestNotFoundPageAndFavicon(t *testing.T) {
 		t.Errorf("favicon Cache-Control %q", cc)
 	}
 	see(t, r, "<svg")
+}
+
+// TestAssets: the self-hosted fonts are served under the CSP's font-src, the
+// theme script runs before the stylesheet (no flash of the wrong theme), and
+// no page uses an inline style or script, which the CSP would block.
+func TestAssets(t *testing.T) {
+	e := newEnv(t, envOpts{rotator: &rotatorStub{}})
+	c := e.client()
+	for _, f := range []string{"IBMPlexSans-Regular-Latin1.woff2", "IBMPlexSans-Medium-Latin1.woff2", "IBMPlexSans-SemiBold-Latin1.woff2", "IBMPlexMono-Regular-Latin1.woff2", "OFL.txt"} {
+		r := c.get("/ui/static/fonts/" + f)
+		code(t, r, 200)
+		if strings.HasSuffix(f, ".woff2") && r.hdr.Get("Content-Type") != "font/woff2" {
+			t.Errorf("%s: content type %q", f, r.hdr.Get("Content-Type"))
+		}
+	}
+	see(t, c.get("/ui/static/ui.css"), `url("fonts/IBMPlexSans-Regular-Latin1.woff2")`, `:root[data-theme="dark"]`, `:root:not([data-theme="light"])`)
+	see(t, c.get("/ui/static/theme.js"), "localStorage", "data-theme")
+	seedCert(t, e, "c1", "www.example.com")
+	admin := e.login("alice")
+	for _, p := range append(allPages, pageSpec{path: "/ui/login"}, pageSpec{path: "/ui/nope"}) {
+		r := admin.get(p.path)
+		if p.path == "/ui/login" {
+			r = c.get(p.path)
+		}
+		head := r.body[:strings.Index(r.body, "</head>")]
+		th, css := strings.Index(head, `<script src="/ui/static/theme.js?v=`), strings.Index(head, `<link rel="stylesheet"`)
+		if th < 0 || css < 0 || th > css || strings.Contains(head[th:css], "defer") {
+			t.Errorf("%s: theme script must load, undeferred, before the stylesheet", p.path)
+		}
+		lacks(t, r, ` style="`, "<style", "<script>", "onclick=", " - TLS broker", " · ")
+	}
 }
 
 func TestFormBodyLimits(t *testing.T) {

@@ -20,7 +20,7 @@ func (h *Handler) usersPage(w http.ResponseWriter, r *http.Request, cur *auth.Cu
 		return
 	}
 	d := &usersData{Users: users, Roles: []core.Role{core.RoleNormal, core.RoleWildcardAllowed, core.RoleAdmin}}
-	h.render(w, http.StatusOK, "admin_users", h.newPage(w, r, cur, "Users", "admin-users", d))
+	h.render(w, http.StatusOK, "admin_users", h.newPage(w, r, cur, "Users and roles", "admin-users", d))
 }
 
 // userAction handles role, block and unblock. The change is stored at once
@@ -47,14 +47,14 @@ func (h *Handler) userAction(w http.ResponseWriter, r *http.Request, cur *auth.C
 	}
 	refuse := func(msg string) { h.redirect(w, r, back, "error", msg) }
 	if u.Local {
-		refuse("The local break-glass administrator cannot be changed here; it is always an unblocked admin.")
+		refuse("The local break-glass administrator cannot be changed: it is always an unblocked administrator.")
 		return
 	}
 	if u.ID == cur.User.ID {
-		refuse("You cannot change your own role or blocked state.")
+		refuse("You cannot change your own role or block yourself. Ask another administrator.")
 		return
 	}
-	var detail string
+	var detail, msg string
 	switch r.PathValue("action") {
 	case "role":
 		role := core.Role(r.PostFormValue("role"))
@@ -67,6 +67,7 @@ func (h *Handler) userAction(w http.ResponseWriter, r *http.Request, cur *auth.C
 			return
 		}
 		detail = fmt.Sprintf("%s: role=%s", u.Username, role)
+		msg = fmt.Sprintf("%s is now %s. The change applies to open sessions at once.", u.Username, roleName(role))
 	case "block", "unblock":
 		blocked := r.PathValue("action") == "block"
 		if err := h.Users.SetBlocked(r.Context(), u.ID, blocked); err != nil {
@@ -74,12 +75,16 @@ func (h *Handler) userAction(w http.ResponseWriter, r *http.Request, cur *auth.C
 			return
 		}
 		detail = fmt.Sprintf("%s: blocked=%t", u.Username, blocked)
+		msg = "Blocked " + u.Username + ". The block applies at once; their networks keep working until disabled."
+		if !blocked {
+			msg = "Unblocked " + u.Username + "."
+		}
 	default:
 		h.notFound(w, r, cur)
 		return
 	}
 	h.record(r, cur, core.AuditUserChange, detail, 0)
-	h.redirect(w, r, back, "ok", "Saved: "+detail+".")
+	h.redirect(w, r, back, "ok", msg)
 }
 
 func (h *Handler) userErr(w http.ResponseWriter, r *http.Request, cur *auth.Current, err error) {
@@ -92,6 +97,7 @@ func (h *Handler) userErr(w http.ResponseWriter, r *http.Request, cur *auth.Curr
 
 type providersData struct {
 	Snapshot core.SchedulerSnapshot
+	Gauges   map[string][]gauge
 	Configs  map[string]core.ProviderConfig
 	Accounts map[string]accountView
 	Order    []string // enabled providers in preference order
@@ -101,7 +107,10 @@ type providersData struct {
 // exposes no circuit reset in core, so there is no reset action.
 func (h *Handler) providersPage(w http.ResponseWriter, r *http.Request, cur *auth.Current) {
 	cfg := h.Config.Current()
-	d := &providersData{Snapshot: h.Scheduler.Snapshot(), Configs: map[string]core.ProviderConfig{}, Accounts: map[string]accountView{}}
+	d := &providersData{Snapshot: h.Scheduler.Snapshot(), Configs: map[string]core.ProviderConfig{}, Accounts: map[string]accountView{}, Gauges: map[string][]gauge{}}
+	for _, ps := range d.Snapshot.Providers {
+		d.Gauges[ps.Name] = allGauges(ps.Budgets)
+	}
 	for _, p := range cfg.Providers {
 		d.Configs[p.Name] = p
 	}
@@ -119,5 +128,5 @@ func (h *Handler) providersPage(w http.ResponseWriter, r *http.Request, cur *aut
 		}
 		d.Accounts[pr.Name()] = av
 	}
-	h.render(w, http.StatusOK, "admin_providers", h.newPage(w, r, cur, "Providers", "admin-providers", d))
+	h.render(w, http.StatusOK, "admin_providers", h.newPage(w, r, cur, "Certificate authorities", "admin-providers", d))
 }

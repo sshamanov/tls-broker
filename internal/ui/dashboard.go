@@ -63,6 +63,8 @@ type caStatus struct {
 	Name    string
 	State   string
 	RetryAt time.Time
+	// Detail for admins.
+	Snap core.ProviderSnapshot
 }
 
 // queueStatus is the issuance queue over all providers.
@@ -116,13 +118,19 @@ func newGauge(b core.BudgetUsage) gauge {
 
 // headroom keeps, per provider, the new-order budget and the most used
 // per-domain and per-set budget: the ones that would refuse a request first.
-func headroom(snap core.SchedulerSnapshot, enabled map[string]bool) []providerHeadroom {
+// With all set (admins) every bucket is kept, most used first.
+func headroom(snap core.SchedulerSnapshot, enabled map[string]bool, all bool) []providerHeadroom {
 	var out []providerHeadroom
 	for _, ps := range snap.Providers {
 		if !enabled[ps.Name] {
 			continue
 		}
 		ph := providerHeadroom{Provider: ps.Name}
+		if all {
+			ph.Gauges = allGauges(ps.Budgets)
+			out = append(out, ph)
+			continue
+		}
 		best := map[core.BudgetKind]core.BudgetUsage{}
 		for _, b := range ps.Budgets {
 			if cur, ok := best[b.Kind]; !ok || pct(b.Used, b.Limit) > pct(cur.Used, cur.Limit) {
@@ -139,13 +147,33 @@ func headroom(snap core.SchedulerSnapshot, enabled map[string]bool) []providerHe
 	return out
 }
 
+// allGauges is every budget as a gauge: the new-order budget first, then
+// the others by used share, most used first.
+func allGauges(budgets []core.BudgetUsage) []gauge {
+	var out []gauge
+	for _, b := range budgets {
+		out = append(out, newGauge(b))
+	}
+	slices.SortStableFunc(out, func(a, b gauge) int {
+		an, bn := a.Label == "New orders", b.Label == "New orders"
+		switch {
+		case an != bn && an:
+			return -1
+		case an != bn:
+			return 1
+		}
+		return b.Pct - a.Pct
+	})
+	return out
+}
+
 func caStatuses(snap core.SchedulerSnapshot, enabled map[string]bool) []caStatus {
 	var out []caStatus
 	for _, ps := range snap.Providers {
 		if !enabled[ps.Name] {
 			continue
 		}
-		cs := caStatus{Name: ps.Name, State: "operational"}
+		cs := caStatus{Name: ps.Name, State: "operational", Snap: ps}
 		switch {
 		case !ps.Open:
 			cs.State, cs.RetryAt = "unavailable", ps.State.RetryAfter
@@ -263,7 +291,7 @@ func capped(n int) string {
 
 func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request, cur *auth.Current) {
 	d := &dashboardData{Snapshot: h.Scheduler.Snapshot(), Config: h.Config.Current()}
-	p := h.newPage(w, r, cur, "Status", "dashboard", d)
+	p := h.newPage(w, r, cur, "Broker status", "dashboard", d)
 	if cur.User.Blocked {
 		h.render(w, http.StatusOK, "dashboard", p)
 		return
@@ -276,7 +304,7 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request, cur *auth.Cu
 		enabled[pc.Name] = true
 	}
 	d.CAs = caStatuses(d.Snapshot, enabled)
-	d.Headroom = headroom(d.Snapshot, enabled)
+	d.Headroom = headroom(d.Snapshot, enabled, p.Admin)
 	for _, ps := range d.Snapshot.Providers {
 		d.Queue.Waiting += ps.Waiting
 		d.Queue.SlotsInUse += ps.SlotsInUse

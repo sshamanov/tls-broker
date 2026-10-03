@@ -1,38 +1,48 @@
+{{define "lede"}}<p class="lede">Every certificate the broker obtained, who it belongs to, and where it is in its lifetime. The owner is the owner of the network that requested it.</p>{{end}}
+
 {{define "content"}}
-<form method="get" action="/ui/certificates" class="filters">
-<label>Search <input name="q" value="{{.Data.Q}}" placeholder="name contains"></label>
-<label>Provider <select name="provider"><option value="">any</option>{{$p := .Data.Provider}}{{range .Data.Providers}}<option{{if eq . $p}} selected{{end}}>{{.}}</option>{{end}}</select></label>
-<label>Kind <select name="mode"><option value="">all</option><option value="acme"{{if eq .Data.Mode "acme"}} selected{{end}}>ACME</option><option value="direct"{{if eq .Data.Mode "direct"}} selected{{end}}>direct cache</option></select></label>
-<label class="check"><input type="checkbox" name="expired" value="1"{{if .Data.Expired}} checked{{end}}> include expired</label>
-<button type="submit">Filter</button>
+<form method="get" action="/ui/certificates" class="filters" role="search" aria-label="Filter certificates">
+<label>Name contains <input name="q" value="{{.Data.Q}}" placeholder="part of a name" spellcheck="false"></label>
+<label>Certificate authority <select name="provider"><option value="">Any</option>{{$p := .Data.Provider}}{{range .Data.Providers}}<option value="{{.}}"{{if eq . $p}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+<label>Kind <select name="mode"><option value="">All</option><option value="acme"{{if eq .Data.Mode "acme"}} selected{{end}}>ACME clients</option><option value="direct"{{if eq .Data.Mode "direct"}} selected{{end}}>Direct cache</option></select></label>
+<label class="check"><input type="checkbox" name="expired" value="1"{{if .Data.Expired}} checked{{end}}> Include expired</label>
+<button type="submit">Show</button>
 </form>
 
 {{if ne .Data.Mode "direct"}}
-<h2>ACME certificates</h2>
+<section class="plain" aria-labelledby="h-acme"><h2 id="h-acme">Issued to ACME clients</h2>
 <table>
-<tr><th>Identifiers</th><th>Owner</th><th>Provider</th><th>Serial</th><th>Valid from</th><th>Expires</th><th>Issued</th><th>Client interval</th><th>State</th></tr>
+<tr><th>Names</th><th>Owner</th><th>Lifetime</th><th>Authority</th><th>Serial</th><th>Client checks</th></tr>
+
 {{range .Data.ACME}}
-<tr><td>{{join .Names.Names ", "}}</td><td>{{template "owner" .Owner}}</td><td>{{.Provider}}</td><td><code>{{.Serial}}</code></td><td>{{ts .NotBefore}}</td><td>{{ts .NotAfter}} <span class="muted">({{rel .NotAfter}})</span></td><td>{{ts .IssuedAt}}</td>
-<td>{{if .Interval}}{{dur .Interval}}{{else}}-{{end}}</td><td>{{if .ReplacedByID}}replaced{{else}}current{{end}}</td></tr>
-{{else}}<tr><td colspan="9" class="muted">No certificates.</td></tr>{{end}}
+<tr><td class="names">{{range $i, $n := .Names.Names}}{{if $i}}<br>{{end}}<code>{{$n}}</code>{{end}}</td><td>{{template "owner" .Owner}}</td>
+<td>{{template "life" .Life}}<span class="cell-sub">issued {{ts .IssuedAt}}</span></td>
+<td>{{.Provider}}</td><td><code class="wrap">{{.Serial}}</code></td>
+<td class="nowrap">{{if .Interval}}every {{dur .Interval}}{{else}}<span class="muted">not seen yet</span>{{end}}</td></tr>
+{{else}}<tr><td colspan="6" class="empty">{{if or .Data.Q .Data.Provider}}No certificates match the filter.{{else}}No certificates yet. Point certbot or acme.sh at this broker from a machine listed under <a href="/ui/grants">Client access</a>.{{end}}</td></tr>{{end}}
+
 </table>
-<p>{{if .Data.Prev}}<a href="/ui/certificates{{.Data.Prev}}">Previous</a>{{end}} {{if .Data.Next}}<a href="/ui/certificates{{.Data.Next}}">Next</a>{{end}}</p>
+{{if or .Data.Prev .Data.Next}}<p class="pager">{{if .Data.Prev}}<a href="/ui/certificates{{.Data.Prev}}">Newer</a>{{end}}{{if .Data.Next}}<a href="/ui/certificates{{.Data.Next}}">Older</a>{{end}}</p>{{end}}
+</section>
 {{end}}
 
 {{if ne .Data.Mode "acme"}}
-<h2>Direct cache</h2>
+<section class="plain" aria-labelledby="h-direct"><h2 id="h-direct">Direct cache</h2>
 <table>
-<tr><th>Identifier</th><th>Owner</th><th>Provider</th><th>Generation</th><th>Expires</th><th>Renew at</th><th>Last fetch</th><th>Last attempt</th><th><span class="sr">Actions</span></th></tr>
+<tr><th>Name</th><th>Owner</th><th>Lifetime</th><th>Authority</th><th>Last fetch</th><th>Last attempt</th>{{if .Data.CanRotate}}<th><span class="sr">Actions</span></th>{{end}}</tr>
+
 {{range .Data.Direct}}
-<tr><td>{{.Identifier}}</td><td>{{template "owner" .Owner}}</td><td>{{if .Provider}}{{.Provider}}{{else}}-{{end}}</td><td>{{.Generation}}</td>
-<td>{{ts .NotAfter}}{{if not (isZero .NotAfter)}} <span class="muted">({{rel .NotAfter}})</span>{{end}}</td>
-<td>{{ts .RenewAt}}</td>
-<td>{{ts .LastFetchAt}}{{if .LastFetchIP.IsValid}} from {{.LastFetchIP}}{{end}}</td>
-<td>{{ts .LastAttemptAt}}{{if .LastError}}<br><span class="bad">{{if $.Admin}}{{.LastError}}{{else}}renewal failing{{end}}</span> ({{.Failures}} failures){{end}}</td>
-<td class="actions">{{if $.Data.CanRotate}}<form method="post" action="/ui/certificates/rotate" data-confirm="Rotate the key of {{.Identifier}}?">{{template "csrf" $}}<input type="hidden" name="identifier" value="{{.Identifier}}"><button type="submit">Rotate key</button></form>{{end}}</td></tr>
-{{else}}<tr><td colspan="9" class="muted">No direct entries.</td></tr>{{end}}
+<tr><td class="names"><code>{{.Identifier}}</code><span class="cell-sub">generation {{.Generation}}</span></td><td>{{template "owner" .Owner}}</td>
+<td>{{if isZero .NotAfter}}<span class="muted">no certificate yet</span>{{else}}{{template "life" .Life}}{{end}}</td>
+<td>{{if .Provider}}{{.Provider}}{{else}}<span class="muted">none</span>{{end}}</td>
+<td>{{if isZero .LastFetchAt}}<span class="muted">never</span>{{else}}{{rel .LastFetchAt}}{{end}}{{if .LastFetchIP.IsValid}}<span class="cell-sub">from <code>{{.LastFetchIP}}</code></span>{{end}}</td>
+<td class="wrap">{{if isZero .LastAttemptAt}}<span class="muted">none</span>{{else}}{{rel .LastAttemptAt}}{{end}}{{if .LastError}}<span class="cell-sub t-bad">{{if $.Admin}}{{.LastError}}{{else}}renewal failing{{end}} ({{.Failures}} failures)</span>{{end}}</td>
+{{if $.Data.CanRotate}}<td class="actions"><form method="post" action="/ui/certificates/rotate" data-confirm="Rotate the key of {{.Identifier}}? A new certificate is issued for the new key.">{{template "csrf" $}}<input type="hidden" name="identifier" value="{{.Identifier}}"><button type="submit" class="small">Rotate key</button></form></td>{{end}}</tr>
+{{else}}<tr><td colspan="7" class="empty">{{if or .Data.Q .Data.Provider}}No direct entries match the filter.{{else}}Nothing cached yet. A machine fetches <code>/cert/&lt;name&gt;</code> to get a key and certificate here.{{end}}</td></tr>{{end}}
+
 </table>
+</section>
 {{end}}
 {{end}}
 
-{{define "owner"}}{{if eq .Kind "grant"}}{{.User}}<br><span class="muted">grant <code>{{.Prefix}}</code></span>{{else if eq .Kind "deleted"}}deleted grant<br><span class="muted">requested from {{.IP}}</span>{{else if eq .Kind "dns"}}no owner<br><span class="muted">DNS match from {{.IP}}</span>{{else}}<span class="muted">unknown</span>{{end}}{{end}}
+{{define "owner"}}{{if eq .Kind "grant"}}{{.User}}<span class="cell-sub">via <code>{{.Prefix}}</code></span>{{else if eq .Kind "deleted"}}<span class="muted">network removed</span><span class="cell-sub">requested from <code>{{.IP}}</code></span>{{else if eq .Kind "dns"}}<span class="muted">no owner</span><span class="cell-sub">DNS match from <code>{{.IP}}</code></span>{{else}}<span class="muted">unknown</span><span class="cell-sub">issued before owners were recorded</span>{{end}}{{end}}

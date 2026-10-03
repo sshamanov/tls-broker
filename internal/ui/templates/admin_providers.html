@@ -1,26 +1,25 @@
+{{define "lede"}}<p class="lede">Health, accounts and rate budgets of each upstream certificate authority. Preference order: {{if .Data.Order}}{{join .Data.Order ", then "}}{{else}}none enabled{{end}}. A closed circuit reopens by itself when its retry time passes.</p>{{end}}
+
 {{define "content"}}
-<p class="muted">Preference order: {{if .Data.Order}}{{join .Data.Order " > "}}{{else}}none enabled{{end}}. Circuits close by themselves when the retry time passes; there is no manual reset.</p>
+<div class="grid fit">
 {{range .Data.Snapshot.Providers}}
-<section><h2>{{.Name}}</h2>
 {{$cfg := index $.Data.Configs .Name}}{{$acc := index $.Data.Accounts .Name}}
+<section class="panel" aria-labelledby="h-{{.Name}}"><h2 id="h-{{.Name}}">{{.Name}} <span class="pill {{if not .Open}}bad{{else if eq (printf "%s" .State.Health) "healthy"}}ok{{else}}caution{{end}}">{{.State.Health}}{{if not .Open}}, circuit open{{end}}</span></h2>
 <table class="kv">
-<tr><th>Health</th><td><span class="badge {{if not .Open}}bad{{else if eq (printf "%s" .State.Health) "healthy"}}good{{else}}warn{{end}}">{{.State.Health}}</span>{{if not .Open}} circuit open{{end}}{{if $cfg.Disabled}} (disabled in configuration){{end}}</td></tr>
-<tr><th>Retry after</th><td>{{if isZero .State.RetryAfter}}-{{else}}{{ts .State.RetryAfter}}{{if not .Open}} ({{rel .State.RetryAfter}}){{end}}{{end}}</td></tr>
-<tr><th>Consecutive failures</th><td>{{.State.Failures}}</td></tr>
-<tr><th>Last error</th><td>{{if .State.LastError}}{{.State.LastError}}{{else}}-{{end}}</td></tr>
+
+{{if $cfg.Disabled}}<tr><th>Configuration</th><td>disabled</td></tr>{{end}}
+<tr><th>Retry after</th><td>{{if isZero .State.RetryAfter}}<span class="muted">none</span>{{else}}{{ts .State.RetryAfter}}{{if not .Open}} <span class="muted">({{rel .State.RetryAfter}})</span>{{end}}{{end}}</td></tr>
+<tr><th>Failures in a row</th><td>{{.State.Failures}}</td></tr>
+<tr><th>Last error</th><td class="wrap">{{if .State.LastError}}{{.State.LastError}}{{else}}<span class="muted">none</span>{{end}}</td></tr>
 <tr><th>Slots</th><td>{{.SlotsInUse}} in use of {{.SlotsTotal}}; {{.Waiting}} waiting; {{.Reserved}} open reservations</td></tr>
 <tr><th>Directory</th><td><code class="wrap">{{$cfg.DirectoryURL}}</code></td></tr>
-<tr><th>Account URL</th><td>{{if $acc.URL}}<code class="wrap">{{$acc.URL}}</code>{{else if $acc.Err}}<span class="bad">{{$acc.Err}}</span>{{else}}-{{end}}</td></tr>
-<tr><th>Capabilities</th><td>ARI {{if $cfg.ARI}}yes{{else}}no{{end}}; accounturi honoured {{if $cfg.AccountURIHonoured}}yes{{else}}no{{end}}; CAA issuers {{join $cfg.CAAIssuers ", "}}</td></tr>
+<tr><th>Account URL</th><td>{{if $acc.URL}}<code class="wrap">{{$acc.URL}}</code>{{else if $acc.Err}}<span class="t-bad">{{$acc.Err}}</span>{{else}}<span class="muted">none</span>{{end}}</td></tr>
+<tr><th>Capabilities</th><td>ARI {{if $cfg.ARI}}yes{{else}}no{{end}}; honours accounturi {{if $cfg.AccountURIHonoured}}yes{{else}}no{{end}}; CAA issuers {{range $cfg.CAAIssuers}}<code>{{.}}</code> {{end}}</td></tr>
+
 </table>
-<h3>Budgets</h3>
-{{if .Budgets}}
-<table>
-<tr><th>Budget</th><th>Key</th><th>Used</th><th>Window</th></tr>
-{{range .Budgets}}<tr><td>{{.Kind}}</td><td>{{if .Key}}{{.Key}}{{else}}-{{end}}</td>
-<td><meter min="0" max="{{.Limit}}" low="{{pctOf .Limit 50}}" high="{{pctOf .Limit 80}}" optimum="0" value="{{.Used}}">{{pct .Used .Limit}}%</meter> {{.Used}} / {{.Limit}}{{if exhausted .}} <span class="badge bad">exhausted</span>{{end}}{{if .RenewalOnly}} ({{.RenewalOnly}} renewals only){{end}}</td><td>{{dur .Window}}</td></tr>{{end}}
-</table>
-{{else}}<p class="muted">No budget usage in the current windows.</p>{{end}}
+<h3 class="provider-name">Budgets</h3>
+{{range index $.Data.Gauges .Name}}{{template "gauge" .}}{{else}}<p class="muted">Nothing used in the current windows.</p>{{end}}
 </section>
-{{else}}<p class="muted">No providers are known to the scheduler.</p>{{end}}
+{{else}}<div class="panel span"><p class="muted">No certificate authority is configured. Add one under <a href="/ui/admin/config">Configuration</a>.</p></div>{{end}}
+</div>
 {{end}}

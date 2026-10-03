@@ -21,7 +21,7 @@ func (h *Handler) loginForm(w http.ResponseWriter, r *http.Request, _ *auth.Curr
 		http.Redirect(w, r, safeNext(r.URL.Query().Get("next")), http.StatusSeeOther)
 		return
 	}
-	p := h.newPage(w, r, nil, "Log in", "", &loginData{Next: safeNext(r.URL.Query().Get("next"))})
+	p := h.newPage(w, r, nil, "Sign in", "login", &loginData{Next: safeNext(r.URL.Query().Get("next"))})
 	h.render(w, http.StatusOK, "login", p)
 }
 
@@ -40,7 +40,7 @@ func (h *Handler) loginSubmit(w http.ResponseWriter, r *http.Request, _ *auth.Cu
 	user := strings.TrimSpace(r.PostFormValue("username"))
 	next := safeNext(r.PostFormValue("next"))
 	fail := func(status int, msg string) {
-		p := h.newPage(w, r, nil, "Log in", "", &loginData{Username: user, Next: next, Error: msg})
+		p := h.newPage(w, r, nil, "Sign in", "login", &loginData{Username: user, Next: next, Error: msg})
 		h.render(w, status, "login", p)
 	}
 	login, err := h.Auth.Login(r.Context(), user, r.PostFormValue("password"), sourceIP(r))

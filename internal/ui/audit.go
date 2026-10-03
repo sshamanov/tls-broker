@@ -155,8 +155,9 @@ func outcome(ev core.AuditEvent) string {
 }
 
 // activitySummary says what happened in one sentence, from the event's type,
-// outcome and reason only (never Detail, except for grant changes, whose
-// detail the UI writes itself: "created grant 10.0.0.0/24 wildcard=false").
+// outcome and reason only (admins see Detail next to it) (never Detail, except for grant changes, whose
+// detail the UI writes itself: "created grant 10.0.0.0/24 wildcard=false",
+// worded as client access: "Added network 10.0.0.0/24.").
 func activitySummary(ev core.AuditEvent) string {
 	why := func(prefix string) string {
 		if ev.Reason == "" {
@@ -206,12 +207,45 @@ func activitySummary(ev core.AuditEvent) string {
 		}
 		return "DNS-01 publication failed."
 	case core.AuditGrantChange:
-		if ev.Detail == "" {
-			return "Grant changed."
+		// The UI writes "<verb> grant <prefix>[ wildcard=<bool>]".
+		verb, rest, ok := strings.Cut(ev.Detail, " grant ")
+		if !ok {
+			return "Client access changed."
 		}
-		d := strings.Replace(ev.Detail, " wildcard=true", " (wildcards allowed)", 1)
-		d = strings.Replace(d, " wildcard=false", "", 1)
-		return strings.ToUpper(d[:1]) + d[1:] + "."
+		prefix, wild, _ := strings.Cut(rest, " ")
+		word := map[string]string{"created": "Added", "enabled": "Enabled", "disabled": "Disabled", "deleted": "Deleted"}[verb]
+		if word == "" {
+			return "Client access changed."
+		}
+		s := word + " network " + prefix
+		if wild == "wildcard=true" {
+			s += " (wildcards allowed)"
+		}
+		return s + "."
+	case core.AuditLogin:
+		if out == core.AuditResultOK {
+			return "Signed in."
+		}
+		return "Sign-in failed."
+	case core.AuditLogout:
+		return "Signed out."
+	case core.AuditUserChange:
+		return "User role or block changed."
+	case core.AuditConfigChange:
+		return "Configuration or secret changed."
+	case core.AuditProviderState:
+		return "Certificate authority state changed."
+	case core.AuditFailover:
+		return "Switched to another certificate authority."
+	case core.AuditDNSCleanup:
+		return "DNS-01 value removed."
+	case core.AuditDirectFetch:
+		if out == core.AuditResultOK {
+			return "Certificate served from the direct cache."
+		}
+		return "Direct-cache fetch failed."
+	case core.AuditError:
+		return "Error."
 	}
 	return ev.Type
 }

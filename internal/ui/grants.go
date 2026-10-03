@@ -81,7 +81,7 @@ func (h *Handler) renderGrants(w http.ResponseWriter, r *http.Request, cur *auth
 		d.Rows = append(d.Rows, row)
 	}
 	slices.Sort(d.Owners)
-	h.render(w, status, "grants", h.newPage(w, r, cur, "Grants", "grants", d))
+	h.render(w, status, "grants", h.newPage(w, r, cur, "Client access", "grants", d))
 }
 
 // userNames maps user IDs to usernames.
@@ -151,7 +151,7 @@ func (h *Handler) grantCreate(w http.ResponseWriter, r *http.Request, cur *auth.
 		return
 	}
 	if form.Wildcard && !cur.User.Can(core.RoleWildcardAllowed) {
-		bad(http.StatusForbidden, "Your role may not create wildcard grants.")
+		bad(http.StatusForbidden, "Your role may not allow wildcard certificates. Ask an administrator for the wildcard role.")
 		return
 	}
 	g := &core.Grant{OwnerUserID: cur.User.ID, Prefix: prefix, Enabled: true, Wildcard: form.Wildcard, Note: form.Note, CreatedAt: h.Clock.Now()}
@@ -160,7 +160,7 @@ func (h *Handler) grantCreate(w http.ResponseWriter, r *http.Request, cur *auth.
 		return
 	}
 	h.record(r, cur, core.AuditGrantChange, fmt.Sprintf("created grant %s wildcard=%t", g.Prefix, g.Wildcard), g.ID)
-	h.redirect(w, r, base+"/grants", "ok", fmt.Sprintf("Grant %s created.", g.Prefix))
+	h.redirect(w, r, base+"/grants", "ok", fmt.Sprintf("Added network %s. Machines there can request certificates now.", g.Prefix))
 }
 
 // applyGrantAction performs enable, disable or delete on grant id. The caller
@@ -173,13 +173,16 @@ func (h *Handler) applyGrantAction(r *http.Request, cur *auth.Current, g *core.G
 			return "", err
 		}
 		h.record(r, cur, core.AuditGrantChange, fmt.Sprintf("%sd grant %s", action, g.Prefix), g.ID)
-		return fmt.Sprintf("Grant %s %sd.", g.Prefix, action), nil
+		if g.Enabled {
+			return fmt.Sprintf("Enabled network %s.", g.Prefix), nil
+		}
+		return fmt.Sprintf("Disabled network %s. Machines there can no longer request certificates through it.", g.Prefix), nil
 	case "delete":
 		if err := h.Grants.Delete(r.Context(), g.ID); err != nil {
 			return "", err
 		}
 		h.record(r, cur, core.AuditGrantChange, fmt.Sprintf("deleted grant %s wildcard=%t", g.Prefix, g.Wildcard), g.ID)
-		return fmt.Sprintf("Grant %s deleted.", g.Prefix), nil
+		return fmt.Sprintf("Deleted network %s.", g.Prefix), nil
 	}
 	return "", errUnknownAction
 }
@@ -220,7 +223,7 @@ func (h *Handler) grantAction(w http.ResponseWriter, r *http.Request, cur *auth.
 	case err == errUnknownAction:
 		h.notFound(w, r, cur)
 	case isNotFound(err):
-		h.redirect(w, r, back, "error", "That grant no longer exists.")
+		h.redirect(w, r, back, "error", "That network was already removed.")
 	case err != nil:
 		h.serverError(w, r, cur, "change grant", err)
 	default:

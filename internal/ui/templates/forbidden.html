@@ -1,1 +1,2 @@
-{{define "content"}}<p>You do not have the rights for this page.</p><p><a href="/ui/">Back to the status page</a></p>{{end}}
+{{define "content"}}<div class="{{if .User}}panel{{end}}"><p>{{if and .User .User.Blocked}}Your account is blocked, so this page is not available to you. Ask an administrator to unblock you.{{else}}This page or action needs a role you do not have. Administrators can change roles under Users and roles.{{end}}</p>
+<p><a href="/ui/">Go to the status page</a></p></div>{{end}}

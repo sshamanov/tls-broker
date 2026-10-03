@@ -1,9 +1,12 @@
 # Web UI
 
 The UI is the primary operator surface. It is server-rendered `html/template`
-with embedded assets (`internal/ui`): one small stylesheet, an SVG favicon and
-a few lines of JavaScript (`ui.js`) that ask for confirmation before destructive
-forms. There is no build step. Everything lives under `/ui/`.
+with embedded assets (`internal/ui/static`): one stylesheet, self-hosted IBM
+Plex fonts, an SVG favicon and two small scripts: `theme.js` applies the saved
+colour theme before the page paints, `ui.js` asks for confirmation before
+destructive forms and drives the theme switch and the narrow-screen menu.
+Every page works without JavaScript. There is no build step. Everything lives
+under `/ui/`.
 
 Code: `internal/ui`. The handler (`ui.New(ui.Deps{...})`, mount it at `/ui/`)
 depends on the `core` ports plus `*auth.Service` for sessions and cookies. Per
@@ -17,7 +20,7 @@ the route's role check.
 - Every authenticated page sends `Cache-Control: no-store`. Static assets
   (`/ui/static/...`, URLs carry a content hash) are cached for a year.
 - Headers: a CSP without inline script or style (`default-src 'none'`,
-  `script-src 'self'`, `style-src 'self'`, `form-action 'self'`,
+  `script-src 'self'`, `style-src 'self'`, `font-src 'self'`, `form-action 'self'`,
   `frame-ancestors 'none'`), `X-Frame-Options: DENY`,
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`.
 - Every POST needs the session's CSRF token (hidden field `csrf_token`); the
@@ -45,7 +48,7 @@ the route's role check.
 |---|---|---|---|---|
 | Log in, see banner | yes | yes | yes | yes |
 | Status | banner only | CA states, queue, rate-limit headroom, recent issuance, expiring next | same | plus needs attention, provider details, full budgets, CA accounts, zones and CAA |
-| Grants | own, read only | see all with owner; create, enable, disable, delete own | plus `wildcard` | plus change anyone's |
+| Client access | own, read only | see all with owner; create, enable, disable, delete own | plus `wildcard` | plus change anyone's |
 | Certificates | no | all, with owner | same | plus last error and rotate hook |
 | Activity log | issuance activity | issuance activity | issuance activity | all events, with detail |
 | Admin pages | no | no | no | yes |
@@ -104,7 +107,7 @@ Admins additionally see:
   parallel with an 8 s limit, so a slow resolver delays the page, never breaks
   it.
 
-**Grants** (`/ui/grants`). One page for everyone: every grant with its owner,
+**Client access** (`/ui/grants`). Networks allowed to request certificates (IP grants). One page for everyone: every grant with its owner,
 filtered by owner (everyone, mine, or one user). Create one from an IPv4
 address (stored as /32) or IPv4 CIDR (stored masked) with a note; it is owned
 by you. `/0` and IPv6 are refused. The wildcard checkbox appears only for
@@ -142,41 +145,75 @@ resolver or upstream error text; their search does not match it either).
 Admins see every event type with the detail column. See
 `docs/observability.md`.
 
-**Admin, Users** (`/ui/admin/users`). List with source (LDAP or local), role,
+**Users and roles** (`/ui/admin/users`, admin). List with source (LDAP or local), role,
 state and last login. Set role, block, unblock. The local break-glass admin and
 your own account cannot be changed here. Each change is audited as
 `user_change`.
 
-**Admin, Config** (`/ui/admin/config`). The active generation's YAML in an
+**Configuration** (`/ui/admin/config`, admin). The active generation's YAML in an
 editor (open an older one with "View"). *Validate* shows problems with their
 field paths (`zones[0].hosted_zone_id: ...`), warnings, and the LDAP test when
 LDAP settings changed. *Activate* validates again and stores a new generation;
 on failure nothing is stored and the same problems are shown (HTTP 422).
 *Test LDAP* tests the active generation's LDAP (connect, service bind, filter);
-the result feeds the status page warning. The generation list offers *Rollback*,
+the result feeds the status page warning. The generation list offers *Roll back*,
 which makes an old generation's content current again (as a new generation).
 All changes are audited as `config_change`.
 
-**Admin, Secrets** (`/ui/admin/secrets`). Secrets referenced by the active
+**Secrets** (`/ui/admin/secrets`, admin). Secrets referenced by the active
 configuration with set/missing state; the stored names; set or replace a secret
 (name `[a-z0-9][a-z0-9._-]*`, value write-only, trailing newlines trimmed);
 delete (with a warning when the active configuration still refers to it).
 Names the broker writes itself (`provider-account-key.*`,
 `provider-account-url.*`) are shown but cannot be set or deleted here.
 
-**Admin, Providers** (`/ui/admin/providers`). Per provider: health, retry-after,
+**Certificate authorities** (`/ui/admin/providers`, admin; nav "CAs"). Per provider: health, retry-after,
 consecutive failures, last error, slots, reservations, directory URL, account
-URL, capabilities and budget usage (same meters and "exhausted" marker as the
-status page). There is no circuit reset: `core` exposes none, and circuits close
+URL, capabilities and every budget as a gauge (same levels as the status page). There is no circuit reset: `core` exposes none, and circuits close
 by themselves.
 
 ## Presentation
 
-Tables fill their box and scroll horizontally when they are wider than the
-viewport; a shaded edge shows which side has more. Timestamps are `<time>`
-elements (UTC, never wrapped). Persistent notices (process banners, the
-blocked-account notice) are `role="status"` regions; only the outcome of an
-action is an alert. The YAML editor does not soft-wrap lines.
+The look is an engraved certificate: ink on paper, hairline and double rules,
+one intaglio blue for links and the current page. Colour marks state only,
+and every state also has a word: green *ok*, brass *caution* or *due*, seal red
+*failed*, *exhausted* or *expired*.
+
+- Tokens are CSS custom properties on `:root` (ink, paper, sheet, intaglio,
+  brass, seal red, ok green, rules), with a dark set under
+  `prefers-color-scheme: dark` and again under `[data-theme="dark"]`. Text
+  colours meet WCAG AA on both backgrounds; brass has a darker text variant
+  for that reason.
+- Theme: *Auto* (follows the system), *Light* or *Dark* in the sidebar,
+  remembered in the browser's `localStorage` (when storage is blocked the
+  choice still applies to the page). `theme.js` is loaded without `defer`
+  before the stylesheet so the page never flashes the wrong theme; the CSP
+  allows no inline script.
+- Type: IBM Plex Sans for text, IBM Plex Mono only for identifiers (names,
+  addresses and networks, serials, URLs, YAML). Latin-1 subsets of Sans 400,
+  500, 600 and Mono 400 are served from `/ui/static/fonts/` under the SIL Open
+  Font License (`OFL.txt` next to them).
+- Layout: a left sidebar (brand, Status, Certificates, Client access,
+  Activity, an Administration group for admins, then the user, the theme
+  switch and Log out). Below 48rem it folds into a top bar with a Menu button.
+  Every page has a title, a one-line description and, where there is one,
+  its primary action. The status page is a two-column grid on wide screens.
+- The lifetime bar (status page, certificates page) shows a certificate's
+  validity from issue to expiry with the renewal point as a tick and now as a
+  marker; the elapsed part is blue, brass once renewal is due, red when
+  expired. Rate-limit gauges use the same drawing. Both are SVG whose
+  geometry comes from attributes computed on the server: the CSP allows no
+  `style` attributes.
+- Tables fill their box and scroll horizontally when they are wider than the
+  viewport; a shaded edge shows which side has more; identifiers and times do
+  not wrap. Nothing scrolls the page sideways at 360px. Timestamps are
+  `<time>` elements (UTC). Keyboard focus is always visible; motion is off
+  under `prefers-reduced-motion`.
+- Persistent notices (process banners, the blocked-account notice) are
+  `role="status"` regions; only the outcome of an action is an alert. Empty
+  states say what to do next. Blocked users and 403, 404 and 500 answers get
+  pages in the same layout; the login page is a centred sign-in panel. The
+  YAML editor does not soft-wrap lines.
 
 ## First start
 
@@ -197,5 +234,5 @@ action is an alert. The YAML editor does not soft-wrap lines.
    protected" and no provider is missing.
 6. **LDAP**: add the `ldap:` section (bind password as a secret). *Validate*
    tests it; *Activate*; then *Test LDAP* clears the status page warning.
-7. Log in as an LDAP user once, then promote LDAP admins under Admin, Users (or
+7. Log in as an LDAP user once, then promote LDAP admins under Users and roles (or
    list them in `TLS_BROKER_ADMINS`). Keep the local admin for emergencies.

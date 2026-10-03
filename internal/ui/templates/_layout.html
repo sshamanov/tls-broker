@@ -1,52 +1,85 @@
 {{define "csrf"}}<input type="hidden" name="csrf_token" value="{{.CSRF}}">{{end}}
+{{define "brandmark"}}<svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor"><circle cx="16" cy="16" r="14.5" stroke-width="1.5"/><circle cx="16" cy="16" r="11.5" stroke-width=".75" stroke-dasharray="1.2 1.4"/><circle cx="16" cy="16" r="8.5" stroke-width="1.5"/><path d="M12.2 16.3l2.6 2.6 5-5.6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></g></svg>{{end}}
 {{define "layout"}}<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>{{.Title}} - TLS broker</title>
+<meta name="color-scheme" content="light dark">
+<title>{{.Title}} – TLS broker</title>
+<script src="/ui/static/theme.js?v={{.Assets}}"></script>
 <link rel="stylesheet" href="/ui/static/ui.css?v={{.Assets}}">
 <link rel="icon" type="image/svg+xml" href="/ui/static/favicon.svg?v={{.Assets}}">
 <script src="/ui/static/ui.js?v={{.Assets}}" defer></script>
 </head>
 <body>
-<header>
-<a class="brand" href="/ui/">TLS broker</a>
-{{if .User}}
-<nav>
-<a href="/ui/"{{if eq .Nav "dashboard"}} class="on"{{end}}>Status</a>
-<a href="/ui/grants"{{if eq .Nav "grants"}} class="on"{{end}}>Grants</a>
-{{if not .Blocked}}<a href="/ui/certificates"{{if eq .Nav "certificates"}} class="on"{{end}}>Certificates</a>{{end}}
-<a href="/ui/audit"{{if eq .Nav "audit"}} class="on"{{end}}>Activity</a>
+{{if .User}}<a class="skip" href="#main">Skip to content</a>
+<div class="shell">
+<aside class="side" id="side">
+<div class="side-head">
+<a class="brand" href="/ui/">{{template "brandmark"}}<span>TLS broker</span></a>
+<button type="button" class="menu-btn" aria-controls="side-body" aria-expanded="false" hidden>Menu</button>
+</div>
+<div class="side-body" id="side-body">
+<nav class="nav" aria-label="Main">
+<a href="/ui/"{{if eq .Nav "dashboard"}} aria-current="page"{{end}}>Status</a>
+{{if not .Blocked}}<a href="/ui/certificates"{{if eq .Nav "certificates"}} aria-current="page"{{end}}>Certificates</a>{{end}}
+<a href="/ui/grants"{{if eq .Nav "grants"}} aria-current="page"{{end}}>Client access</a>
+<a href="/ui/audit"{{if eq .Nav "audit"}} aria-current="page"{{end}}>Activity</a>
 {{if and .Admin (not .Blocked)}}
-<span class="sep">Admin</span>
-<a href="/ui/admin/users"{{if eq .Nav "admin-users"}} class="on"{{end}}>Users</a>
-<a href="/ui/admin/config"{{if eq .Nav "admin-config"}} class="on"{{end}}>Config</a>
-<a href="/ui/admin/secrets"{{if eq .Nav "admin-secrets"}} class="on"{{end}}>Secrets</a>
-<a href="/ui/admin/providers"{{if eq .Nav "admin-providers"}} class="on"{{end}}>Providers</a>
+<div class="nav-group" id="nav-admin">Administration</div>
+<a href="/ui/admin/users"{{if eq .Nav "admin-users"}} aria-current="page"{{end}}>Users</a>
+<a href="/ui/admin/providers"{{if eq .Nav "admin-providers"}} aria-current="page"{{end}}>CAs</a>
+<a href="/ui/admin/config"{{if eq .Nav "admin-config"}} aria-current="page"{{end}}>Configuration</a>
+<a href="/ui/admin/secrets"{{if eq .Nav "admin-secrets"}} aria-current="page"{{end}}>Secrets</a>
 {{end}}
 </nav>
-<form class="who" method="post" action="/ui/logout">{{template "csrf" .}}
-<span>{{.User.Username}} <span class="badge">{{role .User.Role}}</span>{{if .User.Blocked}} <span class="badge bad">blocked</span>{{end}}</span>
-<button type="submit">Log out</button></form>
-{{end}}
+<div class="side-foot">
+<div class="who"><b>{{.User.Username}}</b><span>{{if .User.Blocked}}Blocked{{else}}{{roleName .User.Role}}{{end}}{{if .User.Local}}, local account{{end}}</span></div>
+<div class="theme" role="group" aria-label="Colour theme" hidden>
+<button type="button" data-theme-set="auto" aria-pressed="true">Auto</button><button type="button" data-theme-set="light" aria-pressed="false">Light</button><button type="button" data-theme-set="dark" aria-pressed="false">Dark</button>
+</div>
+<form method="post" action="/ui/logout">{{template "csrf" .}}<button type="submit" class="btn">Log out</button></form>
+</div>
+</div>
+</aside>
+<main class="content" id="main">
+{{template "notices" .}}
+<header class="page-head">
+<div><h1>{{.Title}}</h1>{{block "lede" .}}{{end}}</div>
+<div class="page-actions">{{block "actions" .}}{{end}}</div>
 </header>
-<main>
-{{range .Banners}}<p class="flash error banner" role="status">{{.}}</p>{{end}}
-{{if .Flash}}<p class="flash {{.Flash.Kind}}" role="status">{{.Flash.Text}}</p>{{end}}
-{{if and .User .Blocked}}<p class="flash error" role="status">Your account is blocked. You have no issuance or control rights; you can still see your grants and the activity log. Ask an administrator.</p>{{end}}
-<h1>{{.Title}}</h1>
 {{template "content" .}}
 </main>
+</div>
+{{else}}<main class="bare" id="main">
+{{template "notices" .}}
+{{if eq .Nav "login"}}{{template "content" .}}{{else}}<div class="bare-page"><a class="brand" href="/ui/">{{template "brandmark"}}<span>TLS broker</span></a>
+<h1>{{.Title}}</h1>
+{{template "content" .}}</div>{{end}}
+</main>{{end}}
 </body>
 </html>{{end}}
 
+{{define "notices"}}{{range .Banners}}<div class="notice error banner" role="status"><p>{{.}}</p></div>{{end}}
+{{if .Flash}}<div class="notice {{.Flash.Kind}}" role="status"><p>{{.Flash.Text}}</p></div>{{end}}
+{{if and .User .Blocked}}<div class="notice error" role="status"><p>Your account is blocked. You cannot request certificates or change anything; you can still see your networks and the activity log. Ask an administrator to unblock you.</p></div>{{end}}{{end}}
+
+{{define "outcome"}}{{$o := outcome .}}<span class="pill {{if eq $o "ok"}}ok{{else if eq $o "denied"}}caution{{else if eq $o "failed"}}bad{{else}}quiet{{end}}">{{if $o}}{{$o}}{{else}}noted{{end}}</span>{{end}}
+
 {{define "events"}}
 <table class="events">
-<tr><th>Time</th>{{if .Admin}}<th>Type</th>{{end}}<th>Mode</th><th>Who</th><th>Names</th><th>Outcome</th><th>What happened</th>{{if .Admin}}<th>Detail</th>{{end}}</tr>
-{{range .Events}}<tr><td>{{ts .Time}}</td>{{if $.Admin}}<td>{{.Type}}</td>{{end}}<td>{{.Mode}}</td><td>{{.Username}}{{if and .Username .SourceIP}}<br>{{end}}{{.SourceIP}}</td><td>{{join .Names ", "}}</td>
-<td>{{outcome .}}</td><td class="wrap">{{summary .}}</td>{{if $.Admin}}<td class="detail wrap">{{.Detail}}</td>{{end}}</tr>
-{{else}}<tr><td colspan="8" class="muted">No events.</td></tr>{{end}}
+<tr><th>Time</th><th>Outcome</th><th>What happened</th><th>Names</th><th>Who</th>{{if .Admin}}<th>Event</th>{{end}}</tr>
+{{range .Events}}<tr><td>{{ts .Time}}</td><td>{{template "outcome" .}}</td><td class="what">{{summary .}}{{if and $.Admin .Detail}}<span class="cell-sub detail">{{.Detail}}</span>{{end}}</td><td class="names">{{range $i, $n := .Names}}{{if $i}}<br>{{end}}<code>{{$n}}</code>{{end}}</td>
+<td>{{.Username}}{{if and .Username .SourceIP}}<br>{{end}}{{if .SourceIP}}<code>{{.SourceIP}}</code>{{end}}</td>{{if $.Admin}}<td>{{.Type}}{{if .Mode}}<span class="cell-sub">{{.Mode}}</span>{{end}}</td>{{end}}</tr>
+{{else}}<tr><td colspan="6" class="empty">No events match.</td></tr>{{end}}
 </table>
 {{end}}
+
+{{define "life"}}<div class="life {{.State}}"><svg viewBox="0 0 100 14" preserveAspectRatio="none" role="img" aria-label="{{.State}}: issued {{date .NotBefore}}, renewal {{if .RenewExpected}}expected {{end}}{{date .RenewAt}}, expires {{date .NotAfter}}"><rect class="track" x="0" y="4" width="100" height="6" rx="1"/><rect class="elapsed" x="0" y="4" width="{{.NowPct}}" height="6" rx="1"/><line class="renew" x1="{{.RenewPct}}" x2="{{.RenewPct}}" y1="1" y2="13" vector-effect="non-scaling-stroke"/><line class="now" x1="{{.NowPct}}" x2="{{.NowPct}}" y1="0" y2="14" vector-effect="non-scaling-stroke"/></svg>
+<div class="life-text"><span class="state">{{if eq .State "ok"}}Valid{{else if eq .State "due"}}Renewal due{{else if eq .State "expired"}}Expired{{else}}Replaced{{end}}</span><span>{{if eq .State "expired"}}expired {{rel .NotAfter}}{{else}}renews {{if .RenewExpected}}about {{end}}{{date .RenewAt}}, expires {{rel .NotAfter}}{{end}}</span></div></div>{{end}}
+
+{{define "gauge"}}<div class="gauge {{.Level}}"><div class="gauge-head"><span class="label">{{.Label}}</span><span class="num">{{.Used}} of {{.Limit}} used</span></div>
+<svg class="bar" viewBox="0 0 100 8" preserveAspectRatio="none" role="img" aria-label="{{.Pct}} percent used"><rect class="track" x="0" y="0" width="100" height="8" rx="1"/><rect class="fill" x="0" y="0" width="{{.Pct}}" height="8" rx="1"/></svg>
+<div class="gauge-foot"><span class="{{if eq .Level "ok"}}t-ok{{else if eq .Level "caution"}}t-caution{{else}}t-bad{{end}}">{{if eq .Level "ok"}}OK{{else if eq .Level "caution"}}Caution{{else}}Exhausted{{end}}</span><span>{{if .RenewalOnly}}{{.RenewalOnly}} kept for renewals, {{end}}{{dur .Window}} window</span></div></div>{{end}}

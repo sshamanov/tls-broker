@@ -1,19 +1,23 @@
+{{define "lede"}}<p class="lede">Who may use the broker and what they may do. Changes apply to open sessions at once; a blocked user's networks keep working until disabled.</p>{{end}}
+
 {{define "content"}}
 <table>
-<tr><th>User</th><th>Source</th><th>Role</th><th>State</th><th>Last login</th><th><span class="sr">Actions</span></th></tr>
+<tr><th>User</th><th>Sign-in</th><th>Role</th><th>State</th><th>Last login</th><th><span class="sr">Actions</span></th></tr>
+
 {{range .Data.Users}}
-<tr><td>{{.Username}}</td><td>{{if .Local}}local break-glass{{else}}LDAP{{end}}</td>
-<td>{{if or .Local (eq .ID $.User.ID)}}{{role .Role}}{{else}}
+<tr><td class="nowrap">{{.Username}}{{if eq .ID $.User.ID}} <span class="pill info plain">you</span>{{end}}</td><td>{{if .Local}}local break-glass{{else}}LDAP{{end}}</td>
+<td>{{if or .Local (eq .ID $.User.ID)}}{{roleName .Role}}{{else}}
 <form method="post" action="/ui/admin/users/{{.ID}}/role" class="inline">{{template "csrf" $}}
-<select name="role" aria-label="Role of {{.Username}}">{{$r := .Role}}{{range $.Data.Roles}}<option value="{{roleStr .}}"{{if eq . $r}} selected{{end}}>{{role .}}</option>{{end}}</select>
-<button type="submit">Set</button></form>{{end}}</td>
-<td><span class="badge {{if .Blocked}}bad{{else}}good{{end}}">{{if .Blocked}}blocked{{else}}active{{end}}</span></td>
+<select name="role" aria-label="Role of {{.Username}}">{{$r := .Role}}{{range $.Data.Roles}}<option value="{{roleStr .}}"{{if eq . $r}} selected{{end}}>{{roleName .}}</option>{{end}}</select>
+<button type="submit" class="small">Change role</button></form>{{end}}</td>
+<td><span class="pill {{if .Blocked}}bad{{else}}ok{{end}}">{{if .Blocked}}blocked{{else}}active{{end}}</span></td>
 <td>{{ts .LastLoginAt}}</td>
 <td class="actions">{{if and (not .Local) (ne .ID $.User.ID)}}
-{{if .Blocked}}<form method="post" action="/ui/admin/users/{{.ID}}/unblock">{{template "csrf" $}}<button type="submit">Unblock</button></form>
-{{else}}<form method="post" action="/ui/admin/users/{{.ID}}/block" data-confirm="Block {{.Username}}? The block applies immediately.">{{template "csrf" $}}<button type="submit" class="danger">Block</button></form>{{end}}
+{{if .Blocked}}<form method="post" action="/ui/admin/users/{{.ID}}/unblock">{{template "csrf" $}}<button type="submit" class="small">Unblock</button></form>
+{{else}}<form method="post" action="/ui/admin/users/{{.ID}}/block" data-confirm="Block {{.Username}}? The block applies at once.">{{template "csrf" $}}<button type="submit" class="small danger">Block</button></form>{{end}}
 {{end}}</td></tr>
-{{end}}
+{{else}}<tr><td colspan="6" class="empty">No users yet. People appear here after their first sign-in.</td></tr>{{end}}
+
 </table>
-<p class="muted">The local break-glass administrator and your own account cannot be changed here. Bootstrap admins from the environment are promoted again at their next login.</p>
+<p class="muted small">The local break-glass administrator and your own account cannot be changed here. Administrators listed in <code>TLS_BROKER_ADMINS</code> get the administrator role again at their next sign-in.</p>
 {{end}}

@@ -1,8 +1,9 @@
 // Package ui is the web UI: server-rendered html/template pages under /ui/,
-// embedded assets and one small stylesheet. There is no JavaScript build step;
-// the only script is a few lines that ask for confirmation before destructive
-// forms (static/ui.js), served from the same origin so the CSP needs no
-// inline script.
+// embedded assets (one stylesheet, self-hosted fonts, a favicon) and two small
+// same-origin scripts: static/theme.js applies the saved colour theme before
+// the page paints, static/ui.js confirms destructive forms and drives the
+// theme switch and the narrow-screen menu. There is no build step and the CSP
+// allows no inline script or style; pages work without JavaScript.
 //
 // The handler depends only on the ports of package core (plus the concrete
 // auth.Service for the cookie helpers and middleware). Every page sits behind
@@ -160,7 +161,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) { h.root.Ser
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hd := w.Header()
-		hd.Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+		hd.Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 		hd.Set("X-Frame-Options", "DENY")
 		hd.Set("X-Content-Type-Options", "nosniff")
 		hd.Set("Referrer-Policy", "same-origin")
@@ -384,12 +385,12 @@ func (h *Handler) render(w http.ResponseWriter, status int, name string, p *page
 }
 
 func (h *Handler) forbidden(w http.ResponseWriter, r *http.Request, cur *auth.Current) {
-	p := h.newPage(w, r, cur, "Forbidden", "", nil)
+	p := h.newPage(w, r, cur, "Access denied", "", nil)
 	h.render(w, http.StatusForbidden, "forbidden", p)
 }
 
 func (h *Handler) notFound(w http.ResponseWriter, r *http.Request, cur *auth.Current) {
-	p := h.newPage(w, r, cur, "Not found", "", nil)
+	p := h.newPage(w, r, cur, "Page not found", "", nil)
 	h.render(w, http.StatusNotFound, "notfound", p)
 }
 
@@ -398,7 +399,7 @@ func (h *Handler) notFound(w http.ResponseWriter, r *http.Request, cur *auth.Cur
 func (h *Handler) serverError(w http.ResponseWriter, r *http.Request, cur *auth.Current, what string, err error) {
 	id := httpx.RequestIDFrom(r.Context())
 	h.Logger.Error("ui: request failed", "what", what, "path", r.URL.Path, "error", err, "request_id", id)
-	p := h.newPage(w, r, cur, "Error", "", map[string]string{"What": what, "RequestID": id})
+	p := h.newPage(w, r, cur, "Something went wrong", "", map[string]string{"What": what, "RequestID": id})
 	h.render(w, http.StatusInternalServerError, "error", p)
 }
 
@@ -495,6 +496,9 @@ func (h *Handler) loadTemplates() error {
 		"isZero":    func(t time.Time) bool { return t.IsZero() },
 		"lower":     strings.ToLower,
 		"roleStr":   func(r core.Role) string { return string(r) },
+		"roleName":  roleName,
+		"date":      func(t time.Time) string { return t.UTC().Format("2006-01-02") },
+		"gaugeOf":   newGauge,
 		"summary":   activitySummary,
 		"events":    func(evs []core.AuditEvent, admin bool) eventsView { return eventsView{evs, admin} },
 		"outcome":   outcome,
@@ -564,6 +568,17 @@ func fmtDur(d time.Duration) string {
 	default:
 		return fmt.Sprintf("%dd", int(d.Hours()/24))
 	}
+}
+
+// roleName is a role in words.
+func roleName(r core.Role) string {
+	switch r {
+	case core.RoleAdmin:
+		return "administrator"
+	case core.RoleWildcardAllowed:
+		return "user with wildcards"
+	}
+	return "user"
 }
 
 // budgetExhausted reports a budget with nothing left in its window.
