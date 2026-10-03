@@ -158,9 +158,10 @@ func (v *validator) zones() {
 			}
 			seen[n] = i
 		}
+		// hosted_zone_id is optional: an empty one is discovered by name
+		// through ListHostedZones when the configuration is applied.
 		switch {
 		case z.HostedZoneID == "":
-			v.errf(p+".hosted_zone_id", "is required")
 		case !hostedZoneRe.MatchString(z.HostedZoneID):
 			v.errf(p+".hosted_zone_id", "%q is not a Route53 hosted zone ID (like Z0123456789ABCDEFGHIJ, without a /hostedzone/ prefix)", z.HostedZoneID)
 		default:

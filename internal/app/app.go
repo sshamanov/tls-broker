@@ -315,7 +315,7 @@ func New(ctx context.Context, env config.Env, opts Options) (_ *App, err error) 
 		Providers: a.providers, Scheduler: a.sched, Audit: a.auditLog, Auditor: a.auditor,
 		Users: a.store.Users(), Grants: a.store.Grants(), Certs: a.store.Certificates(), Orders: a.store.Orders(),
 		Direct: a.store.Direct(), Lineages: a.store.Lineages(), Clock: a.clock, Rotator: a.direct,
-		Banners: a.banners, Logger: a.log,
+		Zones: zoneStatusSource{a.dnsEngine}, Banners: a.banners, Logger: a.log,
 	}); err != nil {
 		return nil, fmt.Errorf("web ui: %w", err)
 	}
@@ -462,19 +462,38 @@ func (a *App) closeRest(errs *[]error) {
 	}
 }
 
-// verifyZones checks the managed zones against Route53. A failure is only a
-// warning: on first start AWS is usually not configured yet.
+// verifyZones discovers the hosted zone IDs that are not configured and
+// checks the managed zones against Route53. A failure is only a warning: on
+// first start AWS is usually not configured yet.
 func (a *App) verifyZones(ctx context.Context) {
 	if len(a.cfg.Current().Zones) == 0 {
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, zoneCheckTimeout)
 	defer cancel()
-	if err := a.dnsEngine.VerifyZones(ctx); err != nil {
+	err := a.dnsEngine.VerifyZones(ctx)
+	for _, z := range a.dnsEngine.ZoneStatuses() {
+		if z.Resolved {
+			a.log.Info("route53 hosted zone discovered by name", "zone", z.Name, "hosted_zone_id", z.HostedZoneID)
+		}
+	}
+	if err != nil {
 		a.log.Warn("route53 zone check failed; DNS-01 will fail until Route53 is reachable and the zones match", "err", err)
 		return
 	}
 	a.log.Info("route53 zones verified", "zones", len(a.cfg.Current().Zones))
+}
+
+// zoneStatusSource adapts the DNS-01 engine to ui.ZoneStatusSource.
+type zoneStatusSource struct{ eng *dns01.Engine }
+
+func (s zoneStatusSource) ZoneStatuses() []ui.ZoneStatus {
+	src := s.eng.ZoneStatuses()
+	out := make([]ui.ZoneStatus, 0, len(src))
+	for _, z := range src {
+		out = append(out, ui.ZoneStatus(z))
+	}
+	return out
 }
 
 // lazyLDAPTester forwards to the tester set after construction.

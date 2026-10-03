@@ -22,6 +22,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/route53"
+
 	"tls-broker/internal/core"
 	"tls-broker/internal/names"
 )
@@ -88,6 +91,22 @@ type Engine struct {
 	locks      map[string]*sync.Mutex // by zone|record: guards challenge state transitions
 	inflight   map[string]int         // challenge ID -> Present calls working on it
 	lastChange map[string]string      // zone|record -> ID of the last change that wrote it
+	zoneIDs    map[string]string      // zone name -> hosted zone ID discovered by name
+	zoneErrs   map[string]string      // zone name -> why discovery failed last time
+
+	// resolveMu serializes hosted zone discovery so that concurrent Present
+	// calls for an unresolved zone share one listing instead of each
+	// paging through ListHostedZones.
+	resolveMu sync.Mutex
+}
+
+// ZoneStatus is the effective hosted zone of one configured zone, for the
+// UI and logs.
+type ZoneStatus struct {
+	Name         string
+	HostedZoneID string // effective ID; "" while discovery has not succeeded
+	Resolved     bool   // true: discovered by name; false: configured
+	Err          string // why discovery failed (only when HostedZoneID is "")
 }
 
 var _ core.DNSEngine = (*Engine)(nil)
@@ -110,6 +129,7 @@ func New(o Options) (*Engine, error) {
 		callTimeout: o.CallTimeout, base: base, cancel: cancel, stopping: stopping, stop: stop,
 		writers: map[string]*zoneWriter{}, locks: map[string]*sync.Mutex{},
 		inflight: map[string]int{}, lastChange: map[string]string{},
+		zoneIDs: map[string]string{}, zoneErrs: map[string]string{},
 	}, nil
 }
 
@@ -163,8 +183,10 @@ func (e *Engine) route53() core.Route53Config {
 	return c
 }
 
-// locate normalizes record and finds its managed zone (longest suffix).
-func (e *Engine) locate(record string) (rec string, zone core.ZoneConfig, err error) {
+// locate normalizes record and finds its managed zone (longest suffix). The
+// returned zone carries its effective hosted zone ID: the configured one,
+// or the one discovered by name (discovered now when it is not known yet).
+func (e *Engine) locate(ctx context.Context, record string) (rec string, zone core.ZoneConfig, err error) {
 	id, ok := names.IdentifierFromChallengeRecord(record)
 	if !ok {
 		return "", zone, fmt.Errorf("%w: %q is not an _acme-challenge record", core.ErrOutsideManagedZones, record)
@@ -179,9 +201,192 @@ func (e *Engine) locate(record string) (rec string, zone core.ZoneConfig, err er
 	}
 	zone.HostedZoneID = hostedZoneID(zone.HostedZoneID)
 	if zone.HostedZoneID == "" {
-		return "", zone, fmt.Errorf("dns01: zone %s has no hosted zone ID", zone.Name)
+		if zone.HostedZoneID, err = e.resolveZone(ctx, zone.Name); err != nil {
+			return "", zone, fmt.Errorf("dns01: zone %s has no hosted zone ID: %w", zone.Name, err)
+		}
 	}
 	return names.ChallengeRecord(n), zone, nil
+}
+
+// effectiveZoneID returns the hosted zone ID the engine uses for z: the
+// configured one, or the discovered one. ok is false when neither is known.
+func (e *Engine) effectiveZoneID(z core.ZoneConfig) (id string, ok bool) {
+	if id = hostedZoneID(z.HostedZoneID); id != "" {
+		return id, true
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	id, ok = e.zoneIDs[z.Name]
+	return id, ok
+}
+
+// resolveZone returns the discovered hosted zone ID of the named zone,
+// discovering it (together with every other zone that still needs it) when
+// it is not known yet.
+func (e *Engine) resolveZone(ctx context.Context, name string) (string, error) {
+	e.mu.Lock()
+	id, ok := e.zoneIDs[name]
+	e.mu.Unlock()
+	if ok {
+		return id, nil
+	}
+	e.resolveMu.Lock()
+	defer e.resolveMu.Unlock()
+	e.mu.Lock()
+	id, ok = e.zoneIDs[name]
+	e.mu.Unlock()
+	if ok { // another caller discovered it while we waited
+		return id, nil
+	}
+	_ = e.resolveZones(ctx, e.cfg.Current(), false)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if id, ok = e.zoneIDs[name]; ok {
+		return id, nil
+	}
+	if msg := e.zoneErrs[name]; msg != "" {
+		return "", errors.New(msg)
+	}
+	return "", errors.New("hosted zone not discovered")
+}
+
+// ResolveZones discovers, through ListHostedZones, the hosted zone ID of
+// every configured zone without hosted_zone_id: the one public hosted zone
+// with that name. It is for startup and configuration changes; the result
+// is kept across configuration reloads and dropped when the zone leaves the
+// configuration or gets an explicit ID. When the listing fails, earlier
+// results are kept and the zones still unresolved report the error. A
+// zone whose ID cannot be discovered (none or several public hosted zones
+// of that name) is reported in the returned error and DNS-01 for it fails
+// until the next ResolveZones, Present or configuration change resolves it.
+func (e *Engine) ResolveZones(ctx context.Context) error {
+	e.resolveMu.Lock()
+	defer e.resolveMu.Unlock()
+	return e.resolveZones(ctx, e.cfg.Current(), true)
+}
+
+// resolveZones does the work of ResolveZones. With all false only zones
+// without a known ID are looked up (a lazy retry after an earlier
+// failure); with all true every zone without an explicit ID is looked up
+// again, so a hosted zone recreated under a new ID is picked up. Caller
+// holds resolveMu.
+func (e *Engine) resolveZones(ctx context.Context, cfg *core.Config, all bool) error {
+	var pending []string
+	byName := map[string]bool{}
+	e.mu.Lock()
+	for _, z := range cfg.Zones {
+		if z.HostedZoneID != "" {
+			continue
+		}
+		byName[z.Name] = true
+		if _, known := e.zoneIDs[z.Name]; all || !known {
+			pending = append(pending, z.Name)
+		}
+	}
+	for n := range e.zoneIDs {
+		if !byName[n] {
+			delete(e.zoneIDs, n)
+		}
+	}
+	for n := range e.zoneErrs {
+		if !byName[n] {
+			delete(e.zoneErrs, n)
+		}
+	}
+	e.mu.Unlock()
+	if len(pending) == 0 {
+		return nil
+	}
+
+	found, err := e.listPublicZones(ctx)
+	if err != nil {
+		err = fmt.Errorf("list hosted zones: %w", err)
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		var errs []error
+		for _, n := range pending {
+			if _, known := e.zoneIDs[n]; known {
+				continue // keep the earlier result through a transient failure
+			}
+			e.zoneErrs[n] = err.Error()
+			errs = append(errs, fmt.Errorf("zone %s: %w", n, err))
+		}
+		return errors.Join(errs...)
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var errs []error
+	for _, n := range pending {
+		var err error
+		switch ids := found[strings.ToLower(n)]; len(ids) {
+		case 1:
+			e.zoneIDs[n] = ids[0]
+			delete(e.zoneErrs, n)
+			continue
+		case 0:
+			err = fmt.Errorf("no public hosted zone named %s", n)
+		default:
+			err = fmt.Errorf("several public hosted zones named %s (%s); set hosted_zone_id", n, strings.Join(ids, ", "))
+		}
+		delete(e.zoneIDs, n)
+		e.zoneErrs[n] = err.Error()
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+// listPublicZones pages through ListHostedZones and returns the IDs of the
+// public hosted zones by lower-case name without trailing dot.
+func (e *Engine) listPublicZones(ctx context.Context) (map[string][]string, error) {
+	found := map[string][]string{}
+	var marker *string
+	for {
+		var out *route53.ListHostedZonesOutput
+		err := e.retry(ctx, func(ctx context.Context) error {
+			var err error
+			out, err = e.api.ListHostedZones(ctx, &route53.ListHostedZonesInput{Marker: marker})
+			return err
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, hz := range out.HostedZones {
+			if hz.Config != nil && hz.Config.PrivateZone {
+				continue
+			}
+			n := unfqdn(aws.ToString(hz.Name))
+			found[n] = append(found[n], hostedZoneID(aws.ToString(hz.Id)))
+		}
+		if !out.IsTruncated || out.NextMarker == nil || (marker != nil && *out.NextMarker == *marker) {
+			return found, nil
+		}
+		marker = out.NextMarker
+	}
+}
+
+// ZoneStatuses reports, for every configured zone, the hosted zone ID in
+// effect and whether it was configured or discovered by name, or why
+// discovery failed.
+func (e *Engine) ZoneStatuses() []ZoneStatus {
+	zones := e.cfg.Current().Zones
+	out := make([]ZoneStatus, 0, len(zones))
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, z := range zones {
+		st := ZoneStatus{Name: z.Name, HostedZoneID: hostedZoneID(z.HostedZoneID)}
+		if st.HostedZoneID == "" {
+			st.Resolved = true
+			if st.HostedZoneID = e.zoneIDs[z.Name]; st.HostedZoneID == "" {
+				st.Resolved = false
+				if st.Err = e.zoneErrs[z.Name]; st.Err == "" {
+					st.Err = "hosted zone not discovered yet"
+				}
+			}
+		}
+		out = append(out, st)
+	}
+	return out
 }
 
 func recordKey(zoneID, rec string) string { return zoneID + "|" + rec }
@@ -218,7 +423,7 @@ func (e *Engine) Present(ctx context.Context, owner, record, value string) (stri
 	if owner == "" {
 		return "", errors.New("dns01: owner is required")
 	}
-	rec, zone, err := e.locate(record)
+	rec, zone, err := e.locate(ctx, record)
 	if err != nil {
 		return "", err
 	}
@@ -554,13 +759,21 @@ func (e *Engine) Reconcile(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// VerifyZones checks every configured zone against Route53: the hosted zone
-// must exist, carry the configured name and be public. Meant for startup
-// and for configuration validation.
+// VerifyZones discovers the hosted zone IDs that are not configured
+// (ResolveZones) and then checks every zone against Route53: its effective
+// hosted zone must exist, carry the configured name and be public. Meant
+// for startup and for configuration changes.
 func (e *Engine) VerifyZones(ctx context.Context) error {
 	var errs []error
+	if err := e.ResolveZones(ctx); err != nil {
+		errs = append(errs, err)
+	}
 	for _, z := range e.cfg.Current().Zones {
-		if err := e.verifyZone(ctx, z); err != nil {
+		id, ok := e.effectiveZoneID(z)
+		if !ok {
+			continue // reported by ResolveZones
+		}
+		if err := e.verifyZone(ctx, z.Name, id); err != nil {
 			errs = append(errs, err)
 		}
 	}

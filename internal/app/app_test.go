@@ -269,6 +269,68 @@ func TestBootServeAndShutdown(t *testing.T) {
 	noLeaks(t, before)
 }
 
+// A zone without hosted_zone_id gets its ID from ListHostedZones: in the
+// background when the configuration is activated, and synchronously at
+// startup. Issuance then writes to the discovered zone.
+func TestZoneIDDiscoveredByName(t *testing.T) {
+	f := newFixture(t)
+	yaml := strings.Replace(testYAML, "    hosted_zone_id: Z1EXAMPLE\n", "", 1)
+	if yaml == testYAML {
+		t.Fatal("fixture YAML has no hosted_zone_id line to drop")
+	}
+	a, err := New(context.Background(), f.env, f.options(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, chk, err := a.Config().Activate(context.Background(), []byte(yaml)); err != nil || !chk.OK() {
+		t.Fatalf("activate without hosted_zone_id: %v %+v", err, chk)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	r := &running{t: t, app: a, base: "http://" + a.Addr().String(), cancel: cancel, done: make(chan error, 1),
+		client: &http.Client{Transport: &http.Transport{}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	go func() { r.done <- a.Run(ctx) }()
+	waitReady(t, r)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		st := a.dnsEngine.ZoneStatuses()
+		if len(st) == 1 && st[0].HostedZoneID == "Z1EXAMPLE" && st[0].Resolved {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("zone not discovered after activation: %+v", st)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if z, _ := a.Config().Current().ZoneFor("dev.example.com"); z.HostedZoneID != "" {
+		t.Fatal("the discovered ID must not be written into the configuration")
+	}
+	f.resolver.SetA("dev.example.com", "10.9.9.9")
+	go func() {
+		for i := 0; i < 400; i++ {
+			time.Sleep(5 * time.Millisecond)
+			f.clock.Advance(time.Second)
+		}
+	}()
+	if code, _, body := r.get("/cert/dev.example.com", "X-Real-IP", "10.9.9.9"); code != http.StatusOK {
+		t.Fatalf("direct issuance through the discovered zone: %d %s", code, body)
+	}
+	if got := f.r53.Changes("Z1EXAMPLE"); got == 0 {
+		t.Fatal("no change was written to the discovered hosted zone")
+	}
+	r.stop()
+
+	// Restart: New discovers the zone before serving.
+	calls := f.r53.Calls(dns01.OpListZones)
+	r2 := start(t, f.env, f.options(t))
+	defer r2.stop()
+	if st := r2.app.dnsEngine.ZoneStatuses(); len(st) != 1 || st[0].HostedZoneID != "Z1EXAMPLE" || !st[0].Resolved {
+		t.Fatalf("zone not discovered at startup: %+v", st)
+	}
+	if f.r53.Calls(dns01.OpListZones) == calls {
+		t.Fatal("startup did not list the hosted zones")
+	}
+}
+
 func waitReady(t *testing.T, r *running) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

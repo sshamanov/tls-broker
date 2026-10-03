@@ -45,8 +45,8 @@ func TestValidationRules(t *testing.T) {
 		{"zone wildcard", "zones[0].name", func(c *core.Config) { c.Zones[0].Name = "*.example.com" }},
 		{"zone not normalized", "zones[0].name", func(c *core.Config) { c.Zones[0].Name = "Example.com" }},
 		{"zone duplicate", "zones[1].name", func(c *core.Config) { c.Zones[1].Name = "example.com" }},
-		{"zone empty id", "zones[0].hosted_zone_id", func(c *core.Config) { c.Zones[0].HostedZoneID = "" }},
 		{"zone bad id", "zones[0].hosted_zone_id", func(c *core.Config) { c.Zones[0].HostedZoneID = "/hostedzone/Z123" }},
+		{"zone lower-case id", "zones[0].hosted_zone_id", func(c *core.Config) { c.Zones[0].HostedZoneID = "z123abc" }},
 
 		{"region", "route53.region", func(c *core.Config) { c.Route53.Region = "mars" }},
 		{"route53 half credentials", "route53.access_key_id_secret", func(c *core.Config) { c.Route53.SecretAccessKeySecret = "" }},
@@ -159,6 +159,23 @@ func TestLDAPDisabledNeedsNothing(t *testing.T) {
 	}
 	if len(ValidateLDAP(c.LDAP)) != 0 {
 		t.Fatal("unconfigured LDAP is valid")
+	}
+}
+
+// An omitted hosted_zone_id is valid (the engine discovers it by name) and
+// does not take part in the duplicate-ID warning.
+func TestHostedZoneIDOptional(t *testing.T) {
+	c := testConfig()
+	c.Zones[0].HostedZoneID = ""
+	c.Zones = append(c.Zones, core.ZoneConfig{Name: "example.net"})
+	rep := Validate(c)
+	if !rep.OK() {
+		t.Fatal(rep.Errors)
+	}
+	for _, w := range rep.Warnings {
+		if strings.Contains(w.Path, "hosted_zone_id") {
+			t.Fatalf("unexpected warning %v", w)
+		}
 	}
 }
 

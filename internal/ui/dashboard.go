@@ -37,6 +37,7 @@ type dashCounts struct {
 
 type zoneView struct {
 	Zone    core.ZoneConfig
+	Hosted  ZoneStatus // hosted zone in effect (configured or discovered)
 	Status  core.CAAStatus
 	Err     string
 	Suggest []string // CAA records the operator can add
@@ -135,11 +136,12 @@ func (h *Handler) adminDashboard(ctx context.Context, d *dashboardData) {
 			d.Accounts[i] = av
 		}()
 	}
+	hosted := h.zoneStatuses(cfg)
 	for i, z := range cfg.Zones {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			zv := zoneView{Zone: z}
+			zv := zoneView{Zone: z, Hosted: hosted[z.Name]}
 			if st, err := h.CAA.CheckCAA(pctx, z.Name); err != nil {
 				zv.Err = err.Error()
 			} else {
@@ -153,6 +155,29 @@ func (h *Handler) adminDashboard(ctx context.Context, d *dashboardData) {
 		d.Zones[i].Suggest = suggestCAA(d.Zones[i].Zone.Name, d.Accounts)
 	}
 	d.Warnings = h.warnings(ctx, d)
+}
+
+// zoneStatuses returns the hosted zone in effect for each zone of cfg by
+// name: what Deps.Zones reports, or the configured ID when there is no
+// source (or it does not know the zone yet).
+func (h *Handler) zoneStatuses(cfg *core.Config) map[string]ZoneStatus {
+	out := make(map[string]ZoneStatus, len(cfg.Zones))
+	for _, z := range cfg.Zones {
+		st := ZoneStatus{Name: z.Name, HostedZoneID: z.HostedZoneID}
+		if st.HostedZoneID == "" {
+			st.Err = "hosted zone not discovered yet"
+		}
+		out[z.Name] = st
+	}
+	if h.Zones == nil {
+		return out
+	}
+	for _, st := range h.Zones.ZoneStatuses() {
+		if _, ok := out[st.Name]; ok {
+			out[st.Name] = st
+		}
+	}
+	return out
 }
 
 // suggestCAA builds the CAA records that restrict wildcard issuance in a zone
@@ -204,6 +229,9 @@ func (h *Handler) warnings(ctx context.Context, d *dashboardData) []string {
 		}
 	}
 	for _, z := range d.Zones {
+		if z.Hosted.HostedZoneID == "" {
+			w = append(w, "Zone "+z.Zone.Name+": no hosted zone; DNS-01 fails for it: "+z.Hosted.Err)
+		}
 		switch {
 		case z.Err != "":
 			w = append(w, "Zone "+z.Zone.Name+": CAA could not be checked: "+z.Err)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -777,6 +778,188 @@ func TestCleanupDuringPresentWins(t *testing.T) {
 		t.Fatalf("state = %s, want done", got)
 	}
 	wantTXT(t, e.r53, rec)
+}
+
+// addUnresolvedZone configures a managed zone without hosted_zone_id.
+func (e *env) addUnresolvedZone(name string) {
+	e.cfg.Update(func(c *core.Config) {
+		c.Zones = append(slices.Clone(c.Zones), core.ZoneConfig{Name: name})
+	})
+}
+
+func (e *env) zoneStatus(name string) ZoneStatus {
+	e.t.Helper()
+	for _, st := range e.eng.ZoneStatuses() {
+		if st.Name == name {
+			return st
+		}
+	}
+	e.t.Fatalf("no status for zone %s", name)
+	return ZoneStatus{}
+}
+
+func TestResolveZonesByName(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.addUnresolvedZone("discover.example")
+	// A private zone of the same name is not a candidate.
+	e.r53.AddPrivateZone("ZDISCPRIV", "discover.example")
+	e.r53.AddZone("/hostedzone/ZDISC", "Discover.Example.")
+	e.r53.SetZonePageSize(1) // every zone on its own page
+	if err := e.eng.ResolveZones(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := e.zoneStatus("discover.example"), (ZoneStatus{Name: "discover.example", HostedZoneID: "ZDISC", Resolved: true}); got != want {
+		t.Fatalf("status = %+v, want %+v", got, want)
+	}
+	if got := e.r53.Calls(OpListZones); got != 5 {
+		t.Fatalf("ListHostedZones calls = %d, want one per zone (5) with page size 1", got)
+	}
+	// Configured IDs are reported as such and never looked up.
+	if got, want := e.zoneStatus("example.com"), (ZoneStatus{Name: "example.com", HostedZoneID: zoneCom}); got != want {
+		t.Fatalf("status = %+v, want %+v", got, want)
+	}
+	if z, _ := e.cfg.Current().ZoneFor("h.discover.example"); z.HostedZoneID != "" {
+		t.Fatal("the configuration must stay as written")
+	}
+
+	// A second public zone of the same name makes the name ambiguous.
+	e.r53.AddZone("ZDISC2", "discover.example")
+	err := e.eng.ResolveZones(ctx)
+	if err == nil || !strings.Contains(err.Error(), "several public hosted zones named discover.example") {
+		t.Fatalf("ResolveZones = %v, want ambiguity error", err)
+	}
+	if st := e.zoneStatus("discover.example"); st.HostedZoneID != "" || !strings.Contains(st.Err, "set hosted_zone_id") {
+		t.Fatalf("status after ambiguity = %+v", st)
+	}
+	if _, err := e.present("o", "_acme-challenge.h.discover.example", "v"); err == nil || !strings.Contains(err.Error(), "several public hosted zones") {
+		t.Fatalf("Present on an ambiguous zone = %v", err)
+	}
+
+	// No public zone at all.
+	e.cfg.Update(func(c *core.Config) { c.Zones = []core.ZoneConfig{{Name: "nowhere.example"}} })
+	err = e.eng.ResolveZones(ctx)
+	if err == nil || !strings.Contains(err.Error(), "no public hosted zone named nowhere.example") {
+		t.Fatalf("ResolveZones = %v, want not-found error", err)
+	}
+	if got := e.eng.ZoneStatuses(); len(got) != 1 || got[0].HostedZoneID != "" {
+		t.Fatalf("statuses = %+v; the dropped zone must be forgotten", got)
+	}
+}
+
+func TestPresentResolvesZoneByName(t *testing.T) {
+	e := newEnv(t)
+	e.addUnresolvedZone("discover.example")
+	e.r53.AddZone("ZDISC", "discover.example")
+	rec := "_acme-challenge.host.discover.example"
+	id := e.mustPresent("o1", rec, "v1")
+	if got := e.state(id).ZoneID; got != "ZDISC" {
+		t.Fatalf("challenge zone = %s, want the discovered ZDISC", got)
+	}
+	wantTXT(t, e.r53, rec, "v1")
+	if got := e.r53.Changes("ZDISC"); got != 1 {
+		t.Fatalf("changes in ZDISC = %d, want 1", got)
+	}
+	if e.cleanup(id) != nil {
+		t.Fatal("cleanup")
+	}
+	wantTXT(t, e.r53, rec)
+	// One listing served both the discovery and the later lookups.
+	if got := e.r53.Calls(OpListZones); got != 1 {
+		t.Fatalf("ListHostedZones calls = %d, want 1", got)
+	}
+}
+
+func TestResolveZonesRetriesLazilyAfterFailure(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.addUnresolvedZone("discover.example")
+	e.r53.AddZone("ZDISC", "discover.example")
+	e.r53.Fail(OpListZones, &types.InvalidInput{Message: aws.String("denied")}, 1)
+	if err := e.eng.VerifyZones(ctx); err == nil || !strings.Contains(err.Error(), "denied") {
+		t.Fatalf("VerifyZones = %v, want the listing error", err)
+	}
+	if st := e.zoneStatus("discover.example"); st.HostedZoneID != "" || !strings.Contains(st.Err, "denied") {
+		t.Fatalf("status after failure = %+v", st)
+	}
+	// The next Present resolves the zone itself.
+	rec := "_acme-challenge.host.discover.example"
+	e.mustPresent("o1", rec, "v1")
+	wantTXT(t, e.r53, rec, "v1")
+	if st := e.zoneStatus("discover.example"); st.HostedZoneID != "ZDISC" || !st.Resolved || st.Err != "" {
+		t.Fatalf("status after lazy resolution = %+v", st)
+	}
+	// A failing listing on a later configuration change keeps the result.
+	e.r53.Fail(OpListZones, &types.InvalidInput{Message: aws.String("denied")}, 1)
+	if err := e.eng.ResolveZones(ctx); err != nil {
+		t.Fatalf("ResolveZones with a known zone = %v, want nil", err)
+	}
+	if st := e.zoneStatus("discover.example"); st.HostedZoneID != "ZDISC" {
+		t.Fatalf("status lost through a transient failure: %+v", st)
+	}
+	// An explicit ID replaces the discovered one.
+	e.cfg.Update(func(c *core.Config) {
+		c.Zones[len(c.Zones)-1].HostedZoneID = "ZEXPLICIT"
+	})
+	if st := e.zoneStatus("discover.example"); st.HostedZoneID != "ZEXPLICIT" || st.Resolved {
+		t.Fatalf("status with explicit ID = %+v", st)
+	}
+}
+
+// Concurrent Present calls on an unresolved zone share one listing.
+func TestResolveZonesNoStampede(t *testing.T) {
+	e := newEnv(t)
+	e.addUnresolvedZone("discover.example")
+	e.r53.AddZone("ZDISC", "discover.example")
+	const n = 8
+	errs := make([]error, n)
+	err := e.run(func() error {
+		var wg sync.WaitGroup
+		for i := range n {
+			wg.Go(func() {
+				_, errs[i] = e.eng.Present(context.Background(), "o", fmt.Sprintf("_acme-challenge.h%d.discover.example", i), "v")
+			})
+		}
+		wg.Wait()
+		return errors.Join(errs...)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := e.r53.Calls(OpListZones); got != 1 {
+		t.Fatalf("ListHostedZones calls = %d, want 1", got)
+	}
+}
+
+func TestVerifyZonesMixedIDs(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.addUnresolvedZone("discover.example")
+	e.r53.AddZone("ZDISC", "discover.example")
+	if err := e.eng.VerifyZones(ctx); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]ZoneStatus{
+		"example.com":      {Name: "example.com", HostedZoneID: zoneCom},
+		"example.org":      {Name: "example.org", HostedZoneID: zoneOrg},
+		"sub.example.com":  {Name: "sub.example.com", HostedZoneID: zoneSub},
+		"discover.example": {Name: "discover.example", HostedZoneID: "ZDISC", Resolved: true},
+	}
+	got := e.eng.ZoneStatuses()
+	if len(got) != len(want) {
+		t.Fatalf("statuses = %+v", got)
+	}
+	for _, st := range got {
+		if st != want[st.Name] {
+			t.Fatalf("status %+v, want %+v", st, want[st.Name])
+		}
+	}
+	// A discovered zone is verified like a configured one: here the
+	// listing finds it but GetHostedZone fails.
+	e.r53.Fail(OpGetHostedZone, &types.InvalidInput{Message: aws.String("denied")}, len(want))
+	if err := e.eng.VerifyZones(ctx); err == nil || !strings.Contains(err.Error(), "ZDISC") {
+		t.Fatalf("VerifyZones = %v, want a GetHostedZone failure naming ZDISC", err)
+	}
 }
 
 func TestVerifyZones(t *testing.T) {

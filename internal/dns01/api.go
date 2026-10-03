@@ -21,6 +21,10 @@ type Route53API interface {
 	ListResourceRecordSets(ctx context.Context, in *route53.ListResourceRecordSetsInput, optFns ...func(*route53.Options)) (*route53.ListResourceRecordSetsOutput, error)
 	GetChange(ctx context.Context, in *route53.GetChangeInput, optFns ...func(*route53.Options)) (*route53.GetChangeOutput, error)
 	GetHostedZone(ctx context.Context, in *route53.GetHostedZoneInput, optFns ...func(*route53.Options)) (*route53.GetHostedZoneOutput, error)
+	// ListHostedZones is used to discover the ID of a managed zone whose
+	// hosted_zone_id is not configured. The IAM users this broker runs
+	// with are allowed this call but not ListHostedZonesByName.
+	ListHostedZones(ctx context.Context, in *route53.ListHostedZonesInput, optFns ...func(*route53.Options)) (*route53.ListHostedZonesOutput, error)
 }
 
 var _ Route53API = (*route53.Client)(nil)

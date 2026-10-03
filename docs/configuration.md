@@ -64,7 +64,12 @@ server:
 # Managed Route53 zones; matching uses the longest managed suffix.
 zones: []
 #  - name: example.com          # normalized, not a wildcard, unique
-#    hosted_zone_id: Z0123456789ABCDEFGHIJ   # Z + up to 31 capitals/digits
+#    hosted_zone_id: Z0123456789ABCDEFGHIJ   # optional; Z + up to 31 capitals/digits.
+#                                # Omitted: resolved by name through
+#                                # route53:ListHostedZones at startup and on
+#                                # activation (the one public hosted zone with
+#                                # that name). Set it when two public zones
+#                                # share the name.
 
 route53:
   region: us-east-1
@@ -296,7 +301,8 @@ shared by two zones, ...). The ranges and relations are listed in the
 reference above; in addition:
 
 - zones: well-formed, normalized (lower case, no trailing dot), not wildcards,
-  no duplicates; hosted zone IDs look like `Z...` without `/hostedzone/`;
+  no duplicates; a hosted zone ID, when given, looks like `Z...` without
+  `/hostedzone/` (an omitted one is discovered by name, see `docs/dns01.md`);
 - providers: unique names, https directory URLs, plain e-mail contact, EAB
   fields together, CAA issuers are domain names, limit counts non-negative with
   a window whenever the count is positive;

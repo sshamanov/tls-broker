@@ -115,3 +115,11 @@ func (s *route53Switch) GetHostedZone(ctx context.Context, in *route53.GetHosted
 	}
 	return c.GetHostedZone(ctx, in, optFns...)
 }
+
+func (s *route53Switch) ListHostedZones(ctx context.Context, in *route53.ListHostedZonesInput, optFns ...func(*route53.Options)) (*route53.ListHostedZonesOutput, error) {
+	c, err := s.current(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return c.ListHostedZones(ctx, in, optFns...)
+}

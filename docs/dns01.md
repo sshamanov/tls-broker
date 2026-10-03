@@ -103,6 +103,7 @@ In the configuration YAML (see `docs/configuration.md`):
 zones:
   - name: example.com
     hosted_zone_id: Z0123456789ABCDEFGHIJ
+  - name: example.org              # no hosted_zone_id: discovered by name
 route53:
   region: us-east-1               # Route53 is global; the region only selects the endpoint
   access_key_id_secret: ""        # both or neither, see Credentials
@@ -117,6 +118,30 @@ Zones and timeouts are read on every call, so a configuration change applies
 to the next challenge. The startup check (`VerifyZones`) confirms every
 configured hosted zone exists, has the configured name and is public (a
 private zone is invisible to the public resolvers the CAs use).
+
+### Hosted zone discovery
+
+`hosted_zone_id` is optional. For a zone without it the engine pages through
+`route53:ListHostedZones` (the only listing call the broker's IAM policy
+grants; `ListHostedZonesByName` is not used) and takes the one *public*
+hosted zone whose name equals the zone name; private zones of that name are
+ignored. Discovery runs at startup and whenever a configuration is
+activated, and the result is then checked with `GetHostedZone` like a
+configured ID. The discovered ID is kept in memory only: the configuration
+stays as written, the dashboard's zone table shows the ID in effect and
+whether it was configured or discovered, and the startup log reports
+`route53 hosted zone discovered by name`.
+
+- No public hosted zone of that name, or several: the zone has no hosted zone
+  and DNS-01 for names in it fails with `no public hosted zone named ...` or
+  `several public hosted zones named ...; set hosted_zone_id` until the
+  configuration is fixed. Set `hosted_zone_id` explicitly to pick one of
+  several.
+- A failed listing (AWS unreachable, credentials not yet entered) is retried
+  by the next `Present` for that zone, so a transient failure at startup does
+  not disable DNS-01 until the next restart. An ID discovered earlier
+  survives a later failed listing and configuration reloads; it is dropped
+  only when the zone leaves the configuration or gets an explicit ID.
 
 ## Credentials
 
@@ -140,7 +165,9 @@ Grant exactly this, with your hosted zone IDs. The change permission is
 limited by Route53's condition keys to `TXT` records named
 `_acme-challenge.*`, and to the `CREATE`/`DELETE` actions the engine uses.
 `ListResourceRecordSets` cannot be restricted by record name; it is
-read-only.
+read-only. `ListHostedZones` (needed only for zones without
+`hosted_zone_id`) is account-wide by nature and reveals the names and IDs of
+every hosted zone; it is read-only as well.
 
 ```json
 {
@@ -172,6 +199,12 @@ read-only.
         "arn:aws:route53:::hostedzone/Z0123456789ABCDEFGHIJ",
         "arn:aws:route53:::hostedzone/Z9876543210JIHGFEDCBA"
       ]
+    },
+    {
+      "Sid": "DiscoverZones",
+      "Effect": "Allow",
+      "Action": "route53:ListHostedZones",
+      "Resource": "*"
     },
     {
       "Sid": "ChangeStatus",
@@ -220,7 +253,10 @@ proxy after `dns_proxy.challenge_ttl` (it lists stale rows and calls
 |---|---|
 | `AccessDenied` on `ChangeResourceRecordSets` | IAM policy missing the zone ARN, or the record is not `_acme-challenge.*` TXT. Check the policy above. |
 | `NoSuchHostedZone`, or startup says the zone name does not match | Wrong `hosted_zone_id` in the configuration, or the ID belongs to another account. |
-| Startup says a zone is private | The configured ID is a private hosted zone; use the public zone with the same name. |
+| Startup says a zone is private | The configured ID is a private hosted zone; use the public zone with the same name (discovery never picks a private zone). |
+| `no public hosted zone named <zone>` | The zone has no `hosted_zone_id` and the account has no public hosted zone of exactly that name: a typo, the zone lives in another account, or only a private zone exists. Create the public zone or set `hosted_zone_id`. |
+| `several public hosted zones named <zone>; set hosted_zone_id` | More than one public hosted zone carries the name (for example during a migration). Set `hosted_zone_id` to the one the domain's NS delegation points to. |
+| `list hosted zones: AccessDenied` (dashboard: "not discovered") | The IAM policy lacks `route53:ListHostedZones`; add the `DiscoverZones` statement above or set `hosted_zone_id`. The next `Present` retries discovery, no restart needed. |
 | `route53 change did not complete in time` | Route53 is throttling or unreachable for longer than `change_timeout`, or the change stayed `PENDING`. Check AWS service health and other tools writing to the same account (Route53 limits API calls per account). |
 | `TXT record did not become visible in public DNS` | The change is in sync but the public resolvers do not see it: the domain's NS delegation does not point to this hosted zone, a more specific zone (or a CNAME at `_acme-challenge`) exists elsewhere, or negative caching from an earlier lookup. `dig +trace TXT _acme-challenge.<name>` and compare the NS set with the hosted zone's delegation set. Raise `propagation_timeout` only if it eventually appears. |
 | `name is outside managed zones` | The name has no managed zone; add the zone, or it is not an `_acme-challenge` record. |

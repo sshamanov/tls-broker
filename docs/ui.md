@@ -62,14 +62,17 @@ top of every page, the login page included, to every user.
 **Dashboard** (`/ui/`).
 - Warnings (admin): problems and warnings of the active configuration, no
   zones or providers, LDAP not configured, LDAP not tested since start or last
-  test failed, zones whose CAA does not protect wildcards, zones whose CAA does
-  not authorize a configured provider, providers whose account URL cannot be
-  read, open provider circuits.
+  test failed, zones without a hosted zone (no `hosted_zone_id` and discovery
+  by name failed), zones whose CAA does not protect wildcards, zones whose CAA
+  does not authorize a configured provider, providers whose account URL cannot
+  be read, open provider circuits.
 - Counts: valid ACME certificates, orders in flight, direct entries.
 - Providers: health, circuit state, retry-after, slots, last error; budget
   usage per bucket (`Scheduler.Snapshot()`).
 - Admin: the broker's account URL at each enabled provider (copy it into the
-  CAA `accounturi` parameter), and per managed zone the CAA verdict from
+  CAA `accounturi` parameter), and per managed zone the hosted zone in effect
+  (the configured ID, or the one the DNS-01 engine discovered by name, or why
+  discovery failed; see `docs/dns01.md`) and the CAA verdict from
   `CAAChecker` with ready-to-paste CAA records. CAA and account lookups run in
   parallel with an 8 s limit, so a slow resolver delays the page, never breaks
   it.
@@ -135,8 +138,8 @@ none, and circuits close by themselves.
    in at `/ui/login` as the local admin.
 2. **Secrets**: set the Route53 access key and secret key, and EAB keys for any
    provider that needs them, under the names you will reference.
-3. **Config**: edit the YAML: `server.external_url`, `zones` (name and hosted
-   zone id), `providers` (directory URL, `caa_issuers`, `account_uri_honoured`),
+3. **Config**: edit the YAML: `server.external_url`, `zones` (name, and the
+   hosted zone id unless it is to be discovered by name), `providers` (directory URL, `caa_issuers`, `account_uri_honoured`),
    `route53` secret names. *Validate*; fix the listed problems (a missing
    secret is reported by name).
 4. *Activate*. The dashboard now lists providers, and the broker's account URL

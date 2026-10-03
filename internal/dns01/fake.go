@@ -22,7 +22,12 @@ const (
 	OpList          = "ListResourceRecordSets"
 	OpGetChange     = "GetChange"
 	OpGetHostedZone = "GetHostedZone"
+	OpListZones     = "ListHostedZones"
 )
+
+// maxZonesPerPage is the largest page ListHostedZones returns, like the real
+// API's limit of 100.
+const maxZonesPerPage = 100
 
 // FakeRoute53 is an in-memory Route53 implementing Route53API with the
 // semantics the engine relies on:
@@ -56,6 +61,7 @@ type FakeRoute53 struct {
 	maxInflight map[string]int
 	changeCount map[string]int
 	hook        func(ctx context.Context, zoneID string) error
+	zonePage    int // ListHostedZones page cap; 0 means maxZonesPerPage
 }
 
 type fakeZone struct {
@@ -110,6 +116,14 @@ func (f *FakeRoute53) addZone(id, name string, private bool) {
 	defer f.mu.Unlock()
 	id = hostedZoneID(id)
 	f.zones[id] = &fakeZone{id: id, name: fakeName(name), private: private, rrsets: map[rrKey]types.ResourceRecordSet{}}
+}
+
+// SetZonePageSize caps the hosted zones one ListHostedZones call returns
+// (tests use it to exercise pagination); n <= 0 restores the default of 100.
+func (f *FakeRoute53) SetZonePageSize(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.zonePage = n
 }
 
 // SetSyncDelay sets how long new changes stay PENDING.
@@ -538,10 +552,59 @@ func (f *FakeRoute53) GetHostedZone(ctx context.Context, in *route53.GetHostedZo
 	if !ok {
 		return nil, &types.NoSuchHostedZone{Message: aws.String("no hosted zone " + zid)}
 	}
-	return &route53.GetHostedZoneOutput{HostedZone: &types.HostedZone{
+	return &route53.GetHostedZoneOutput{HostedZone: z.hostedZone()}, nil
+}
+
+// hostedZone describes the zone as the API does: FQDN name with trailing
+// dot, "/hostedzone/" prefixed ID and the private flag.
+func (z *fakeZone) hostedZone() *types.HostedZone {
+	return &types.HostedZone{
 		Id: aws.String("/hostedzone/" + z.id), Name: aws.String(z.name + "."), CallerReference: aws.String(z.id),
 		Config: &types.HostedZoneConfig{PrivateZone: z.private},
-	}}, nil
+	}
+}
+
+// ListHostedZones implements Route53API. Zones are ordered by ID; Marker
+// (a zone ID, as NextMarker returns it) and MaxItems are honoured, and a
+// page never exceeds the configured page cap.
+func (f *FakeRoute53) ListHostedZones(ctx context.Context, in *route53.ListHostedZonesInput, _ ...func(*route53.Options)) (*route53.ListHostedZonesOutput, error) {
+	if err := f.begin(ctx, OpListZones); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	ids := make([]string, 0, len(f.zones))
+	for id := range f.zones {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	limit := maxZonesPerPage
+	if f.zonePage > 0 {
+		limit = f.zonePage
+	}
+	if in.MaxItems != nil && *in.MaxItems > 0 {
+		limit = min(limit, int(*in.MaxItems))
+	}
+	start := hostedZoneID(aws.ToString(in.Marker))
+	out := &route53.ListHostedZonesOutput{MaxItems: aws.Int32(int32(limit))}
+	if start != "" {
+		if _, ok := f.zones[start]; !ok {
+			return nil, &types.NoSuchHostedZone{Message: aws.String("no hosted zone " + start)}
+		}
+		out.Marker = aws.String(start)
+	}
+	for _, id := range ids {
+		if id < start {
+			continue
+		}
+		if len(out.HostedZones) == limit {
+			out.IsTruncated = true
+			out.NextMarker = aws.String(id)
+			break
+		}
+		out.HostedZones = append(out.HostedZones, *f.zones[id].hostedZone())
+	}
+	return out, nil
 }
 
 func copyRRSet(rs types.ResourceRecordSet) types.ResourceRecordSet {

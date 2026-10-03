@@ -55,8 +55,22 @@ type KeyRotator interface {
 	Rotate(ctx context.Context, identifier string) error
 }
 
-// Deps are the collaborators of the UI. Everything except Rotator and Logger
-// is required.
+// ZoneStatus is the hosted zone in effect for one managed zone, as the
+// DNS-01 engine reports it (dns01.ZoneStatus has the same shape).
+type ZoneStatus struct {
+	Name         string
+	HostedZoneID string // effective ID; "" while discovery has not succeeded
+	Resolved     bool   // true: discovered by name; false: configured
+	Err          string // why discovery failed (only when HostedZoneID is "")
+}
+
+// ZoneStatusSource reports the hosted zone in effect for every managed zone.
+type ZoneStatusSource interface {
+	ZoneStatuses() []ZoneStatus
+}
+
+// Deps are the collaborators of the UI. Everything except Zones, Rotator and
+// Logger is required.
 type Deps struct {
 	Auth      *auth.Service
 	Config    core.ConfigSource
@@ -76,6 +90,9 @@ type Deps struct {
 	Lineages  core.LineageStore
 	Clock     core.Clock
 
+	// Zones is optional; when nil the dashboard shows the configured hosted
+	// zone IDs only.
+	Zones ZoneStatusSource
 	// Rotator is optional; see KeyRotator.
 	Rotator KeyRotator
 	// Banners are process-level warnings shown at the top of every page,

@@ -300,8 +300,9 @@ func (e *Engine) changeStatus(ctx context.Context, id string) (types.ChangeStatu
 	return out.ChangeInfo.Status, nil
 }
 
-func (e *Engine) verifyZone(ctx context.Context, z core.ZoneConfig) error {
-	id := hostedZoneID(z.HostedZoneID)
+// verifyZone checks that hosted zone id exists, is named name and is public.
+func (e *Engine) verifyZone(ctx context.Context, name, id string) error {
+	z := core.ZoneConfig{Name: name, HostedZoneID: id}
 	var out *route53.GetHostedZoneOutput
 	err := e.retry(ctx, func(ctx context.Context) error {
 		var err error

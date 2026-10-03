@@ -366,6 +366,19 @@ func TestDashboard(t *testing.T) {
 	account, _ := e.ca.AccountURL(bg)
 	see(t, r, "Broker accounts at providers", account, "example.com", "wide open zone", "is unprotected", "accounturi=", "LDAP is not configured", "circuit open", "too many")
 	see(t, r, "<b>1</b><span>valid ACME certificates", "is rate_limited until")
+	// Without a zone status source the configured hosted zone ID is shown.
+	see(t, r, "<code>Z0123456789ABC</code>", "configured")
+	lacks(t, r, "discovered by name", "no hosted zone")
+
+	// The engine's view wins: a discovered ID, or why there is none.
+	e.h.Zones = zonesStub{{Name: "example.com", HostedZoneID: "ZDISCOVERED", Resolved: true}}
+	r = admin.get("/ui/")
+	see(t, r, "<code>ZDISCOVERED</code>", "discovered by name")
+	lacks(t, r, "Z0123456789ABC")
+	e.h.Zones = zonesStub{{Name: "example.com", Err: "no public hosted zone named example.com"}}
+	r = admin.get("/ui/")
+	see(t, r, "not discovered: no public hosted zone named example.com", "Zone example.com: no hosted zone; DNS-01 fails for it")
+	e.h.Zones = nil
 
 	// Snapshot.Open means admission is open: a healthy provider shows neither
 	// "circuit open" nor a dashboard warning.
@@ -396,6 +409,11 @@ func TestDashboard(t *testing.T) {
 		t.Errorf("error events: %d", len(evs))
 	}
 }
+
+// zonesStub is a fixed ZoneStatusSource.
+type zonesStub []ZoneStatus
+
+func (z zonesStub) ZoneStatuses() []ZoneStatus { return z }
 
 func seedCert(t *testing.T, e *env, id, name string) {
 	t.Helper()
