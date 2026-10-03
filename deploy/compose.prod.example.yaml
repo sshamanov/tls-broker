@@ -48,6 +48,10 @@ services:
   #   network_mode: host
   #   restart: unless-stopped
   #   entrypoint: ["/usr/local/bin/mockdoh"]
+  #   # The image HEALTHCHECK probes the broker's port, not mockdoh, and would
+  #   # report this container healthy or unhealthy for the wrong reason.
+  #   healthcheck:
+  #     disable: true
   #   command:
   #     - --listen=127.0.0.1:8053
   #     - --upstream=https://cloudflare-dns.com/dns-query

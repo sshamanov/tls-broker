@@ -230,8 +230,10 @@ TLS_BROKER_DOH_ENDPOINTS=http://127.0.0.1:8053/dns-query bin/tls-broker
 
 Records use zone-file syntax after `<name> <type>`. The image ships the same
 binary as `/usr/local/bin/mockdoh`; in compose run it as a second service
-from the same image with `entrypoint: ["/usr/local/bin/mockdoh", ...]` and
-host networking. With `TLS_BROKER_DOH_ENDPOINTS` set the broker logs a loud
+from the same image with `entrypoint: ["/usr/local/bin/mockdoh", ...]`, host
+networking and `healthcheck: {disable: true}` (the image's HEALTHCHECK probes
+the broker, so it would report the mockdoh container healthy as long as the
+broker answers, or unhealthy while it does not). With `TLS_BROKER_DOH_ENDPOINTS` set the broker logs a loud
 warning at start-up and every UI page shows "DNS gate is mocked". Never set
 it, or run mockdoh, in production: whoever edits the table decides which
 machine gets which certificate. `cmd/mockdoh/main_test.go` tests it against
