@@ -7,14 +7,14 @@ container through `scripts/dev`; `make` targets wrap the common cases.
 
 | Command | What it does |
 |---|---|
-| `make check` | gofmt check, `go vet ./...`, `go test -race ./...`. Must be green before every commit. |
+| `make check` | gofmt check, `go vet ./...`, `go test -race ./...` (including the in-process end-to-end suite). Must be green before every commit. |
 | `make test` | `go test ./...` without the race detector (faster). |
 | `make fmt` | `gofmt -w` on the source tree. |
 | `make build` | Static binaries `bin/tls-broker` and `bin/mockdoh`. |
 | `make image` | Container image `tls-broker:local` from `deploy/Dockerfile` (both binaries). |
 | `make run-test` | `docker compose -f deploy/compose.test.yaml up -d`: the local test deployment with live credentials (see `docs/deployment.md`). |
-| `make e2e` | In-process end-to-end tests (`test/e2e`). Placeholder until wave 4. |
-| `make e2e-pebble` | Upstream adapter against Pebble. Placeholder until wave 4. |
+| `make e2e` | Only the in-process end-to-end tests (`test/e2e`), uncached. |
+| `make e2e-pebble` | The broker with the real upstream adapter against Pebble and challtestsrv containers (`test/pebble.sh`). |
 | `make compat` | Real certbot / acme.sh against the broker. Placeholder until wave 4. |
 | `make clean` | Removes `bin/` and `.cache/`. |
 
@@ -57,15 +57,18 @@ for shipping (`deploy/compose.yaml`).
 1. **Unit tests** per package, on the `coretest` fakes and a temp-file SQLite
    store (`t.TempDir()`). No network, no real time: take time from
    `core.Clock` and drive it with `coretest.FakeClock`.
-2. **In-process end-to-end** (`test/e2e`, `make e2e`): the whole broker wired
-   with the fake CA, fake Route53, fake resolver, fake LDAP and fake clock.
-3. **Pebble** (`make e2e-pebble`): the real upstream adapter against Pebble and
-   challtestsrv containers.
+2. **In-process end-to-end** (`test/e2e`, part of `make check`; `make e2e`
+   runs only it): the whole broker wired with the fake CAs, fake Route53,
+   fake resolver, fake LDAP and fake clock (below).
+3. **Pebble** (`make e2e-pebble`): the same suite's harness with the real
+   upstream adapter against Pebble and challtestsrv containers (below).
 4. **Compatibility** (`make compat`): real certbot and acme.sh containers.
 5. **Let's Encrypt staging and a production canary** are run by the operator
    with real credentials; they are not automated here.
 
-Layers 3 and 4 run in CI only on manual dispatch (`.github/workflows/e2e.yml`).
+Layers 3 and 4 run in CI only on manual dispatch (`.github/workflows/e2e.yml`);
+`.github/workflows/ci.yml` runs `make check`, so layers 1 and 2 gate every
+push.
 
 Rules that keep tests trustworthy:
 
@@ -74,6 +77,91 @@ Rules that keep tests trustworthy:
 - Do not skip a failing test or weaken an assertion to get green.
 - Scratch files go in `.claude/tmp/` or `t.TempDir()`, never the system temp
   directory.
+
+### In-process end-to-end suite (`test/e2e`)
+
+Each scenario boots its own broker through `internal/app` on a temporary data
+directory and talks to it only over HTTP, the way clients do:
+
+- **World.** Two managed zones (`example.com`, `example.org`) in
+  `dns01.FakeRoute53`; two `coretest.FakeCA`s behind `NewFakeProviders`: the
+  primary `letsencrypt` (ARI exempt) and the fallback `google` (ARI, not
+  exempt), both validating DNS-01 against Route53's public view
+  (`SetTXTLookup(r53.LookupTXT)`); the DNS gate's A and CAA answers from a
+  `coretest.FakeResolver`; LDAP users from `coretest.FakeDirectory`; one
+  `coretest.FakeClock` for everything. The YAML is activated through the
+  app's configuration store, as the UI would.
+- **Front.** An `httptest` TLS server in front of `App.Handler()` (lego
+  requires https). It outlives the app, so a restart on the same data
+  directory keeps every URL. Each "machine" is an HTTP client whose requests
+  carry its address in `X-Real-IP`, trusted from 127.0.0.1.
+- **Clients.** lego's low-level `acme/api` for the ACME proxy, plain
+  `net/http` for `/cert/` and `/dns/`, a cookie-jar client (with the CSRF
+  token) for the UI.
+- **Time.** Nothing waits in real time except where the broker's goroutines
+  run: code that sleeps on the clock (Route53 polling, slow-CA faults,
+  `finalize_wait`) runs under `pump`, which advances the fake clock in small
+  steps; days pass with `advance`. Background work is awaited by polling
+  broker state (`eventually`), never by fixed sleeps that assume an order.
+- **Scenarios.** `TestScenarios` has one parallel subtest per architecture
+  §25 scenario, named after it (`new issuance`, `ARI renewal`, `upstream
+  429`, `duplicate direct requests collapse to one issuance`, ...), plus
+  finalize-before-preparation, a client vanishing after newOrder (expiry,
+  refund, adoption), the DNS proxy, the UI and `/healthz` before ready.
+  Failures are injected with the fakes' fault hooks (`FakeCA.Inject`,
+  `FakeRoute53.Hang`/`SetPublicDelay`).
+- **Invariants.** Every scenario ends with `checkInvariants`, which checks
+  across everything the broker stored: one downstream order owns at most one
+  upstream order and every upstream order at the fake CAs belongs to exactly
+  one broker order; no order with an upstream order skipped the scheduler
+  (budget events, or ARI-qualified); no wildcard certificate without a
+  wildcard grant; a renewal that named its predecessor stayed with the same
+  provider and account. The direct-mode invariants (one job per identifier,
+  cached certificate served through an outage, expired never served) are
+  asserted in the direct scenarios.
+
+The suite takes about 5 s under `-race`. Run one scenario with
+`scripts/dev go test -race -run 'TestScenarios/ARI_renewal' ./test/e2e/`.
+
+### Pebble (`make e2e-pebble`)
+
+`test/pebble.sh start` runs `ghcr.io/letsencrypt/pebble` (with
+`PEBBLE_VA_NOSLEEP=1 PEBBLE_WFE_NONCEREJECT=0`) and
+`ghcr.io/letsencrypt/pebble-challtestsrv` as `tlsbroker-e2e-pebble` and
+`tlsbroker-e2e-challtestsrv` on their own docker network `tlsbroker-e2e`.
+Pebble resolves through challtestsrv inside that network, so challtestsrv's
+DNS port 8053 is never bound on the host (a development broker's `mockdoh`
+usually listens there); only Pebble's defaults are published on 127.0.0.1:
+14000 (ACME), 15000 (management) and 8055 (challtestsrv management). If one of
+them is taken the target prints `SKIPPED` and succeeds. It writes Pebble's API
+TLS root and the root of the certificates it issues to `.claude/tmp/e2e/`;
+`test/pebble.sh stop` removes everything. `make e2e-pebble` holds
+`flock .claude/tmp/pebble.lock` while it uses the containers, so runs that
+share them do not stop each other's.
+
+`test/e2e/pebble_test.go` (build tag `pebble`) boots the broker with
+`Providers` unset, so `internal/upstream` talks to Pebble (`UpstreamRootCAs`
+= Pebble's minica root), with a fresh random managed zone per run. Route53 is
+still `dns01.FakeRoute53`, wrapped by `test/challtest.Route53`, which mirrors
+every TXT RRset the broker writes to challtestsrv (`/clear-txt`, `/set-txt`)
+before the change call returns; the DNS gate stays on the fake resolver. It
+covers new issuance (single and multi-SAN), renewal with `replaces` (sent and
+inferred), wildcard (denied without, issued with a wildcard grant) and the
+direct API, and checks every chain against Pebble's current intermediate and
+root. By hand:
+
+```sh
+test/pebble.sh start
+scripts/dev env TLS_BROKER_PEBBLE_DIRECTORY=https://127.0.0.1:14000/dir \
+  TLS_BROKER_PEBBLE_ROOT=/src/.claude/tmp/e2e/pebble.minica.pem \
+  TLS_BROKER_PEBBLE_ISSUER_ROOT=/src/.claude/tmp/e2e/pebble-root.pem \
+  TLS_BROKER_PEBBLE_CHALLTESTSRV=http://127.0.0.1:8055 \
+  go test -race -tags pebble -run TestPebble -v ./test/e2e/
+test/pebble.sh stop
+```
+
+The same containers serve the upstream adapter's own Pebble test
+(`docs/providers.md`).
 
 ## Running the broker locally
 
@@ -151,7 +239,8 @@ YAML), `App.Store()` (grants, users) and `App.Secrets()` are available;
 answers 503 until `Run` marked the broker ready). An activation before `Run`
 is picked up when `Run` starts. `internal/app/app_test.go` boots the whole
 broker this way, issues one direct-mode certificate end to end and checks
-that shutdown leaves no goroutines behind.
+that shutdown leaves no goroutines behind; `test/e2e/harness_test.go` is the
+complete example (restart on the same data directory, TLS front, clients).
 
 ## Dependencies
 

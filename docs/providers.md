@@ -228,32 +228,21 @@ runs one scenario against `coretest.FakeCA` and the real adapter.
 Pebble: registration, wildcard + base order, dns-01 via challtestsrv,
 finalize twice, chain without root, renewal information, `replaces` and
 `alreadyReplaced`, explicit profiles. It is skipped unless
-`TLS_BROKER_PEBBLE_DIRECTORY` is set. Exact commands (all on the host network):
+`TLS_BROKER_PEBBLE_DIRECTORY` is set. `test/pebble.sh` starts Pebble and
+challtestsrv (see `docs/development.md`, "Pebble"):
 
 ```sh
-docker run -d --rm --network host --name tlsbroker-upstream-test-challtestsrv \
-  ghcr.io/letsencrypt/pebble-challtestsrv:latest -defaultIPv6 "" -defaultIPv4 127.0.0.1
-docker run -d --rm --network host --name tlsbroker-upstream-test-pebble \
-  -e PEBBLE_VA_NOSLEEP=1 -e PEBBLE_WFE_NONCEREJECT=0 \
-  ghcr.io/letsencrypt/pebble:latest -config test/config/pebble-config.json -dnsserver 127.0.0.1:8053
-
-# Pebble's API TLS root, from the image
-mkdir -p .claude/tmp
-cid=$(docker create ghcr.io/letsencrypt/pebble:latest)
-docker cp "$cid:/test/certs/pebble.minica.pem" .claude/tmp/pebble.minica.pem
-docker rm "$cid"
-
+test/pebble.sh start      # writes .claude/tmp/e2e/pebble.minica.pem
 scripts/dev env \
   TLS_BROKER_PEBBLE_DIRECTORY=https://127.0.0.1:14000/dir \
-  TLS_BROKER_PEBBLE_ROOT=/src/.claude/tmp/pebble.minica.pem \
+  TLS_BROKER_PEBBLE_ROOT=/src/.claude/tmp/e2e/pebble.minica.pem \
   TLS_BROKER_PEBBLE_CHALLTESTSRV=http://127.0.0.1:8055 \
   go test -race -tags pebble -run TestPebble -count=1 -v ./internal/upstream/
-
-docker stop tlsbroker-upstream-test-pebble tlsbroker-upstream-test-challtestsrv
+test/pebble.sh stop
 ```
 
-Ports used: 14000/15000 (Pebble), 8053 (challtestsrv DNS), 8055
-(challtestsrv management), 5001-5003 and 8443 (challtestsrv, unused here).
+Host ports used: 14000/15000 (Pebble) and 8055 (challtestsrv management);
+challtestsrv's DNS (8053) stays inside the containers' network.
 Pebble without a `profile` picks one of its profiles itself, so the test
 requests `default` and `shortlived` explicitly when it checks lifetimes.
 

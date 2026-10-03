@@ -33,16 +33,25 @@ image:
 run-test:
 	docker compose -f deploy/compose.test.yaml up -d
 
-# In-process end-to-end tests on fakes. test/e2e is written in wave 4; until
-# then this target is a placeholder that does nothing and succeeds.
+# In-process end-to-end tests on fakes (also part of `make check`).
 e2e:
-	@if [ -d test/e2e ]; then $(DEV) go test -race -count=1 ./test/e2e/...; \
-	else echo "e2e: not implemented until wave 4"; fi
+	$(DEV) go test -race -count=1 ./test/e2e/...
 
-# PLACEHOLDER: real upstream adapter against Pebble + challtestsrv containers.
-# Not implemented until wave 4; prints a notice and exits 0.
+# The broker with the real upstream adapter against Pebble + challtestsrv
+# containers (test/pebble.sh). Skipped with a message when Pebble's ports are
+# taken. The lock serializes runs that share the containers.
+PEBBLE_LOCK := .claude/tmp/pebble.lock
 e2e-pebble:
-	@echo "e2e-pebble: not implemented until wave 4"
+	@mkdir -p .claude/tmp
+	@flock $(PEBBLE_LOCK) sh -c 'test/pebble.sh start; rc=$$?; \
+		if [ $$rc -eq 3 ]; then echo "e2e-pebble: SKIPPED (ports busy)"; exit 0; fi; \
+		[ $$rc -eq 0 ] || exit $$rc; \
+		$(DEV) env TLS_BROKER_PEBBLE_DIRECTORY=https://127.0.0.1:14000/dir \
+			TLS_BROKER_PEBBLE_ROOT=/src/.claude/tmp/e2e/pebble.minica.pem \
+			TLS_BROKER_PEBBLE_ISSUER_ROOT=/src/.claude/tmp/e2e/pebble-root.pem \
+			TLS_BROKER_PEBBLE_CHALLTESTSRV=http://127.0.0.1:8055 \
+			go test -race -tags pebble -count=1 -run TestPebble -v ./test/e2e/; rc=$$?; \
+		test/pebble.sh stop; exit $$rc'
 
 # PLACEHOLDER: real certbot / acme.sh containers against a Pebble-backed
 # broker. Not implemented until wave 4; prints a notice and exits 0.

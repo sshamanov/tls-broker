@@ -1,5 +1,6 @@
 # Slow suites that need extra containers (Pebble, certbot, acme.sh).
-# Run by hand from the Actions tab.
+# Run by hand from the Actions tab. `make check` in ci.yml already runs the
+# in-process end-to-end suite (test/e2e without build tags) on every push.
 name: e2e
 
 on:
@@ -13,7 +14,7 @@ permissions:
   contents: read
 
 jobs:
-  e2e:
+  e2e-pebble:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -26,5 +27,23 @@ jobs:
             go-${{ runner.os }}-
       - name: make e2e-pebble
         run: make e2e-pebble
+      - name: remove containers
+        if: always()
+        run: test/pebble.sh stop
+
+  compat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .cache
+          key: go-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-${{ runner.os }}-
       - name: make compat
         run: make compat
+      - name: remove containers
+        if: always()
+        run: test/pebble.sh stop
