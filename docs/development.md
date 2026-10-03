@@ -284,10 +284,11 @@ and commit `go.mod` and `go.sum` together with the code that uses it.
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs `make check` exactly as it runs locally, then
-builds the image and, on pushes to `main`, publishes it to
-`ghcr.io/sshamanov/tls-broker` (tags `main`, `latest`, `sha-<short>`)
-with the workflow's `GITHUB_TOKEN`. The image is the only artifact; no
+`.github/workflows/ci.yml` runs `make check` exactly as it runs locally and,
+in parallel, builds the image. On pushes to `main` the image job pushes
+`ghcr.io/sshamanov/tls-broker:sha-<short>`; once both jobs pass,
+`publish` points `main` and `latest` at that image without rebuilding, so a
+failing check never moves `latest`. Pushes use the workflow's `GITHUB_TOKEN`. The image is the only artifact; no
 binaries are published. The repository is private, the package is public.
 Actions are pinned by commit SHA; update the SHA and its `# vN` comment
 together.
