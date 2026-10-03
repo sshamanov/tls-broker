@@ -196,10 +196,10 @@ func publicJWK(k *jose.JSONWebKey) ([]byte, error) {
 func (s *Server) readJWS(x *exchange) (*parsedJWS, *core.Problem) {
 	mt, _, err := mime.ParseMediaType(x.r.Header.Get("Content-Type"))
 	// Certbot 0.31's acme library (Debian 10's package) sends the
-	// certificate download's POST-as-GET with the Accept type as its
-	// Content-Type. The body is still a verified JWS; nothing else is
-	// relaxed.
-	certbot031 := mt == "application/pem-certificate-chain" && strings.HasPrefix(x.path, pathCert)
+	// certificate download's POST-as-GET with Content-Type
+	// application/pkix-cert, its DER_CONTENT_TYPE. The body is still a
+	// verified JWS; nothing else is relaxed.
+	certbot031 := mt == "application/pkix-cert" && strings.HasPrefix(x.path, pathCert)
 	if err != nil || mt != "application/jose+json" && !certbot031 {
 		return nil, malformed("Content-Type must be application/jose+json").WithStatus(http.StatusUnsupportedMediaType)
 	}
