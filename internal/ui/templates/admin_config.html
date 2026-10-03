@@ -1,0 +1,41 @@
+{{define "content"}}
+{{if .Data.Check}}
+<section class="result">
+{{if eq .Data.Action "activate"}}<p class="flash error" role="alert">Not activated: the configuration has problems.</p>
+{{else if .Data.Check.OK}}<p class="flash ok" role="status">Valid: this configuration can be activated.</p>
+{{else}}<p class="flash error" role="alert">Invalid: this configuration cannot be activated.</p>{{end}}
+{{if .Data.Check.Errors}}<h3>Problems</h3><ul class="problems">{{range .Data.Check.Errors}}<li><code>{{.}}</code></li>{{end}}</ul>{{end}}
+{{if .Data.Check.Warnings}}<h3>Warnings</h3><ul class="warnings">{{range .Data.Check.Warnings}}<li><code>{{.}}</code></li>{{end}}</ul>{{end}}
+{{if .Data.Check.LDAPTested}}<p>LDAP test: {{if .Data.Check.LDAPError}}<span class="bad">failed: {{.Data.Check.LDAPError}}</span>{{else}}<span class="good">succeeded</span>{{end}}.</p>{{end}}
+</section>
+{{end}}
+
+<p>Active generation: <b>{{.Data.Current}}</b>. Editing generation {{.Data.Selected}}. Credentials are never part of the YAML; refer to secrets by name (see <a href="/ui/admin/secrets">Secrets</a>).</p>
+<form method="post" class="stack" id="cfgform">{{template "csrf" .}}
+<input type="hidden" name="gen" value="{{.Data.Selected}}">
+<textarea name="yaml" rows="30" spellcheck="false" aria-label="Configuration YAML">{{.Data.YAML}}</textarea>
+<div class="row">
+<button type="submit" formaction="/ui/admin/config/validate">Validate</button>
+<button type="submit" formaction="/ui/admin/config/activate" data-confirm="Activate this configuration as a new generation?">Activate</button>
+</div>
+</form>
+<p class="muted">Validate checks syntax, zones, providers, referenced secrets and, when LDAP settings changed, tests LDAP. Activate validates again and stores a new generation; nothing is stored when it fails.</p>
+
+<section><h2>LDAP</h2>
+{{if .Data.LDAPActive}}
+<form method="post" action="/ui/admin/config/test-ldap">{{template "csrf" .}}<button type="submit">Test LDAP</button></form>
+<p class="muted">Tests the LDAP settings of the active generation: connect, service-account bind and the user filter.</p>
+{{else}}<p class="muted">LDAP is not configured in the active generation.</p>{{end}}
+</section>
+
+<section><h2>Generations</h2>
+<table>
+<tr><th>#</th><th>Created</th><th></th><th></th></tr>
+{{range .Data.Generations}}
+<tr><td>{{.Number}}{{if .Active}} <span class="badge good">active</span>{{end}}</td><td>{{ts .CreatedAt}}</td>
+<td><a href="/ui/admin/config?gen={{.Number}}">View</a></td>
+<td class="actions">{{if not .Active}}<form method="post" action="/ui/admin/config/rollback" data-confirm="Roll back to generation {{.Number}}?">{{template "csrf" $}}<input type="hidden" name="gen" value="{{.Number}}"><button type="submit">Rollback</button></form>{{end}}</td></tr>
+{{end}}
+</table>
+</section>
+{{end}}

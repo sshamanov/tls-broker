@@ -1,0 +1,25 @@
+{{define "content"}}
+<p class="muted">Preference order: {{if .Data.Order}}{{join .Data.Order " > "}}{{else}}none enabled{{end}}. Circuits close by themselves when the retry time passes; there is no manual reset.</p>
+{{range .Data.Snapshot.Providers}}
+<section><h2>{{.Name}}</h2>
+{{$cfg := index $.Data.Configs .Name}}{{$acc := index $.Data.Accounts .Name}}
+<table class="kv">
+<tr><th>Health</th><td><span class="badge {{if .Open}}bad{{else if eq (printf "%s" .State.Health) "healthy"}}good{{else}}warn{{end}}">{{.State.Health}}</span>{{if .Open}} circuit open{{end}}{{if $cfg.Disabled}} (disabled in configuration){{end}}</td></tr>
+<tr><th>Retry after</th><td>{{if isZero .State.RetryAfter}}-{{else}}{{ts .State.RetryAfter}}{{if .Open}} ({{rel .State.RetryAfter}}){{end}}{{end}}</td></tr>
+<tr><th>Consecutive failures</th><td>{{.State.Failures}}</td></tr>
+<tr><th>Last error</th><td>{{if .State.LastError}}{{.State.LastError}}{{else}}-{{end}}</td></tr>
+<tr><th>Slots</th><td>{{.SlotsInUse}} in use of {{.SlotsTotal}}; {{.Waiting}} waiting; {{.Reserved}} open reservations</td></tr>
+<tr><th>Directory</th><td><code>{{$cfg.DirectoryURL}}</code></td></tr>
+<tr><th>Account URL</th><td>{{if $acc.URL}}<code>{{$acc.URL}}</code>{{else if $acc.Err}}<span class="bad">{{$acc.Err}}</span>{{else}}-{{end}}</td></tr>
+<tr><th>Capabilities</th><td>ARI {{if $cfg.ARI}}yes{{else}}no{{end}}; accounturi honoured {{if $cfg.AccountURIHonoured}}yes{{else}}no{{end}}; CAA issuers {{join $cfg.CAAIssuers ", "}}</td></tr>
+</table>
+{{if .Budgets}}
+<table>
+<tr><th>Budget</th><th>Key</th><th>Used</th><th>Window</th></tr>
+{{range .Budgets}}<tr><td>{{.Kind}}</td><td>{{if .Key}}{{.Key}}{{else}}-{{end}}</td>
+<td><meter min="0" max="{{.Limit}}" value="{{.Used}}"></meter> {{.Used}} / {{.Limit}}{{if .RenewalOnly}} ({{.RenewalOnly}} renewals only){{end}}</td><td>{{dur .Window}}</td></tr>{{end}}
+</table>
+{{else}}<p class="muted">No budget usage in the current windows.</p>{{end}}
+</section>
+{{else}}<p class="muted">No providers are known to the scheduler.</p>{{end}}
+{{end}}

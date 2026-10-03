@@ -1,0 +1,70 @@
+{{define "content"}}
+{{if .Blocked}}
+<p>Nothing to show while your account is blocked. See <a href="/ui/grants">your grants</a> or the <a href="/ui/audit">public audit log</a>.</p>
+{{else}}
+{{if .Data.Warnings}}
+<section><h2>Warnings</h2><ul class="warnings">{{range .Data.Warnings}}<li>{{.}}</li>{{end}}</ul></section>
+{{end}}
+
+<section class="cards">
+<div class="card"><b>{{.Data.Counts.ACMECerts}}</b><span>valid ACME certificates</span></div>
+<div class="card"><b>{{.Data.Counts.Orders}}</b><span>orders in flight</span></div>
+<div class="card"><b>{{.Data.Counts.Direct}}</b><span>direct entries ({{.Data.Counts.DirectLive}} valid)</span></div>
+</section>
+
+<section><h2>Providers</h2>
+<table>
+<tr><th>Provider</th><th>Health</th><th>Retry after</th><th>Slots</th><th>Waiting</th><th>Last error</th></tr>
+{{range .Data.Snapshot.Providers}}
+<tr><td>{{.Name}}</td>
+<td><span class="badge {{if .Open}}bad{{else if eq (printf "%s" .State.Health) "healthy"}}good{{else}}warn{{end}}">{{.State.Health}}</span>{{if .Open}} circuit open{{end}}</td>
+<td>{{if .Open}}{{ts .State.RetryAfter}} ({{rel .State.RetryAfter}}){{else}}-{{end}}</td>
+<td>{{.SlotsInUse}}/{{.SlotsTotal}}</td><td>{{.Waiting}}</td><td>{{if .State.LastError}}{{.State.LastError}}{{else}}-{{end}}</td></tr>
+{{else}}<tr><td colspan="6" class="muted">No providers.</td></tr>{{end}}
+</table>
+</section>
+
+<section><h2>Budget usage</h2>
+{{range .Data.Snapshot.Providers}}{{if .Budgets}}
+<h3>{{.Name}}</h3>
+<table>
+<tr><th>Budget</th><th>Key</th><th>Used</th><th>Window</th></tr>
+{{range .Budgets}}<tr><td>{{.Kind}}</td><td>{{if .Key}}{{.Key}}{{else}}-{{end}}</td>
+<td><meter min="0" max="{{.Limit}}" value="{{.Used}}"></meter> {{.Used}} / {{.Limit}}{{if .RenewalOnly}} ({{.RenewalOnly}} renewals only){{end}}</td><td>{{dur .Window}}</td></tr>{{end}}
+</table>
+{{end}}{{end}}
+</section>
+
+{{if .Admin}}
+<section><h2>Broker accounts at providers</h2>
+<p class="muted">Put these account URLs into the CAA <code>accounturi</code> parameter of your zones.</p>
+<table>
+<tr><th>Provider</th><th>Account URL</th><th>Issuers</th><th>accounturi honoured</th></tr>
+{{range .Data.Accounts}}<tr><td>{{.Provider}}</td><td>{{if .URL}}<code>{{.URL}}</code>{{else}}<span class="bad">{{.Err}}</span>{{end}}</td><td>{{join .Issuers ", "}}</td><td>{{if .Honoured}}yes{{else}}no{{end}}</td></tr>
+{{else}}<tr><td colspan="4" class="muted">No enabled providers.</td></tr>{{end}}
+</table>
+</section>
+
+<section><h2>Managed zones</h2>
+<table>
+<tr><th>Zone</th><th>Hosted zone</th><th>CAA node</th><th>Wildcard protected</th><th>Detail</th></tr>
+{{range .Data.Zones}}
+<tr><td>{{.Zone.Name}}</td><td><code>{{.Zone.HostedZoneID}}</code></td>
+{{if .Err}}<td colspan="3"><span class="bad">CAA lookup failed: {{.Err}}</span></td>
+{{else}}<td>{{if .Status.Node}}{{.Status.Node}}{{else}}none{{end}}</td>
+<td><span class="badge {{if .Status.WildcardProtected}}good{{else}}bad{{end}}">{{if .Status.WildcardProtected}}yes{{else}}no{{end}}</span></td>
+<td>{{.Status.Detail}}{{if .Status.MissingProviders}} Missing providers: {{join .Status.MissingProviders ", "}}.{{end}}</td>{{end}}</tr>
+{{if .Suggest}}<tr><td></td><td colspan="4"><details><summary>CAA records for this zone</summary><pre>{{range .Suggest}}{{.}}
+{{end}}</pre></details></td></tr>{{end}}
+{{else}}<tr><td colspan="5" class="muted">No zones configured.</td></tr>{{end}}
+</table>
+</section>
+{{end}}
+
+<section><h2>Recent audit events</h2>
+{{template "events" .Data.Recent}}
+<p><a href="/ui/audit">Full audit log</a></p>
+</section>
+{{end}}
+{{end}}
+

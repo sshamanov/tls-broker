@@ -1,0 +1,36 @@
+{{define "content"}}
+<form method="get" action="/ui/certificates" class="filters">
+<label>Search <input name="q" value="{{.Data.Q}}" placeholder="name contains"></label>
+<label>Provider <select name="provider"><option value="">any</option>{{$p := .Data.Provider}}{{range .Data.Providers}}<option{{if eq . $p}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+<label>Kind <select name="mode"><option value="">all</option><option value="acme"{{if eq .Data.Mode "acme"}} selected{{end}}>ACME</option><option value="direct"{{if eq .Data.Mode "direct"}} selected{{end}}>direct cache</option></select></label>
+<label class="check"><input type="checkbox" name="expired" value="1"{{if .Data.Expired}} checked{{end}}> include expired</label>
+<button type="submit">Filter</button>
+</form>
+
+{{if ne .Data.Mode "direct"}}
+<h2>ACME certificates</h2>
+<table>
+<tr><th>Identifiers</th><th>Provider</th><th>Serial</th><th>Valid from</th><th>Expires</th><th>Issued</th><th>Client interval</th><th>State</th></tr>
+{{range .Data.ACME}}
+<tr><td>{{join .Names.Names ", "}}</td><td>{{.Provider}}</td><td><code>{{.Serial}}</code></td><td>{{ts .NotBefore}}</td><td>{{ts .NotAfter}} <span class="muted">({{rel .NotAfter}})</span></td><td>{{ts .IssuedAt}}</td>
+<td>{{if .Interval}}{{dur .Interval}}{{else}}-{{end}}</td><td>{{if .ReplacedByID}}replaced{{else}}current{{end}}</td></tr>
+{{else}}<tr><td colspan="8" class="muted">No certificates.</td></tr>{{end}}
+</table>
+<p>{{if .Data.Prev}}<a href="/ui/certificates{{.Data.Prev}}">Previous</a>{{end}} {{if .Data.Next}}<a href="/ui/certificates{{.Data.Next}}">Next</a>{{end}}</p>
+{{end}}
+
+{{if ne .Data.Mode "acme"}}
+<h2>Direct cache</h2>
+<table>
+<tr><th>Identifier</th><th>Provider</th><th>Generation</th><th>Expires</th><th>Renew at</th><th>Last fetch</th><th>Last attempt</th><th></th></tr>
+{{range .Data.Direct}}
+<tr><td>{{.Identifier}}</td><td>{{if .Provider}}{{.Provider}}{{else}}-{{end}}</td><td>{{.Generation}}</td>
+<td>{{ts .NotAfter}}{{if not (isZero .NotAfter)}} <span class="muted">({{rel .NotAfter}})</span>{{end}}</td>
+<td>{{ts .RenewAt}}</td>
+<td>{{ts .LastFetchAt}}{{if .LastFetchIP.IsValid}} from {{.LastFetchIP}}{{end}}</td>
+<td>{{ts .LastAttemptAt}}{{if .LastError}}<br><span class="bad">{{.LastError}}</span> ({{.Failures}} failures){{end}}</td>
+<td class="actions">{{if $.Data.CanRotate}}<form method="post" action="/ui/certificates/rotate" data-confirm="Rotate the key of {{.Identifier}}?">{{template "csrf" $}}<input type="hidden" name="identifier" value="{{.Identifier}}"><button type="submit">Rotate key</button></form>{{end}}</td></tr>
+{{else}}<tr><td colspan="8" class="muted">No direct entries.</td></tr>{{end}}
+</table>
+{{end}}
+{{end}}

@@ -1,0 +1,19 @@
+{{define "content"}}
+<table>
+<tr><th>User</th><th>Source</th><th>Role</th><th>State</th><th>Last login</th><th></th></tr>
+{{range .Data.Users}}
+<tr><td>{{.Username}}</td><td>{{if .Local}}local break-glass{{else}}LDAP{{end}}</td>
+<td>{{if or .Local (eq .ID $.User.ID)}}{{role .Role}}{{else}}
+<form method="post" action="/ui/admin/users/{{.ID}}/role" class="inline">{{template "csrf" $}}
+<select name="role" aria-label="Role of {{.Username}}">{{$r := .Role}}{{range $.Data.Roles}}<option value="{{roleStr .}}"{{if eq . $r}} selected{{end}}>{{role .}}</option>{{end}}</select>
+<button type="submit">Set</button></form>{{end}}</td>
+<td><span class="badge {{if .Blocked}}bad{{else}}good{{end}}">{{if .Blocked}}blocked{{else}}active{{end}}</span></td>
+<td>{{ts .LastLoginAt}}</td>
+<td class="actions">{{if and (not .Local) (ne .ID $.User.ID)}}
+{{if .Blocked}}<form method="post" action="/ui/admin/users/{{.ID}}/unblock">{{template "csrf" $}}<button type="submit">Unblock</button></form>
+{{else}}<form method="post" action="/ui/admin/users/{{.ID}}/block" data-confirm="Block {{.Username}}? The block applies immediately.">{{template "csrf" $}}<button type="submit" class="danger">Block</button></form>{{end}}
+{{end}}</td></tr>
+{{end}}
+</table>
+<p class="muted">The local break-glass administrator and your own account cannot be changed here. Bootstrap admins from the environment are promoted again at their next login.</p>
+{{end}}

@@ -1,0 +1,10 @@
+{{define "content"}}
+{{if .Data.Error}}<p class="flash error" role="alert">{{.Data.Error}}</p>{{end}}
+<form method="post" action="/ui/login" class="stack narrow">
+<input type="hidden" name="next" value="{{.Data.Next}}">
+<label>Username <input name="username" value="{{.Data.Username}}" autocomplete="username" autofocus required></label>
+<label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+<button type="submit">Log in</button>
+</form>
+<p class="muted">Use your directory (LDAP) account, or the local administrator account if LDAP is unavailable.</p>
+{{end}}

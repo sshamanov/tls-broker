@@ -1,0 +1,52 @@
+{{define "csrf"}}<input type="hidden" name="csrf_token" value="{{.CSRF}}">{{end}}
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>{{.Title}} - TLS broker</title>
+<link rel="stylesheet" href="/ui/static/ui.css?v={{.Assets}}">
+<script src="/ui/static/ui.js?v={{.Assets}}" defer></script>
+</head>
+<body>
+<header>
+<a class="brand" href="/ui/">TLS broker</a>
+{{if .User}}
+<nav>
+<a href="/ui/"{{if eq .Nav "dashboard"}} class="on"{{end}}>Dashboard</a>
+<a href="/ui/grants"{{if eq .Nav "grants"}} class="on"{{end}}>My grants</a>
+{{if not .Blocked}}<a href="/ui/certificates"{{if eq .Nav "certificates"}} class="on"{{end}}>Certificates</a>{{end}}
+<a href="/ui/audit"{{if eq .Nav "audit"}} class="on"{{end}}>Audit</a>
+{{if and .Admin (not .Blocked)}}
+<span class="sep">Admin</span>
+<a href="/ui/admin/users"{{if eq .Nav "admin-users"}} class="on"{{end}}>Users</a>
+<a href="/ui/admin/grants"{{if eq .Nav "admin-grants"}} class="on"{{end}}>Grants</a>
+<a href="/ui/admin/config"{{if eq .Nav "admin-config"}} class="on"{{end}}>Config</a>
+<a href="/ui/admin/secrets"{{if eq .Nav "admin-secrets"}} class="on"{{end}}>Secrets</a>
+<a href="/ui/admin/providers"{{if eq .Nav "admin-providers"}} class="on"{{end}}>Providers</a>
+{{end}}
+</nav>
+<form class="who" method="post" action="/ui/logout">{{template "csrf" .}}
+<span>{{.User.Username}} <span class="badge">{{role .User.Role}}</span>{{if .User.Blocked}} <span class="badge bad">blocked</span>{{end}}</span>
+<button type="submit">Log out</button></form>
+{{end}}
+</header>
+<main>
+{{if .Flash}}<p class="flash {{.Flash.Kind}}" role="status">{{.Flash.Text}}</p>{{end}}
+{{if and .User .Blocked}}<p class="flash error" role="alert">Your account is blocked. You have no issuance or control rights; you can still see your grants and the public audit log. Ask an administrator.</p>{{end}}
+<h1>{{.Title}}</h1>
+{{template "content" .}}
+</main>
+</body>
+</html>{{end}}
+
+{{define "events"}}
+<table>
+<tr><th>Time</th><th>Type</th><th>Mode</th><th>Source</th><th>User</th><th>Names</th><th>Result</th><th>Detail</th></tr>
+{{range .}}<tr><td>{{ts .Time}}</td><td>{{.Type}}</td><td>{{.Mode}}</td><td>{{.SourceIP}}</td><td>{{.Username}}</td><td>{{join .Names ", "}}</td>
+<td>{{if .Decision}}{{.Decision}} {{end}}{{.Result}}{{if .Reason}} ({{.Reason}}){{end}}</td>
+<td>{{if .Provider}}{{.Provider}} {{end}}{{.Detail}}</td></tr>
+{{else}}<tr><td colspan="8" class="muted">No events.</td></tr>{{end}}
+</table>
+{{end}}

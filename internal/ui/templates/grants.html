@@ -1,0 +1,26 @@
+{{define "content"}}
+{{if .Data.Error}}<p class="flash error" role="alert">{{.Data.Error}}</p>{{end}}
+<p class="muted">A grant lets clients at an IPv4 address or CIDR use the broker. Grants stay in force when their owner is later blocked or demoted; disable or delete them to revoke.</p>
+<table>
+<tr><th>Network</th><th>Wildcards</th><th>Status</th><th>Note</th><th>Created</th><th></th></tr>
+{{range .Data.Grants}}
+<tr><td><code>{{.Prefix}}</code></td><td>{{if .Wildcard}}allowed{{else}}no{{end}}</td>
+<td><span class="badge {{if .Enabled}}good{{else}}warn{{end}}">{{if .Enabled}}enabled{{else}}disabled{{end}}</span></td>
+<td>{{.Note}}</td><td>{{ts .CreatedAt}}</td>
+<td class="actions">{{if not $.Blocked}}
+<form method="post" action="/ui/grants/{{.ID}}/{{if .Enabled}}disable{{else}}enable{{end}}">{{template "csrf" $}}<button type="submit">{{if .Enabled}}Disable{{else}}Enable{{end}}</button></form>
+<form method="post" action="/ui/grants/{{.ID}}/delete" data-confirm="Delete grant {{.Prefix}}?">{{template "csrf" $}}<button type="submit" class="danger">Delete</button></form>
+{{end}}</td></tr>
+{{else}}<tr><td colspan="6" class="muted">You have no grants.</td></tr>{{end}}
+</table>
+{{if not .Blocked}}
+<h2>New grant</h2>
+<form method="post" action="/ui/grants" class="stack narrow">{{template "csrf" .}}
+<label>IPv4 address or CIDR <input name="prefix" value="{{.Data.Form.Prefix}}" placeholder="10.1.2.3 or 10.1.2.0/24" required></label>
+<label>Note <input name="note" value="{{.Data.Form.Note}}" maxlength="200"></label>
+{{if .Data.CanWildcard}}<label class="check"><input type="checkbox" name="wildcard" value="true"{{if .Data.Form.Wildcard}} checked{{end}}> Allow wildcard certificates</label>
+{{else}}<p class="muted">Wildcard grants need the wildcard_allowed or admin role.</p>{{end}}
+<button type="submit">Create grant</button>
+</form>
+{{end}}
+{{end}}

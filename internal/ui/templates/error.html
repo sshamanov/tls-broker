@@ -1,0 +1,2 @@
+{{define "content"}}<p class="flash error">Something went wrong while trying to: {{.Data.What}}.</p>
+<p>The details are in the server log{{if .Data.RequestID}} (request id <code>{{.Data.RequestID}}</code>){{end}}.</p>{{end}}
