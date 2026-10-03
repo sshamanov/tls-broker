@@ -369,7 +369,12 @@ scenario and invariant (`test/e2e`, part of `make check`), the broker
 against Pebble (`make e2e-pebble`) and real clients (`make compat`: Certbot
 5.8.0, 0.40.0, 0.31.0 and acme.sh 3.1.6, see `docs/acme-proxy.md`). Layer 5
 (Let's Encrypt staging, production canary) is run by the operator. Wave 5,
-the independent review, is next.
+the independent review, landed on 2026-10-03 (commits c1bbb1f..HEAD): cross
+package seams (finalize gated once, `badCSR`, direct recovery), security
+(break-glass throttling, middleware order, `state.db` 0600, resolver text),
+operations (zone-ID discovery, `cookie_secure: auto`, issuance and DNS-01
+logging) and the UI browser pass. Next: production canary on the operator's
+go.
 
 Rules while waves run in parallel:
 

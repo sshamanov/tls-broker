@@ -80,7 +80,7 @@ type BootstrapConfig struct {
 // ZoneConfig is one managed Route53 zone.
 type ZoneConfig struct {
 	Name         string // normalized zone name, for example "example.com"
-	HostedZoneID string // Route53 hosted zone ID, for example "Z123ABC"
+	HostedZoneID string // Route53 hosted zone ID, for example "Z123ABC"; empty: discovered by name (dns01)
 }
 
 // Route53Config configures the DNS-01 engine (architecture §17).
