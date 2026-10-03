@@ -4,8 +4,8 @@
 <section><h2>{{.Name}}</h2>
 {{$cfg := index $.Data.Configs .Name}}{{$acc := index $.Data.Accounts .Name}}
 <table class="kv">
-<tr><th>Health</th><td><span class="badge {{if .Open}}bad{{else if eq (printf "%s" .State.Health) "healthy"}}good{{else}}warn{{end}}">{{.State.Health}}</span>{{if .Open}} circuit open{{end}}{{if $cfg.Disabled}} (disabled in configuration){{end}}</td></tr>
-<tr><th>Retry after</th><td>{{if isZero .State.RetryAfter}}-{{else}}{{ts .State.RetryAfter}}{{if .Open}} ({{rel .State.RetryAfter}}){{end}}{{end}}</td></tr>
+<tr><th>Health</th><td><span class="badge {{if not .Open}}bad{{else if eq (printf "%s" .State.Health) "healthy"}}good{{else}}warn{{end}}">{{.State.Health}}</span>{{if not .Open}} circuit open{{end}}{{if $cfg.Disabled}} (disabled in configuration){{end}}</td></tr>
+<tr><th>Retry after</th><td>{{if isZero .State.RetryAfter}}-{{else}}{{ts .State.RetryAfter}}{{if not .Open}} ({{rel .State.RetryAfter}}){{end}}{{end}}</td></tr>
 <tr><th>Consecutive failures</th><td>{{.State.Failures}}</td></tr>
 <tr><th>Last error</th><td>{{if .State.LastError}}{{.State.LastError}}{{else}}-{{end}}</td></tr>
 <tr><th>Slots</th><td>{{.SlotsInUse}} in use of {{.SlotsTotal}}; {{.Waiting}} waiting; {{.Reserved}} open reservations</td></tr>

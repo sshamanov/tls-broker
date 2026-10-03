@@ -17,8 +17,8 @@
 <tr><th>Provider</th><th>Health</th><th>Retry after</th><th>Slots</th><th>Waiting</th><th>Last error</th></tr>
 {{range .Data.Snapshot.Providers}}
 <tr><td>{{.Name}}</td>
-<td><span class="badge {{if .Open}}bad{{else if eq (printf "%s" .State.Health) "healthy"}}good{{else}}warn{{end}}">{{.State.Health}}</span>{{if .Open}} circuit open{{end}}</td>
-<td>{{if .Open}}{{ts .State.RetryAfter}} ({{rel .State.RetryAfter}}){{else}}-{{end}}</td>
+<td><span class="badge {{if not .Open}}bad{{else if eq (printf "%s" .State.Health) "healthy"}}good{{else}}warn{{end}}">{{.State.Health}}</span>{{if not .Open}} circuit open{{end}}</td>
+<td>{{if not .Open}}{{ts .State.RetryAfter}} ({{rel .State.RetryAfter}}){{else}}-{{end}}</td>
 <td>{{.SlotsInUse}}/{{.SlotsTotal}}</td><td>{{.Waiting}}</td><td>{{if .State.LastError}}{{.State.LastError}}{{else}}-{{end}}</td></tr>
 {{else}}<tr><td colspan="6" class="muted">No providers.</td></tr>{{end}}
 </table>

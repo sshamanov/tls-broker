@@ -354,7 +354,7 @@ func TestAuditPaging(t *testing.T) {
 func TestDashboard(t *testing.T) {
 	e := newEnv(t)
 	e.caa.m["example.com"] = core.CAAStatus{Name: "example.com", WildcardProtected: false, Detail: "wide open zone"}
-	e.sched.SetSnapshot(core.SchedulerSnapshot{Providers: []core.ProviderSnapshot{{Name: "letsencrypt", Open: true,
+	e.sched.SetSnapshot(core.SchedulerSnapshot{Providers: []core.ProviderSnapshot{{Name: "letsencrypt", Open: false,
 		State: core.ProviderState{Name: "letsencrypt", Health: core.ProviderLimited, RetryAfter: e.clock.Now().Add(time.Hour), LastError: "too many"}}}})
 	// Seed one direct entry and one ACME certificate.
 	now := e.clock.Now()
@@ -365,7 +365,17 @@ func TestDashboard(t *testing.T) {
 	r := admin.get("/ui/")
 	account, _ := e.ca.AccountURL(bg)
 	see(t, r, "Broker accounts at providers", account, "example.com", "wide open zone", "is unprotected", "accounturi=", "LDAP is not configured", "circuit open", "too many")
-	see(t, r, "<b>1</b><span>valid ACME certificates")
+	see(t, r, "<b>1</b><span>valid ACME certificates", "is rate_limited until")
+
+	// Snapshot.Open means admission is open: a healthy provider shows neither
+	// "circuit open" nor a dashboard warning.
+	e.sched.SetSnapshot(core.SchedulerSnapshot{Providers: []core.ProviderSnapshot{{Name: "letsencrypt", Open: true,
+		State: core.ProviderState{Name: "letsencrypt", Health: core.ProviderHealthy}}}})
+	r = admin.get("/ui/")
+	see(t, r, `<span class="badge good">healthy</span>`)
+	lacks(t, r, "circuit open", "is healthy until")
+	see(t, admin.get("/ui/admin/providers"), `<span class="badge good">healthy</span>`)
+	lacks(t, admin.get("/ui/admin/providers"), "circuit open")
 
 	bob := e.login("bob")
 	r = bob.get("/ui/")
@@ -582,12 +592,12 @@ func TestSecrets(t *testing.T) {
 
 func TestProvidersPage(t *testing.T) {
 	e := newEnv(t)
-	e.sched.SetSnapshot(core.SchedulerSnapshot{Providers: []core.ProviderSnapshot{{Name: "letsencrypt", Open: true, SlotsTotal: 4, SlotsInUse: 1,
+	e.sched.SetSnapshot(core.SchedulerSnapshot{Providers: []core.ProviderSnapshot{{Name: "letsencrypt", Open: false, SlotsTotal: 4, SlotsInUse: 1,
 		State:   core.ProviderState{Name: "letsencrypt", Health: core.ProviderUnavailable, RetryAfter: e.clock.Now().Add(10 * time.Minute), Failures: 3, LastError: "503 upstream"},
 		Budgets: []core.BudgetUsage{{Kind: core.BudgetNewOrder, Used: 150, Limit: 200, Window: 3 * time.Hour}}}}})
 	r := e.login("alice").get("/ui/admin/providers")
 	account, _ := e.ca.AccountURL(bg)
-	see(t, r, "letsencrypt", "503 upstream", "150 / 200", "10m", account, "https://acme.example/dir")
+	see(t, r, "letsencrypt", "503 upstream", "150 / 200", "10m", account, "https://acme.example/dir", "circuit open")
 	lacks(t, r, "Reset")
 }
 

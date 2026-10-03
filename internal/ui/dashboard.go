@@ -219,7 +219,7 @@ func (h *Handler) warnings(ctx context.Context, d *dashboardData) []string {
 		}
 	}
 	for _, ps := range d.Snapshot.Providers {
-		if ps.Open {
+		if !ps.Open {
 			w = append(w, fmt.Sprintf("Provider %s is %s until %s.", ps.Name, ps.State.Health, fmtTime(ps.State.RetryAfter)))
 		}
 	}
