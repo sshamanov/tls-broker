@@ -122,8 +122,11 @@ with its own key. What a fetch does:
   over to another CA.
 - **One job per identifier.** Every issuance and renewal of an identifier
   runs as one job. Concurrent misses wait for the same issuance; a fetch
-  during a running renewal does not start another one. A job that finds the
-  work already done (another job just finished) does nothing.
+  during a running renewal does not start another one. A hit that finds
+  renewal or a renewal-information check due while a job runs makes that
+  job run once more after it ends (at most one such run is queued), so the
+  hit's trigger is never lost to a job that read the state before it. A job
+  that finds the work already done (another job just finished) does nothing.
 - **Waiting.** A miss or expired fetch waits at most `direct.issue_timeout`
   (and never longer than the client stays connected). If issuance takes
   longer the client gets 503 with `Retry-After`; the job carries on, and the

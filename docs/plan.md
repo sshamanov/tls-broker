@@ -322,7 +322,9 @@ counters, fault injection by operation), `FakeDNSEngine`, `FakeDirectory`,
   interval (architecture §8) and decides provider switching and priority class.
 - **DNS proxy wildcard protection** is the CAA check of architecture §3.2 and
   lives in `gate`.
-- **Direct cache** is request-driven; one `singleflight` group per identifier.
+- **Direct cache** is request-driven; one job per identifier at a time. A hit
+  that finds maintenance due while the job runs queues one more run instead of
+  joining a run that may already have read older state.
 - **Real source IP** comes from `httpx` only: the configured header when the
   TCP peer is a trusted proxy, the TCP peer otherwise.
 

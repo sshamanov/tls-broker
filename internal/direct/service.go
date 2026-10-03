@@ -16,8 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/sync/singleflight"
-
 	"tls-broker/internal/core"
 	"tls-broker/internal/metrics"
 	"tls-broker/internal/names"
@@ -79,19 +77,34 @@ type Service struct {
 	ctx    context.Context // cancelled by Close; parent of every job
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
-	// jobs collapses every issuance and renewal of one identifier into a
-	// single job: the key is the identifier.
-	jobs singleflight.Group
 
 	mu     sync.Mutex
 	closed bool
 	gens   map[string]*Generation // last loaded generation per identifier
 	holds  map[string]hold        // failure backoff per identifier
 	rotate map[string]bool        // key rotation requested
-	// waiting counts callers of start per identifier that have not received
-	// their result yet; a start that finds none begins a new job.
-	waiting map[string]int
+	// jobs is the running job per identifier: every issuance and renewal
+	// of one identifier is a single job.
+	jobs map[string]*job
 }
+
+// job is the running job of one identifier: one run after another until no
+// caller asks for another. Its fields are guarded by Service.mu.
+type job struct {
+	cur *jobRun // the run in progress
+	// next is a run requested while cur was in progress; it starts when cur
+	// ends.
+	next *jobRun
+}
+
+// jobRun is one run of a job and its result.
+type jobRun struct {
+	t    trigger
+	done chan struct{} // closed when the run has ended; err is final then
+	err  error
+}
+
+func newJobRun(t trigger) *jobRun { return &jobRun{t: t, done: make(chan struct{})} }
 
 // hold is the backoff after a failed attempt: until then no new attempt is
 // made and requests without a valid certificate get problem.
@@ -134,7 +147,7 @@ func New(o Options) (*Service, error) {
 		cfg: o.Config, issuer: o.Issuer, gate: o.Gate, entries: o.Entries, lineages: o.Lineages,
 		certs: o.Certificates, auditor: o.Auditor, metrics: o.Metrics, clock: o.Clock, log: o.Logger,
 		keep: o.KeepGenerations, newKey: o.NewKey,
-		gens: map[string]*Generation{}, holds: map[string]hold{}, rotate: map[string]bool{}, waiting: map[string]int{},
+		gens: map[string]*Generation{}, holds: map[string]hold{}, rotate: map[string]bool{}, jobs: map[string]*job{},
 	}
 	if s.metrics == nil {
 		s.metrics = metrics.Nop{}
@@ -268,7 +281,7 @@ func (s *Service) Get(ctx context.Context, src netip.Addr, raw string) (*Cert, e
 		ev.Detail = fmt.Sprintf("hit: generation %d", gen.Number)
 		interval := lin.Interval(cfg.Emergency.DefaultInterval)
 		if why := s.maintenanceDue(cfg, id, entry, gen, now, interval); why != "" {
-			if _, started := s.start(id, t); started {
+			if _, started := s.start(id, t, true); started {
 				ev.Detail += "; background job started: " + why
 			}
 		}
@@ -285,15 +298,15 @@ func (s *Service) Get(ctx context.Context, src netip.Addr, raw string) (*Cert, e
 		s.audit(ctx, ev)
 		return nil, p
 	}
-	var res singleflight.Result
-	ch, _ := s.start(id, t)
+	r, _ := s.start(id, t, false)
 	select {
-	case res = <-ch:
+	case <-r.done:
 	case <-ctx.Done():
 		ev.Result, ev.Detail = core.AuditResultFailed, kind+": request ended while issuance was running"
 		s.audit(context.WithoutCancel(ctx), ev)
 		return nil, unavailable("issuance is in progress; retry later", cfg.Scheduler.BusyRetryAfter)
 	}
+	res := r.err
 	// Whatever the job reports, serve what is now on disk if it is valid.
 	now = s.clock.Now()
 	entry, _ = s.entry(ctx, id)
@@ -304,14 +317,14 @@ func (s *Service) Get(ctx context.Context, src netip.Addr, raw string) (*Cert, e
 		ev.Detail = fmt.Sprintf("%s: issued generation %d", kind, gen.Number)
 		return s.served(ctx, ev, id, gen)
 	}
-	p := issueProblem(cfg, res.Err)
-	if res.Err == nil {
+	p := issueProblem(cfg, res)
+	if res == nil {
 		p = s.held(cfg, id, entry, now)
 		if p == nil {
 			p = unavailable("no valid certificate is available; retry later", cfg.Direct.RetryBackoff)
 		}
 	}
-	ev.Result, ev.Detail = core.AuditResultFailed, kind+": "+errText(res.Err, p)
+	ev.Result, ev.Detail = core.AuditResultFailed, kind+": "+errText(res, p)
 	s.audit(ctx, ev)
 	return nil, p
 }
@@ -438,34 +451,74 @@ func (s *Service) held(cfg *core.Config, id string, e *core.DirectEntry, now tim
 
 var errClosed = errors.New("direct: service is closed")
 
-// start runs (or joins) the identifier's job and returns a channel that
-// receives its result, and whether this call started the job rather than
-// joining one already running. At most one job per identifier runs at a
+// start runs (or joins) the identifier's job and returns the run whose
+// result the caller gets (its done channel closes when err is final), and
+// whether this call started the job rather than joining one already running. At most one job per identifier runs at a
 // time.
-func (s *Service) start(id string, t trigger) (<-chan singleflight.Result, bool) {
-	out := make(chan singleflight.Result, 1)
+//
+// fresh asks for a run that reads the state after this call. A caller that
+// acts on what it read (a hit that found maintenance due) must not join a
+// run that may have read the state earlier, decided nothing was due and is
+// about to end: its trigger would be lost until the next fetch. Such a
+// caller gets the next run of the running job instead (one queued run
+// serves every such caller). Without fresh the caller joins the run in
+// progress and receives its result.
+func (s *Service) start(id string, t trigger, fresh bool) (*jobRun, bool) {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
-		out <- singleflight.Result{Err: errClosed}
-		return out, false
+		r := newJobRun(t)
+		r.err = errClosed
+		close(r.done)
+		return r, false
 	}
-	s.wg.Add(1)
-	started := s.waiting[id] == 0
-	s.waiting[id]++
-	s.mu.Unlock()
-	ch := s.jobs.DoChan(id, func() (any, error) { return nil, s.run(id, t) })
-	go func() {
-		defer s.wg.Done()
-		res := <-ch
-		s.mu.Lock()
-		if s.waiting[id]--; s.waiting[id] == 0 {
-			delete(s.waiting, id)
+	var r *jobRun
+	j, running := s.jobs[id]
+	switch {
+	case !running:
+		r = newJobRun(t)
+		s.jobs[id] = &job{cur: r}
+		s.wg.Add(1)
+		go s.loop(id, s.jobs[id])
+	case fresh:
+		if j.next == nil {
+			j.next = newJobRun(t)
 		}
+		r = j.next
+	default:
+		r = j.cur
+	}
+	s.mu.Unlock()
+	return r, !running
+}
+
+// loop runs the job's runs one after another. Publishing a run's result,
+// taking the queued next run and removing the finished job happen under one
+// lock, so no caller can join a run that has already ended.
+func (s *Service) loop(id string, j *job) {
+	defer s.wg.Done()
+	s.mu.Lock()
+	for {
+		r := j.cur
 		s.mu.Unlock()
-		out <- res
-	}()
-	return out, started
+		err := s.run(id, r.t)
+		s.mu.Lock()
+		r.err = err
+		close(r.done)
+		if j.next == nil {
+			delete(s.jobs, id)
+			s.mu.Unlock()
+			return
+		}
+		j.cur, j.next = j.next, nil
+		if s.ctx.Err() != nil { // closing: the queued run is not started
+			j.cur.err = errClosed
+			close(j.cur.done)
+			delete(s.jobs, id)
+			s.mu.Unlock()
+			return
+		}
+	}
 }
 
 // jobTimeout bounds one job: the whole upstream budget of an issuance. A
@@ -654,10 +707,9 @@ func (s *Service) Rotate(ctx context.Context, identifier string) error {
 		s.mu.Lock()
 		s.rotate[id] = true
 		s.mu.Unlock()
-		var res singleflight.Result
-		ch, _ := s.start(id, t)
+		r, _ := s.start(id, t, false)
 		select {
-		case res = <-ch:
+		case <-r.done:
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -665,7 +717,7 @@ func (s *Service) Rotate(ctx context.Context, identifier string) error {
 		pending := s.rotate[id]
 		s.mu.Unlock()
 		if !pending { // a job took the request; its result is ours
-			return res.Err
+			return r.err
 		}
 	}
 	s.mu.Lock()

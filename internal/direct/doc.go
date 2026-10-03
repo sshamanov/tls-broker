@@ -8,7 +8,8 @@
 // (core.DirectEntry). Renewal is request-driven: a fetch of a certificate
 // whose renewal is due starts one background job; an identifier nobody
 // fetches is never renewed. Every issuance and renewal of one identifier
-// runs as a single job (singleflight keyed by identifier), so concurrent
-// misses collapse into one upstream issuance. docs/direct-api.md is the
+// runs as a single job, so concurrent misses collapse into one upstream
+// issuance; a hit that finds maintenance due while a job runs makes it run
+// once more, so its trigger is never lost. docs/direct-api.md is the
 // operator and device documentation.
 package direct

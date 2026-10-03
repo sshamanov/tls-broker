@@ -192,6 +192,10 @@ func TestConcurrentMissesCollapse(t *testing.T) {
 			t.Fatalf("request %d: %v", i, errs[i])
 		}
 	}
+	// Joining misses take the job's result; they queue no further run.
+	if got := e.iss.ARICalls(); got != 0 {
+		t.Fatalf("ARI calls after collapsed misses: %d", got)
+	}
 }
 
 // While a background renewal runs, further hits join it silently: only the
@@ -222,6 +226,42 @@ func TestBackgroundJobStartAuditedOnce(t *testing.T) {
 	}
 	if started != 1 {
 		t.Fatalf("%d fetches audited a job start for one job", started)
+	}
+}
+
+// A hit that finds maintenance due while a job runs is not lost in that job:
+// the job read the state before the hit, so it runs once more and does what
+// the hit needed. Here hits during a renewal see the old certificate; the
+// extra run checks renewal information of the new one, which the renewal
+// itself never does. Waiting misses, in contrast, only take the result of
+// the run they joined.
+func TestHitDuringJobIsNotLost(t *testing.T) {
+	e := newEnv(t)
+	e.mustGet(host)
+	<-e.iss.started           // the miss's issuance
+	e.clock.Advance(61 * day) // renewal due
+	release := make(chan struct{})
+	e.iss.set(func(f *fakeIssuer) { f.block = release })
+	if _, err := e.svc.Get(ctx, device, host); err != nil {
+		t.Fatal(err)
+	}
+	<-e.iss.started
+	ariBefore := e.iss.ARICalls() // the renewal job's own check of generation 1
+	for i := range 3 {
+		if _, err := e.svc.Get(ctx, device, host); err != nil {
+			t.Fatalf("hit %d during the renewal: %v", i, err)
+		}
+	}
+	close(release)
+	e.idle()
+	e.wantCalls(2)
+	en := e.entry(host)
+	if en.Generation != 2 {
+		t.Fatalf("generation %d", en.Generation)
+	}
+	// One queued run for the three hits: one more check, and it was stored.
+	if got := e.iss.ARICalls(); got != ariBefore+1 || !en.NextARICheckAt.After(e.clock.Now()) {
+		t.Fatalf("ARI calls %d (before %d), next check %s: the hits' trigger was lost", got, ariBefore, en.NextARICheckAt)
 	}
 }
 
