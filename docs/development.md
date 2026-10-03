@@ -286,7 +286,11 @@ and commit `go.mod` and `go.sum` together with the code that uses it.
 
 `.github/workflows/ci.yml` runs `make check` exactly as it runs locally, then
 builds the image and, on pushes to `main`, publishes it to
-`ghcr.io/sshamanov/tls-broker`.
+`ghcr.io/sshamanov/tls-broker` (tags `main`, `latest`, `sha-<short>`)
+with the workflow's `GITHUB_TOKEN`. The image is the only artifact; no
+binaries are published. The repository is private, the package is public.
+Actions are pinned by commit SHA; update the SHA and its `# vN` comment
+together.
 
 ## Commits
 
