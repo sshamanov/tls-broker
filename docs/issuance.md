@@ -252,7 +252,8 @@ reattached by order ID; an ARI-qualified admission has none, which is fine.
 | Persisted state | Action |
 |---|---|
 | `Prep intent` (no upstream URL), either mode | `Ticket.OrderCreated` then `Refund` (new-order budget counted as spent, certificate budgets returned); order `invalid`, `Prep failed`. The upstream call may have happened; another is never made. |
-| `Mode direct`, upstream URL known | `invalid`, refunded, TXT values removed. The requester's key context is gone; direct mode issues again when asked. `Prep prepared` is kept, so the upstream order is adoptable. |
+| `Mode direct`, upstream URL known, `ready` | `invalid`, refunded, TXT values removed. The requester's key context is gone; direct mode issues again when asked. `Prep prepared` is kept, so the upstream order is adoptable. |
+| `Mode direct`, `processing` (CSR recorded) | background `GetOrder`. CA has the CSR (`processing`/`valid`): finish like an ACME order — `Finalize` (idempotent), `WaitCertificate`, `Complete`, `Commit`; the certificate is real, so its budget is spent and it becomes the lineage's predecessor for `replaces`, although the direct cache (whose key died with the process) issues again on the next fetch. CA never received it: `invalid`, refunded. CA unreachable: `invalid` with the certificate budget committed (over-counting is the safe error). |
 | `acme`, `Prep preparing` | background `GetOrder` → validate whatever is still pending (`Present` is idempotent per owner/record/value, so a half-published value is picked up) → `prepared`; continues into finalize if a CSR was recorded. |
 | `acme`, `Prep prepared`, `processing` (CSR recorded) | background `Finalize` (safe to repeat for the same CSR) → `WaitCertificate` → verify → `Complete`, `Commit`. |
 | `acme`, `Prep prepared`, `ready` | nothing; an in-memory job is registered so `Finalize` can proceed, and `Sweep` expires it on time. |

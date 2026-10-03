@@ -271,6 +271,83 @@ func TestRecoverFailsDirectModeInFlight(t *testing.T) {
 	}
 }
 
+// A direct-mode order found processing at startup is settled by asking the
+// CA: when the CSR arrived the certificate is stored and the budget committed
+// (it is real, and the lineage's predecessor); when it never arrived the
+// order is failed and refunded.
+func TestRecoverDirectProcessing(t *testing.T) {
+	for _, arrived := range []bool{true, false} {
+		t.Run(map[bool]string{true: "csr arrived", false: "csr lost"}[arrived], func(t *testing.T) {
+			e := newEnv(t, nil)
+			op := coretest.OpFinalize
+			if arrived {
+				op = coretest.OpWaitCertificate
+			}
+			e.primary.Inject(coretest.Fault{Op: op, Delay: time.Hour})
+			ctx, cancel := context.WithCancel(e.ctx)
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				_, err := e.issueDirect(ctx, "edge.example.com", false)
+				done <- err
+			}()
+			e.waitUntil("CSR sent", func() bool { return e.primary.Stats().Calls[op] == 1 })
+			e.crash()
+			cancel()
+			if err := <-done; err == nil {
+				t.Fatal("Issue succeeded through a crash")
+			}
+			active, err := e.st.Orders().ListActive(e.ctx)
+			if err != nil || len(active) != 1 {
+				t.Fatalf("active orders after crash: %v %+v", err, active)
+			}
+			o := &active[0]
+			if o.Mode != core.ModeDirect || o.Status != core.OrderProcessing {
+				t.Fatalf("order after crash: %+v", o)
+			}
+			if n := e.primary.Stats().Finalizations; (n == 1) != arrived {
+				t.Fatalf("finalizations before the crash: %d", n)
+			}
+
+			e.primary.ClearFaults()
+			e.start()
+			if err := e.eng.Recover(e.ctx); err != nil {
+				t.Fatal(err)
+			}
+			got := e.waitTerminal(o.ID)
+			st := e.budgetStates(o.ID)
+			if len(e.openRefs()) != 0 {
+				t.Fatal("reservation left open")
+			}
+			if arrived {
+				if got.Status != core.OrderValid || got.CertificateID == "" {
+					t.Fatalf("order after recovery: %+v %v", got, got.Error)
+				}
+				if st[core.BudgetCertSet] != core.BudgetCommitted || st[core.BudgetNewOrder] != core.BudgetCommitted {
+					t.Fatalf("budget not committed for an issued certificate: %v", st)
+				}
+				if s := e.primary.Stats(); s.Finalizations != 1 || s.CertificatesIssued != 1 {
+					t.Fatalf("recovery re-finalized or re-issued: %+v", s)
+				}
+				// The next direct issuance sees it as the lineage's predecessor.
+				if c, err := e.st.Certificates().Newest(e.ctx, e.set("edge.example.com").Key(), ""); err != nil || c.ID != got.CertificateID {
+					t.Fatalf("stored certificate is not the lineage's newest: %v %+v", err, c)
+				}
+			} else {
+				if got.Status != core.OrderInvalid || got.CertificateID != "" {
+					t.Fatalf("order after recovery: %+v", got)
+				}
+				if st[core.BudgetNewOrder] != core.BudgetCommitted || len(st) != 1 {
+					t.Fatalf("certificate budget not refunded: %v", st)
+				}
+				if s := e.primary.Stats(); s.Finalizations != 0 {
+					t.Fatalf("recovery sent the CSR of a lost key: %+v", s)
+				}
+			}
+		})
+	}
+}
+
 func TestRecoverSettlesOrphanedReservations(t *testing.T) {
 	e := newEnv(t, nil)
 	// A reservation whose order was never written (crash between Acquire

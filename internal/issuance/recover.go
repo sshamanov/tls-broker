@@ -13,7 +13,10 @@ import (
 // order, then settlement of reservations that belong to no live order.
 //
 //	intent, no upstream URL        -> invalid; new-order budget counted as spent
-//	direct mode, upstream URL      -> invalid, refunded (prepared stays adoptable)
+//	direct, preparing or ready     -> invalid, refunded (prepared stays adoptable)
+//	direct, processing             -> ask the CA: CSR arrived -> finish (certificate
+//	                                  stored, budget committed); not arrived -> invalid,
+//	                                  refunded; unknown -> invalid, budget committed
 //	acme, preparing                -> resume preparation in the background
 //	acme, prepared, processing     -> resume finalize in the background
 //	acme, prepared, ready          -> wait for the client's CSR (or expiry)
@@ -35,6 +38,17 @@ func (e *Engine) Recover(ctx context.Context) error {
 			e.recoverFail(ctx, o, ticket, "broker restarted before the upstream order was recorded")
 		case o.Prep == core.PrepFailed:
 			e.recoverFail(ctx, o, ticket, "broker restarted after preparation failed")
+		case o.Mode == core.ModeDirect && o.Status == core.OrderProcessing:
+			// The CSR was recorded and may have reached the CA. The key that
+			// signed it is gone with the process, but a certificate the CA
+			// issued is real: its budget is spent and it is the lineage's
+			// predecessor for `replaces`. Ask the CA before deciding.
+			j := newJob(o.ID, ticket)
+			j.prepared, j.finalize, j.running = true, true, true
+			j.prepOnce.Do(func() { close(j.prepDone) })
+			e.addJob(j)
+			order := *o
+			e.spawn(func() { e.recoverDirectFinalize(j, &order) })
 		case o.Mode == core.ModeDirect:
 			// The requester's key context is gone; direct mode issues again
 			// when asked. A prepared upstream order stays adoptable.
@@ -91,6 +105,37 @@ func (e *Engine) runResumed(j *job, o *core.Order) {
 	}
 	if j.markPrepared() {
 		e.finalizeOrder(j)
+	}
+}
+
+// recoverDirectFinalize settles a direct-mode order found processing at
+// startup. When the CA already has the CSR the issuance is finished like an
+// ACME one (the certificate is stored and the budget committed; the direct
+// cache issues again on the next fetch with that certificate as predecessor).
+// When the CA never received it the order is failed and refunded. When the CA
+// cannot be asked the certificate budget is counted as spent (architecture
+// §10: over-counting is the safe error) and the order is failed.
+func (e *Engine) recoverDirectFinalize(j *job, o *core.Order) {
+	ctx, cancel := e.bgContext()
+	defer cancel()
+	p, err := e.provider(o.Provider)
+	if err != nil {
+		e.failOrder(ctx, j, o, err)
+		return
+	}
+	up, err := p.GetOrder(ctx, o.UpstreamOrderURL)
+	e.report(ctx, p.Name(), err)
+	switch {
+	case err != nil:
+		if !(isCtxErr(err) && e.closing()) {
+			j.getTicket().Commit()
+		}
+		e.failOrder(ctx, j, o, err)
+	case up.Status == core.UpstreamProcessing || up.Status == core.UpstreamValid:
+		e.finalizeOrder(j)
+	default:
+		e.failOrder(ctx, j, o, core.NewProblem(core.ProblemServerInternal,
+			"broker restarted during direct-mode issuance before the CSR reached the certificate authority"))
 	}
 }
 
