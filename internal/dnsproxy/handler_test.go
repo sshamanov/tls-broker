@@ -553,3 +553,218 @@ func TestMethodsAndPaths(t *testing.T) {
 		t.Fatalf("unknown path: %d", w.Code)
 	}
 }
+
+// fqdnBody is the body the stock acme.sh dns_acmeproxy and lego httpreq hooks
+// send (acme.sh puts a space after each colon).
+func fqdnBody(fqdn, value string) string {
+	return `{"fqdn": "` + fqdn + `", "value": "` + value + `"}`
+}
+
+func TestPresentFQDN(t *testing.T) {
+	e := newEnv(t)
+	e.gate.Decide(core.Decision{Allowed: true, Reason: core.ReasonIPGrant, GrantID: 7})
+	// curl -d sends application/x-www-form-urlencoded; the body is JSON anyway.
+	req := httptest.NewRequest("POST", "/dns/present", strings.NewReader(fqdnBody("_acme-challenge.Foo.Example.com.", goodValue)))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.RemoteAddr = "10.0.0.5:4000"
+	w := httptest.NewRecorder()
+	e.srv.ServeHTTP(w, req)
+	if w.Code != 201 {
+		t.Fatalf("status %d %s", w.Code, w.Body)
+	}
+	// The stock hooks accept the call only if the body has the quoted value.
+	if !strings.Contains(w.Body.String(), `"`+goodValue+`"`) {
+		t.Fatalf("body lacks the quoted value: %s", w.Body)
+	}
+	var r presentResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Record != "_acme-challenge.foo.example.com" || r.Value != goodValue || r.ChallengeID == "" {
+		t.Fatalf("response %+v", r)
+	}
+	if c := e.gate.Calls(); len(c) != 1 || c[0].Mode != core.ModeDNSProxy || c[0].Names.Key() != "foo.example.com" {
+		t.Fatalf("gate calls %+v", c)
+	}
+	ev := e.aud.OfType(core.AuditDNSPresent)
+	if len(ev) != 1 || ev[0].Decision != "allow" || ev[0].Result != "ok" || ev[0].GrantID != 7 ||
+		ev[0].Names[0] != "foo.example.com" || !strings.Contains(ev[0].Detail, r.ChallengeID) {
+		t.Fatalf("audit %+v", ev)
+	}
+	if len(e.m.requests) != 1 || e.m.requests[0] != metrics.OutcomeOK {
+		t.Fatalf("metrics %v", e.m.requests)
+	}
+	// Without the trailing dot, and the identifier form, is the same challenge.
+	if w := e.do("POST", "/dns/present", "10.0.0.5", fqdnBody("_acme-challenge.foo.example.com", goodValue)); w.Code != 201 ||
+		!strings.Contains(w.Body.String(), r.ChallengeID) {
+		t.Fatalf("no trailing dot: %d %s", w.Code, w.Body)
+	}
+	if b := e.mustPresent("10.0.0.5", "foo.example.com", goodValue); b.ChallengeID != r.ChallengeID || e.eng.ActiveCount() != 1 {
+		t.Fatalf("identifier form gave %q, active %d", b.ChallengeID, e.eng.ActiveCount())
+	}
+}
+
+func TestPresentFQDNGateAndZone(t *testing.T) {
+	e := newEnv(t)
+	e.gate.Decide(core.Decision{Reason: core.ReasonWildcardUnprotected})
+	w := e.do("POST", "/dns/present", "10.0.0.5", fqdnBody("_acme-challenge.foo.example.com.", goodValue))
+	if w.Code != 403 || strings.Contains(w.Body.String(), `"`+goodValue+`"`) {
+		t.Fatalf("denied: %d %s", w.Code, w.Body)
+	}
+	if p := problem(t, w); !strings.Contains(p.Detail, core.ReasonWildcardUnprotected) {
+		t.Fatalf("detail %q", p.Detail)
+	}
+	if w := e.do("POST", "/dns/present", "10.0.0.5", fqdnBody("_acme-challenge.foo.other.org.", goodValue)); w.Code != 404 {
+		t.Fatalf("outside zone: %d", w.Code)
+	}
+	if p, _, _ := e.eng.Calls(); p != 0 || len(e.gate.Calls()) != 1 {
+		t.Fatal("engine reached or gate skipped")
+	}
+}
+
+func TestPresentFQDNBadInput(t *testing.T) {
+	e := newEnv(t)
+	cases := map[string]string{
+		"both":          `{"identifier":"foo.example.com","fqdn":"_acme-challenge.foo.example.com.","value":"abc"}`,
+		"neither":       `{"value":"abc"}`,
+		"no prefix":     fqdnBody("foo.example.com.", "abc"),
+		"prefix only":   fqdnBody("_acme-challenge.", "abc"),
+		"wildcard":      fqdnBody("_acme-challenge.*.example.com.", "abc"),
+		"bad name":      fqdnBody("_acme-challenge.foo..example.com", "abc"),
+		"bad value":     fqdnBody("_acme-challenge.foo.example.com", "a b"),
+		"no value":      `{"fqdn":"_acme-challenge.foo.example.com"}`,
+		"unknown field": `{"fqdn":"_acme-challenge.foo.example.com","value":"abc","x":1}`,
+	}
+	for name, body := range cases {
+		w := e.do("POST", "/dns/present", "10.0.0.5", body)
+		if w.Code != 400 {
+			t.Errorf("%s: status %d %s", name, w.Code, w.Body)
+			continue
+		}
+		problem(t, w)
+	}
+	if p, _, _ := e.eng.Calls(); p != 0 || len(e.gate.Calls()) != 0 {
+		t.Fatal("backend reached with bad input")
+	}
+}
+
+func TestCleanupFQDN(t *testing.T) {
+	e := newEnv(t)
+	a := e.mustPresent("10.0.0.5", "foo.example.com", goodValue)
+	e.mustPresent("10.0.0.5", "*.example.com", "wild")    // another record
+	e.mustPresent("10.0.0.5", "foo.example.com", "other") // same record, other value
+	e.mustPresent("10.0.0.6", "foo.example.com", goodValue)
+	body := fqdnBody("_acme-challenge.foo.example.com.", goodValue)
+	check := func(w *httptest.ResponseRecorder) {
+		t.Helper()
+		if w.Code != 200 || w.Header().Get("Content-Type") != "application/json" {
+			t.Fatalf("status %d %s", w.Code, w.Body)
+		}
+		var r cleanupResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &r); err != nil || r.Value != goodValue || r.FQDN != "_acme-challenge.foo.example.com." {
+			t.Fatalf("body %s (%v)", w.Body, err)
+		}
+		if !strings.Contains(w.Body.String(), `"`+goodValue+`"`) {
+			t.Fatalf("body lacks the quoted value: %s", w.Body)
+		}
+	}
+
+	req := httptest.NewRequest("POST", "/dns/cleanup", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.RemoteAddr = "10.0.0.5:4000"
+	w := httptest.NewRecorder()
+	e.srv.ServeHTTP(w, req)
+	check(w)
+	if got := e.eng.Active("_acme-challenge.foo.example.com"); len(got) != 2 {
+		t.Fatalf("active after cleanup %v", got)
+	}
+	if c, _ := e.st.Get(context.Background(), a.ChallengeID); c.State != core.ChallengeDone {
+		t.Fatalf("state %s", c.State)
+	}
+	// The other source's identical value and the caller's other values stay.
+	if _, err := e.st.FindActive(context.Background(), "dnsproxy:10.0.0.6", "_acme-challenge.foo.example.com", goodValue); err != nil {
+		t.Fatalf("other source's value: %v", err)
+	}
+	if got := e.eng.Active("_acme-challenge.example.com"); len(got) != 1 {
+		t.Fatalf("wildcard value %v", got)
+	}
+
+	// Idempotent: a retry, without the trailing dot too, still answers 200.
+	check(e.do("POST", "/dns/cleanup", "10.0.0.5", body))
+	w = e.do("POST", "/dns/cleanup", "10.0.0.5", fqdnBody("_acme-challenge.foo.example.com", goodValue))
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"`+goodValue+`"`) {
+		t.Fatalf("no dot: %d %s", w.Code, w.Body)
+	}
+	if _, c, _ := e.eng.Calls(); c != 1 {
+		t.Fatalf("engine cleanups %d", c)
+	}
+
+	ev := e.aud.OfType(core.AuditDNSCleanup)
+	if len(ev) != 3 || ev[0].Decision != "allow" || ev[0].Reason != reasonOwner || ev[0].Result != "ok" ||
+		ev[0].Mode != core.ModeDNSProxy || ev[0].SourceIP != "10.0.0.5" || ev[0].Names[0] != "foo.example.com" ||
+		!strings.Contains(ev[0].Detail, a.ChallengeID) || ev[1].Reason != reasonNothing || ev[1].Result != "ok" {
+		t.Fatalf("audit %+v", ev)
+	}
+	for _, o := range e.m.requests[len(e.m.requests)-3:] {
+		if o != metrics.OutcomeOK {
+			t.Fatalf("metrics %v", e.m.requests)
+		}
+	}
+}
+
+func TestCleanupFQDNOtherSource(t *testing.T) {
+	e := newEnv(t)
+	e.mustPresent("10.0.0.5", "foo.example.com", goodValue)
+	// Another address cannot remove the value; it gets the idempotent no-op.
+	w := e.do("POST", "/dns/cleanup", "10.0.0.6", fqdnBody("_acme-challenge.foo.example.com.", goodValue))
+	if w.Code != 200 {
+		t.Fatalf("status %d %s", w.Code, w.Body)
+	}
+	if e.eng.ActiveCount() != 1 {
+		t.Fatal("cleaned by a foreign source")
+	}
+	if _, c, _ := e.eng.Calls(); c != 0 {
+		t.Fatalf("engine cleanups %d", c)
+	}
+	ev := e.aud.OfType(core.AuditDNSCleanup)
+	if len(ev) != 1 || ev[0].Reason != reasonNothing || ev[0].SourceIP != "10.0.0.6" {
+		t.Fatalf("audit %+v", ev)
+	}
+	// Unknown value and record: also 200.
+	if w := e.do("POST", "/dns/cleanup", "10.0.0.5", fqdnBody("_acme-challenge.nothing.example.com.", "x")); w.Code != 200 {
+		t.Fatalf("unknown: %d", w.Code)
+	}
+}
+
+func TestCleanupFQDNErrors(t *testing.T) {
+	e := newEnv(t)
+	for name, b := range map[string]string{
+		"both":      `{"challenge_id":"a","fqdn":"_acme-challenge.foo.example.com","value":"v"}`,
+		"no value":  `{"fqdn":"_acme-challenge.foo.example.com"}`,
+		"no fqdn":   `{"value":"v"}`,
+		"bad value": fqdnBody("_acme-challenge.foo.example.com", "a b"),
+		"no prefix": fqdnBody("foo.example.com", "v"),
+		"wildcard":  fqdnBody("_acme-challenge.*.example.com", "v"),
+		"bad name":  fqdnBody("_acme-challenge.foo..example.com", "v"),
+		"extra":     `{"fqdn":"_acme-challenge.foo.example.com","value":"v","x":1}`,
+	} {
+		w := e.do("POST", "/dns/cleanup", "10.0.0.5", b)
+		if w.Code != 400 || strings.Contains(w.Body.String(), `"v"`) {
+			t.Errorf("%s: %d %s", name, w.Code, w.Body)
+			continue
+		}
+		problem(t, w)
+	}
+	e.mustPresent("10.0.0.5", "foo.example.com", goodValue)
+	e.eng.OnCleanup(func(context.Context, core.Challenge) error { return errors.New("route53 down") })
+	w := e.do("POST", "/dns/cleanup", "10.0.0.5", fqdnBody("_acme-challenge.foo.example.com", goodValue))
+	if w.Code != 503 || strings.Contains(w.Body.String(), `"`+goodValue+`"`) || strings.Contains(w.Body.String(), "route53") {
+		t.Fatalf("engine error: %d %s", w.Code, w.Body)
+	}
+	if ev := e.aud.OfType(core.AuditDNSCleanup); len(ev) != 1 || ev[0].Result != "failed" {
+		t.Fatalf("audit %+v", ev)
+	}
+	if e.m.requests[len(e.m.requests)-1] != metrics.OutcomeUnavailable {
+		t.Fatalf("metrics %v", e.m.requests)
+	}
+}

@@ -3,9 +3,17 @@
 // to the broker.
 //
 //	POST   /dns/present            {"identifier","value"} -> 201 {"challenge_id","record","value"}
+//	POST   /dns/present            {"fqdn","value"}       -> 201 {"challenge_id","record","value"}
 //	POST   /dns/cleanup            {"challenge_id"}       -> 204
+//	POST   /dns/cleanup            {"fqdn","value"}       -> 200 {"fqdn","value"}
 //	DELETE /dns/challenges/{id}                           -> 204
 //	GET    /dns/challenges                                -> the caller's active challenges
+//
+// The fqdn form ("_acme-challenge.<name>", optional trailing dot) is what the
+// stock acme.sh dns_acmeproxy and lego httpreq hooks send; it means identifier
+// <name>. Its cleanup is idempotent and answers 200 with the value even when
+// nothing was left to remove, because those hooks check the body for it. The
+// body is read as JSON whatever the Content-Type, so curl -d works.
 //
 // Present is gated like every mode (core.ModeDNSProxy, including the CAA
 // wildcard protection), limited per source address, and returns only once the

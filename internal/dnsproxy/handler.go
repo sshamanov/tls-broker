@@ -28,6 +28,10 @@ const (
 const (
 	reasonOwner    = "owner"     // the caller presented the challenge
 	reasonNotOwner = "not_owner" // another source address presented it
+	// reasonNothing: a cleanup by fqdn and value found no active challenge
+	// of the caller (already cleaned, never presented, or presented by
+	// another source); it succeeds without touching DNS.
+	reasonNothing = "nothing_to_clean"
 )
 
 // Options are the dependencies of a Handler.
@@ -74,8 +78,12 @@ func New(o Options) *Handler {
 // ServeHTTP implements http.Handler for the /dns/ routes.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) { h.mux.ServeHTTP(w, r) }
 
+// presentRequest names the identifier either directly or, in the form the
+// stock acme.sh (dns_acmeproxy) and lego (httpreq) hooks send, as the
+// challenge record's fqdn. Exactly one of Identifier and FQDN is set.
 type presentRequest struct {
-	Identifier string `json:"identifier"`
+	Identifier string `json:"identifier,omitempty"`
+	FQDN       string `json:"fqdn,omitempty"`
 	Value      string `json:"value"`
 }
 
@@ -85,8 +93,18 @@ type presentResponse struct {
 	Value       string `json:"value"`
 }
 
+// cleanupRequest is either {"challenge_id"} or {"fqdn","value"}.
 type cleanupRequest struct {
 	ChallengeID string `json:"challenge_id"`
+	FQDN        string `json:"fqdn"`
+	Value       string `json:"value"`
+}
+
+// cleanupResponse answers a cleanup by fqdn. Stock hooks treat the call as
+// successful only when the body contains the value in double quotes.
+type cleanupResponse struct {
+	FQDN  string `json:"fqdn"`
+	Value string `json:"value"`
 }
 
 type challengeView struct {
@@ -166,6 +184,24 @@ func (h *Handler) source(w http.ResponseWriter, r *http.Request, typ string, set
 	return netip.Addr{}, false
 }
 
+// identFromFQDN returns the identifier whose challenge record fqdn is:
+// "_acme-challenge.foo.example.com." gives "foo.example.com". The record of
+// "*.N" is the record of "N", so the result is never a wildcard.
+func identFromFQDN(fqdn string) (string, error) {
+	name, ok := names.IdentifierFromChallengeRecord(strings.TrimSpace(fqdn))
+	if !ok {
+		return "", core.NewProblem(core.ProblemMalformed, "fqdn must be _acme-challenge.<name>").WithStatus(http.StatusBadRequest)
+	}
+	ident, err := names.Normalize(name)
+	if err != nil {
+		return "", err
+	}
+	if names.IsWildcard(ident) {
+		return "", core.NewProblem(core.ProblemMalformed, "fqdn must not contain a wildcard label").WithStatus(http.StatusBadRequest)
+	}
+	return ident, nil
+}
+
 func (h *Handler) present(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var req presentRequest
@@ -173,7 +209,16 @@ func (h *Handler) present(w http.ResponseWriter, r *http.Request) {
 		h.o.Metrics.Request(core.ModeDNSProxy, metrics.OutcomeError)
 		return
 	}
-	ident, err := names.Normalize(req.Identifier)
+	var ident string
+	var err error
+	switch {
+	case req.Identifier != "" && req.FQDN != "":
+		err = core.NewProblem(core.ProblemMalformed, "give either identifier or fqdn, not both").WithStatus(http.StatusBadRequest)
+	case req.FQDN != "":
+		ident, err = identFromFQDN(req.FQDN)
+	default:
+		ident, err = names.Normalize(req.Identifier)
+	}
 	if err != nil {
 		h.o.Metrics.Request(core.ModeDNSProxy, metrics.OutcomeError)
 		httpx.WriteError(w, err)
@@ -287,7 +332,65 @@ func (h *Handler) cleanupBody(w http.ResponseWriter, r *http.Request) {
 		h.o.Metrics.Request(core.ModeDNSProxy, metrics.OutcomeError)
 		return
 	}
+	if req.FQDN != "" || req.Value != "" {
+		if req.ChallengeID != "" {
+			h.o.Metrics.Request(core.ModeDNSProxy, metrics.OutcomeError)
+			httpx.WriteProblemStatus(w, http.StatusBadRequest, core.ProblemMalformed, "give either challenge_id or fqdn and value, not both")
+			return
+		}
+		h.cleanupValue(w, r, req.FQDN, req.Value)
+		return
+	}
 	h.cleanup(w, r, strings.TrimSpace(req.ChallengeID))
+}
+
+// cleanupValue removes the caller's active challenges with the record of fqdn
+// and that value. It is idempotent: when there is nothing to remove (already
+// cleaned, never presented, or presented by another source, whose value is
+// left alone) it still answers 200, so a retried client hook never fails.
+func (h *Handler) cleanupValue(w http.ResponseWriter, r *http.Request, fqdn, value string) {
+	ctx := r.Context()
+	ident, err := identFromFQDN(fqdn)
+	if err != nil {
+		h.o.Metrics.Request(core.ModeDNSProxy, metrics.OutcomeError)
+		httpx.WriteError(w, err)
+		return
+	}
+	if !validValue(value) {
+		h.o.Metrics.Request(core.ModeDNSProxy, metrics.OutcomeError)
+		httpx.WriteProblemStatus(w, http.StatusBadRequest, core.ProblemMalformed,
+			"value must be 1 to 255 printable ASCII characters without spaces, quotes or backslashes")
+		return
+	}
+	set := []string{ident}
+	src, ok := h.source(w, r, core.AuditDNSCleanup, set)
+	if !ok {
+		return
+	}
+	record := names.ChallengeRecord(ident)
+	rows, err := h.o.Challenges.ListByOwner(ctx, core.DNSProxyOwner(src))
+	if err != nil {
+		h.unavailable(w, r, src, "", err)
+		return
+	}
+	cleaned := 0
+	for _, c := range rows {
+		if c.RecordName != record || c.Value != value {
+			continue
+		}
+		if err := h.o.Engine.Cleanup(ctx, c.ID); err != nil && !errors.Is(err, core.ErrNotFound) {
+			h.unavailable(w, r, src, c.ID, err)
+			return
+		}
+		cleaned++
+		h.audit(ctx, core.AuditDNSCleanup, src.String(), set, core.Decision{Allowed: true, Reason: reasonOwner}, "ok", "", c.ID)
+	}
+	if cleaned == 0 {
+		h.audit(ctx, core.AuditDNSCleanup, src.String(), set, core.Decision{Allowed: true, Reason: reasonNothing}, "ok",
+			"no active challenge of this source with that value", "")
+	}
+	h.o.Metrics.Request(core.ModeDNSProxy, metrics.OutcomeOK)
+	httpx.WriteJSON(w, http.StatusOK, cleanupResponse{FQDN: fqdn, Value: value})
 }
 
 func (h *Handler) cleanupPath(w http.ResponseWriter, r *http.Request) {

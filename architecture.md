@@ -186,13 +186,16 @@ POST /dns/cleanup
 `present` takes:
 
 ```text
-identifier
+identifier (or the challenge record fqdn, _acme-challenge.<identifier>)
 TXT challenge value
 ```
 
 and returns a broker-generated challenge ID.
 
-`cleanup` takes the challenge ID.
+`cleanup` takes the challenge ID, or the record fqdn and value. The fqdn form
+is the body stock client hooks send (acme.sh `dns_acmeproxy`, lego
+`httpreq`), so those clients need no custom hook; it always means the
+non-wildcard identifier, which the implicit-wildcard rule above already covers.
 
 The broker should return success from `present` only after the exact TXT value is visible through public DNS.
 
@@ -1351,7 +1354,8 @@ Gated as described in section 3.2.
 
 `present` returns a challenge ID and waits for DNS propagation before success.
 
-`cleanup` is idempotent and removes only its own TXT value.
+`cleanup` is idempotent and removes only its own TXT value (the caller's,
+identified by challenge ID or by record fqdn and value).
 
 ## Direct API
 
