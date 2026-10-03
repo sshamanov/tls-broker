@@ -3,16 +3,15 @@
 <p>Nothing to show while your account is blocked. See <a href="/ui/grants">your grants</a> or the <a href="/ui/audit">activity log</a>.</p>
 {{else}}
 {{if .Data.Warnings}}
-<section><h2>Warnings</h2><ul class="warnings">{{range .Data.Warnings}}<li>{{.}}</li>{{end}}</ul></section>
+<section><h2>Needs attention</h2><ul class="warnings">{{range .Data.Warnings}}<li>{{.}}</li>{{end}}</ul></section>
 {{end}}
 
-<section class="cards">
-<div class="card"><b>{{.Data.Counts.ACMECerts}}</b><span>valid ACME certificates</span></div>
-<div class="card"><b>{{.Data.Counts.Orders}}</b><span>orders in flight</span></div>
-<div class="card"><b>{{.Data.Counts.Direct}}</b><span>direct entries ({{.Data.Counts.DirectLive}} valid)</span></div>
-</section>
-
-<section><h2>Providers</h2>
+<section><h2>Certificate authorities</h2>
+<ul class="states">
+{{range .Data.CAs}}<li>{{.Name}} <span class="badge {{if eq .State "operational"}}good{{else if eq .State "degraded"}}warn{{else}}bad{{end}}">{{.State}}</span>{{if eq .State "unavailable"}} <span class="muted">retry {{rel .RetryAt}}</span>{{end}}</li>
+{{else}}<li class="muted">No certificate authority is enabled.</li>{{end}}
+</ul>
+{{if .Admin}}
 <table>
 <tr><th>Provider</th><th>Health</th><th>Retry after</th><th>Slots</th><th>Waiting</th><th>Last error</th></tr>
 {{range .Data.Snapshot.Providers}}
@@ -22,9 +21,40 @@
 <td>{{.SlotsInUse}}/{{.SlotsTotal}}</td><td>{{.Waiting}}</td><td>{{if .State.LastError}}{{.State.LastError}}{{else}}-{{end}}</td></tr>
 {{else}}<tr><td colspan="6" class="muted">No providers.</td></tr>{{end}}
 </table>
+{{end}}
 </section>
 
-<section><h2>Budget usage</h2>
+<section><h2>Queue</h2>
+<p>{{.Data.Queue.InFlight}} orders in flight, {{.Data.Queue.Waiting}} waiting for a slot ({{.Data.Queue.SlotsInUse}} of {{.Data.Queue.SlotsTotal}} slots in use).</p>
+</section>
+
+<section><h2>Rate-limit headroom</h2>
+{{range .Data.Headroom}}<h3>{{.Provider}}</h3>
+<ul class="gauges">{{range .Gauges}}<li class="gauge {{.Level}}"><span>{{.Label}}</span> <meter min="0" max="{{.Limit}}" low="{{pctOf .Limit 50}}" high="{{pctOf .Limit 75}}" optimum="0" value="{{.Used}}">{{.Pct}}%</meter> {{.Used}} / {{.Limit}} <span class="badge {{if eq .Level "ok"}}good{{else if eq .Level "caution"}}warn{{else}}bad{{end}}">{{.Level}}</span></li>{{end}}</ul>
+{{else}}<p class="muted">No certificate authority is enabled.</p>{{end}}
+</section>
+
+<section><h2>Recent issuance</h2>
+<table>
+<tr><th>Time</th><th>Names</th><th>Outcome</th><th>What happened</th></tr>
+{{range .Data.Recent}}<tr><td>{{ts .Time}}</td><td>{{join .Names ", "}}</td><td>{{outcome .}}</td><td class="wrap">{{summary .}}</td></tr>
+{{else}}<tr><td colspan="4" class="muted">No issuance yet.</td></tr>{{end}}
+</table>
+<p><a href="/ui/audit">Activity log</a></p>
+</section>
+
+<section><h2>Expiring next</h2>
+<table>
+<tr><th>Names</th><th>Kind</th><th>Expires</th><th>State</th></tr>
+{{range .Data.Expiring}}<tr><td>{{join .Names ", "}}</td><td>{{.Mode}}</td><td>{{ts .NotAfter}} <span class="muted">({{rel .NotAfter}})</span></td><td>{{.Life.State}}</td></tr>
+{{else}}<tr><td colspan="4" class="muted">No valid certificates.</td></tr>{{end}}
+</table>
+<p><a href="/ui/certificates">All certificates</a></p>
+</section>
+
+{{if .Admin}}
+<section><h2>Budgets</h2>
+<p class="muted">{{.Data.Counts.ACMECerts}} valid ACME certificates; {{.Data.Counts.Direct}} direct entries ({{.Data.Counts.DirectLive}} valid).</p>
 {{range .Data.Snapshot.Providers}}{{if .Budgets}}
 <h3>{{.Name}}</h3>
 <table>
@@ -35,8 +65,7 @@
 {{end}}{{end}}
 </section>
 
-{{if .Admin}}
-<section><h2>Broker accounts at providers</h2>
+<section><h2>CA accounts for CAA</h2>
 <p class="muted">Put these account URLs into the CAA <code>accounturi</code> parameter of your zones.</p>
 <table>
 <tr><th>Provider</th><th>Account URL</th><th>Issuers</th><th>accounturi honoured</th></tr>
@@ -45,7 +74,7 @@
 </table>
 </section>
 
-<section><h2>Managed zones</h2>
+<section><h2>DNS zones and CAA</h2>
 <table>
 <tr><th>Zone</th><th>Hosted zone</th><th>CAA node</th><th>Wildcard protected</th><th>Detail</th></tr>
 {{range .Data.Zones}}
@@ -61,11 +90,5 @@
 </table>
 </section>
 {{end}}
-
-<section><h2>Recent activity</h2>
-{{template "events" (events .Data.Recent .Admin)}}
-<p><a href="/ui/audit">Activity log</a></p>
-</section>
 {{end}}
 {{end}}
-

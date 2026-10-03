@@ -15,7 +15,7 @@
 <a class="brand" href="/ui/">TLS broker</a>
 {{if .User}}
 <nav>
-<a href="/ui/"{{if eq .Nav "dashboard"}} class="on"{{end}}>Dashboard</a>
+<a href="/ui/"{{if eq .Nav "dashboard"}} class="on"{{end}}>Status</a>
 <a href="/ui/grants"{{if eq .Nav "grants"}} class="on"{{end}}>Grants</a>
 {{if not .Blocked}}<a href="/ui/certificates"{{if eq .Nav "certificates"}} class="on"{{end}}>Certificates</a>{{end}}
 <a href="/ui/audit"{{if eq .Nav "audit"}} class="on"{{end}}>Activity</a>

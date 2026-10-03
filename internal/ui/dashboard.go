@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -20,8 +21,13 @@ const (
 
 type dashboardData struct {
 	Snapshot core.SchedulerSnapshot
-	Counts   dashCounts
+	CAs      []caStatus
+	Queue    queueStatus
+	Headroom []providerHeadroom
 	Recent   []core.AuditEvent
+	Expiring []expiringCert
+	// Admin only.
+	Counts   dashCounts
 	Warnings []string
 	Zones    []zoneView
 	Accounts []accountView
@@ -30,7 +36,6 @@ type dashboardData struct {
 
 type dashCounts struct {
 	ACMECerts  string
-	Orders     string
 	Direct     int
 	DirectLive int
 }
@@ -51,6 +56,204 @@ type accountView struct {
 	Issuers  []string
 }
 
+// caStatus is one certificate authority in one word: operational, degraded
+// (admitting, but its last answers were errors or rate limits) or
+// unavailable (admission closed until RetryAt).
+type caStatus struct {
+	Name    string
+	State   string
+	RetryAt time.Time
+}
+
+// queueStatus is the issuance queue over all providers.
+type queueStatus struct {
+	InFlight   string // orders not yet finished (capped count)
+	Waiting    int    // requests waiting for an admission slot
+	SlotsInUse int
+	SlotsTotal int
+}
+
+// providerHeadroom holds the rate-limit gauges of one provider.
+type providerHeadroom struct {
+	Provider string
+	Gauges   []gauge
+}
+
+// gauge is one rate budget: how much of it is used, and its level.
+type gauge struct {
+	Label       string
+	Key         string
+	Used, Limit int
+	RenewalOnly int
+	Window      time.Duration
+	Pct         int    // used share, 0..100
+	Level       string // ok | caution | exhausted
+}
+
+// cautionPct is the used share from which a budget is shown as caution.
+const cautionPct = 75
+
+func newGauge(b core.BudgetUsage) gauge {
+	g := gauge{Key: b.Key, Used: b.Used, Limit: b.Limit, RenewalOnly: b.RenewalOnly, Window: b.Window, Pct: pct(b.Used, b.Limit), Level: "ok"}
+	switch b.Kind {
+	case core.BudgetNewOrder:
+		g.Label = "New orders"
+	case core.BudgetCertDomain:
+		g.Label = "Certificates for " + b.Key
+	case core.BudgetCertSet:
+		g.Label = "Renewals of " + b.Key
+	default:
+		g.Label = string(b.Kind)
+	}
+	switch {
+	case budgetExhausted(b):
+		g.Level = "exhausted"
+	case g.Pct >= cautionPct:
+		g.Level = "caution"
+	}
+	return g
+}
+
+// headroom keeps, per provider, the new-order budget and the most used
+// per-domain and per-set budget: the ones that would refuse a request first.
+func headroom(snap core.SchedulerSnapshot, enabled map[string]bool) []providerHeadroom {
+	var out []providerHeadroom
+	for _, ps := range snap.Providers {
+		if !enabled[ps.Name] {
+			continue
+		}
+		ph := providerHeadroom{Provider: ps.Name}
+		best := map[core.BudgetKind]core.BudgetUsage{}
+		for _, b := range ps.Budgets {
+			if cur, ok := best[b.Kind]; !ok || pct(b.Used, b.Limit) > pct(cur.Used, cur.Limit) {
+				best[b.Kind] = b
+			}
+		}
+		for _, k := range []core.BudgetKind{core.BudgetNewOrder, core.BudgetCertDomain, core.BudgetCertSet} {
+			if b, ok := best[k]; ok {
+				ph.Gauges = append(ph.Gauges, newGauge(b))
+			}
+		}
+		out = append(out, ph)
+	}
+	return out
+}
+
+func caStatuses(snap core.SchedulerSnapshot, enabled map[string]bool) []caStatus {
+	var out []caStatus
+	for _, ps := range snap.Providers {
+		if !enabled[ps.Name] {
+			continue
+		}
+		cs := caStatus{Name: ps.Name, State: "operational"}
+		switch {
+		case !ps.Open:
+			cs.State, cs.RetryAt = "unavailable", ps.State.RetryAfter
+		case ps.State.Health != core.ProviderHealthy && ps.State.Health != "", ps.State.Failures > 0:
+			cs.State = "degraded"
+		}
+		out = append(out, cs)
+	}
+	return out
+}
+
+// recentLimit is how many issuance operations the status page lists.
+const recentLimit = 8
+
+// recentOperations keeps the events that are an outcome: certificates
+// issued or failed, orders refused or ended, requests denied, DNS proxy
+// publications. Allowed gate decisions and admitted orders are steps on the
+// way and are left out.
+func recentOperations(evs []core.AuditEvent) []core.AuditEvent {
+	var out []core.AuditEvent
+	for _, ev := range evs {
+		o := outcome(ev)
+		keep := false
+		switch ev.Type {
+		case core.AuditIssue, core.AuditDNSPresent:
+			keep = true
+		case core.AuditGate, core.AuditOrder:
+			keep = o != core.AuditResultOK
+		}
+		if keep {
+			out = append(out, ev)
+		}
+		if len(out) == recentLimit {
+			break
+		}
+	}
+	return out
+}
+
+// expiringLimit is how many certificates "Expiring next" lists.
+const expiringLimit = 6
+
+type expiringCert struct {
+	Names    []string
+	Mode     core.Mode
+	Provider string
+	NotAfter time.Time
+	Life     lifetime
+}
+
+// lifetime places now and the renewal point on a certificate's validity, as
+// percentages of it, for the lifetime bar.
+type lifetime struct {
+	NotBefore, NotAfter, RenewAt time.Time
+	// RenewExpected: RenewAt is the usual point (two thirds of the
+	// lifetime), not a schedule the broker keeps (direct cache).
+	RenewExpected bool
+	NowPct        int
+	RenewPct      int
+	State         string // ok | due | expired
+}
+
+func newLifetime(now, nb, na, renewAt time.Time) lifetime {
+	l := lifetime{NotBefore: nb, NotAfter: na, RenewAt: renewAt, State: "ok"}
+	total := na.Sub(nb)
+	if total <= 0 {
+		l.State = "expired"
+		return l
+	}
+	if renewAt.IsZero() {
+		l.RenewAt, l.RenewExpected = nb.Add(total*2/3), true
+	}
+	at := func(t time.Time) int {
+		return int(min(max(t.Sub(nb)*100/total, 0), 100))
+	}
+	l.NowPct, l.RenewPct = at(now), at(l.RenewAt)
+	switch {
+	case !now.Before(na):
+		l.State = "expired"
+	case !now.Before(l.RenewAt):
+		l.State = "due"
+	}
+	return l
+}
+
+// expiringNext returns the current certificate of each identifier set and
+// mode that expires soonest.
+func expiringNext(certs []core.Certificate, renewAt map[string]time.Time, now time.Time) []expiringCert {
+	latest := map[string]core.Certificate{}
+	for _, c := range certs {
+		k := string(c.Mode) + " " + c.Names.Key()
+		if cur, ok := latest[k]; !ok || c.NotAfter.After(cur.NotAfter) {
+			latest[k] = c
+		}
+	}
+	list := make([]core.Certificate, 0, len(latest))
+	for _, c := range latest {
+		list = append(list, c)
+	}
+	slices.SortFunc(list, func(a, b core.Certificate) int { return a.NotAfter.Compare(b.NotAfter) })
+	var out []expiringCert
+	for _, c := range list[:min(len(list), expiringLimit)] {
+		out = append(out, expiringCert{Names: c.Names.Names(), Mode: c.Mode, Provider: c.Provider, NotAfter: c.NotAfter,
+			Life: newLifetime(now, c.NotBefore, c.NotAfter, renewAt[c.ID])})
+	}
+	return out
+}
+
 func capped(n int) string {
 	if n >= countCap {
 		return fmt.Sprintf("%d+", countCap)
@@ -60,7 +263,7 @@ func capped(n int) string {
 
 func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request, cur *auth.Current) {
 	d := &dashboardData{Snapshot: h.Scheduler.Snapshot(), Config: h.Config.Current()}
-	p := h.newPage(w, r, cur, "Dashboard", "dashboard", d)
+	p := h.newPage(w, r, cur, "Status", "dashboard", d)
 	if cur.User.Blocked {
 		h.render(w, http.StatusOK, "dashboard", p)
 		return
@@ -68,35 +271,60 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request, cur *auth.Cu
 	ctx := r.Context()
 	now := h.Clock.Now()
 
-	if certs, err := h.Certs.List(ctx, core.CertificateFilter{Mode: core.ModeACME, ValidAt: now, Limit: countCap}); err != nil {
-		h.serverError(w, r, cur, "list certificates", err)
-		return
-	} else {
-		d.Counts.ACMECerts = capped(len(certs))
+	enabled := map[string]bool{}
+	for _, pc := range d.Config.EnabledProviders() {
+		enabled[pc.Name] = true
 	}
-	if active, err := h.Orders.ListActive(ctx); err != nil {
+	d.CAs = caStatuses(d.Snapshot, enabled)
+	d.Headroom = headroom(d.Snapshot, enabled)
+	for _, ps := range d.Snapshot.Providers {
+		d.Queue.Waiting += ps.Waiting
+		d.Queue.SlotsInUse += ps.SlotsInUse
+		d.Queue.SlotsTotal += ps.SlotsTotal
+	}
+	active, err := h.Orders.ListActive(ctx)
+	if err != nil {
 		h.serverError(w, r, cur, "list orders", err)
 		return
-	} else {
-		d.Counts.Orders = capped(len(active))
+	}
+	d.Queue.InFlight = capped(len(active))
+
+	certs, err := h.Certs.List(ctx, core.CertificateFilter{ValidAt: now, Limit: countCap})
+	if err != nil {
+		h.serverError(w, r, cur, "list certificates", err)
+		return
 	}
 	entries, err := h.Direct.List(ctx)
 	if err != nil {
 		h.serverError(w, r, cur, "list direct entries", err)
 		return
 	}
-	d.Counts.Direct = len(entries)
+	renewAt := map[string]time.Time{}
 	for _, e := range entries {
+		if e.CertificateID != "" {
+			renewAt[e.CertificateID] = e.RenewAt
+		}
 		if e.NotAfter.After(now) {
 			d.Counts.DirectLive++
 		}
 	}
-	if d.Recent, err = h.Audit.Query(ctx, activityQuery(core.AuditQuery{Limit: 10}, p.Admin)); err != nil {
+	d.Expiring = expiringNext(certs, renewAt, now)
+	if evs, err := h.Audit.Query(ctx, activityQuery(core.AuditQuery{Types: activityTypes, Limit: 50}, p.Admin)); err != nil {
 		h.Logger.Warn("ui: audit query failed", "error", err)
 		p.Flash = firstFlash(p.Flash, &flash{Kind: "error", Text: "The activity log could not be read."})
+	} else {
+		d.Recent = recentOperations(evs)
 	}
 
 	if p.Admin {
+		acme := 0
+		for _, c := range certs {
+			if c.Mode == core.ModeACME {
+				acme++
+			}
+		}
+		d.Counts.ACMECerts = capped(acme)
+		d.Counts.Direct = len(entries)
 		h.adminDashboard(ctx, d)
 	}
 	h.render(w, http.StatusOK, "dashboard", p)

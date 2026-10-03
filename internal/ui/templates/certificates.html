@@ -10,11 +10,11 @@
 {{if ne .Data.Mode "direct"}}
 <h2>ACME certificates</h2>
 <table>
-<tr><th>Identifiers</th><th>Provider</th><th>Serial</th><th>Valid from</th><th>Expires</th><th>Issued</th><th>Client interval</th><th>State</th></tr>
+<tr><th>Identifiers</th><th>Owner</th><th>Provider</th><th>Serial</th><th>Valid from</th><th>Expires</th><th>Issued</th><th>Client interval</th><th>State</th></tr>
 {{range .Data.ACME}}
-<tr><td>{{join .Names.Names ", "}}</td><td>{{.Provider}}</td><td><code>{{.Serial}}</code></td><td>{{ts .NotBefore}}</td><td>{{ts .NotAfter}} <span class="muted">({{rel .NotAfter}})</span></td><td>{{ts .IssuedAt}}</td>
+<tr><td>{{join .Names.Names ", "}}</td><td>{{template "owner" .Owner}}</td><td>{{.Provider}}</td><td><code>{{.Serial}}</code></td><td>{{ts .NotBefore}}</td><td>{{ts .NotAfter}} <span class="muted">({{rel .NotAfter}})</span></td><td>{{ts .IssuedAt}}</td>
 <td>{{if .Interval}}{{dur .Interval}}{{else}}-{{end}}</td><td>{{if .ReplacedByID}}replaced{{else}}current{{end}}</td></tr>
-{{else}}<tr><td colspan="8" class="muted">No certificates.</td></tr>{{end}}
+{{else}}<tr><td colspan="9" class="muted">No certificates.</td></tr>{{end}}
 </table>
 <p>{{if .Data.Prev}}<a href="/ui/certificates{{.Data.Prev}}">Previous</a>{{end}} {{if .Data.Next}}<a href="/ui/certificates{{.Data.Next}}">Next</a>{{end}}</p>
 {{end}}
@@ -22,15 +22,17 @@
 {{if ne .Data.Mode "acme"}}
 <h2>Direct cache</h2>
 <table>
-<tr><th>Identifier</th><th>Provider</th><th>Generation</th><th>Expires</th><th>Renew at</th><th>Last fetch</th><th>Last attempt</th><th><span class="sr">Actions</span></th></tr>
+<tr><th>Identifier</th><th>Owner</th><th>Provider</th><th>Generation</th><th>Expires</th><th>Renew at</th><th>Last fetch</th><th>Last attempt</th><th><span class="sr">Actions</span></th></tr>
 {{range .Data.Direct}}
-<tr><td>{{.Identifier}}</td><td>{{if .Provider}}{{.Provider}}{{else}}-{{end}}</td><td>{{.Generation}}</td>
+<tr><td>{{.Identifier}}</td><td>{{template "owner" .Owner}}</td><td>{{if .Provider}}{{.Provider}}{{else}}-{{end}}</td><td>{{.Generation}}</td>
 <td>{{ts .NotAfter}}{{if not (isZero .NotAfter)}} <span class="muted">({{rel .NotAfter}})</span>{{end}}</td>
 <td>{{ts .RenewAt}}</td>
 <td>{{ts .LastFetchAt}}{{if .LastFetchIP.IsValid}} from {{.LastFetchIP}}{{end}}</td>
-<td>{{ts .LastAttemptAt}}{{if .LastError}}<br><span class="bad">{{.LastError}}</span> ({{.Failures}} failures){{end}}</td>
+<td>{{ts .LastAttemptAt}}{{if .LastError}}<br><span class="bad">{{if $.Admin}}{{.LastError}}{{else}}renewal failing{{end}}</span> ({{.Failures}} failures){{end}}</td>
 <td class="actions">{{if $.Data.CanRotate}}<form method="post" action="/ui/certificates/rotate" data-confirm="Rotate the key of {{.Identifier}}?">{{template "csrf" $}}<input type="hidden" name="identifier" value="{{.Identifier}}"><button type="submit">Rotate key</button></form>{{end}}</td></tr>
-{{else}}<tr><td colspan="8" class="muted">No direct entries.</td></tr>{{end}}
+{{else}}<tr><td colspan="9" class="muted">No direct entries.</td></tr>{{end}}
 </table>
 {{end}}
 {{end}}
+
+{{define "owner"}}{{if eq .Kind "grant"}}{{.User}}<br><span class="muted">grant <code>{{.Prefix}}</code></span>{{else if eq .Kind "deleted"}}deleted grant<br><span class="muted">requested from {{.IP}}</span>{{else if eq .Kind "dns"}}no owner<br><span class="muted">DNS match from {{.IP}}</span>{{else}}<span class="muted">unknown</span>{{end}}{{end}}

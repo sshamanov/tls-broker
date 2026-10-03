@@ -128,7 +128,7 @@ hosted zone whose name equals the zone name; private zones of that name are
 ignored. Discovery runs at startup and whenever a configuration is
 activated, and the result is then checked with `GetHostedZone` like a
 configured ID. The discovered ID is kept in memory only: the configuration
-stays as written, the dashboard's zone table shows the ID in effect and
+stays as written, the status page's zone table shows the ID in effect and
 whether it was configured or discovered, and the startup log reports
 `route53 hosted zone discovered by name`.
 
@@ -263,7 +263,7 @@ spent. The issuance engine logs the same order's steps with `order=<id>`.
 | Startup says a zone is private | The configured ID is a private hosted zone; use the public zone with the same name (discovery never picks a private zone). |
 | `no public hosted zone named <zone>` | The zone has no `hosted_zone_id` and the account has no public hosted zone of exactly that name: a typo, the zone lives in another account, or only a private zone exists. Create the public zone or set `hosted_zone_id`. |
 | `several public hosted zones named <zone>; set hosted_zone_id` | More than one public hosted zone carries the name (for example during a migration). Set `hosted_zone_id` to the one the domain's NS delegation points to. |
-| `list hosted zones: AccessDenied` (dashboard: "not discovered") | The IAM policy lacks `route53:ListHostedZones`; add the `DiscoverZones` statement above or set `hosted_zone_id`. The next `Present` retries discovery, no restart needed. |
+| `list hosted zones: AccessDenied` (status page: "not discovered") | The IAM policy lacks `route53:ListHostedZones`; add the `DiscoverZones` statement above or set `hosted_zone_id`. The next `Present` retries discovery, no restart needed. |
 | `route53 change did not complete in time` | Route53 is throttling or unreachable for longer than `change_timeout`, or the change stayed `PENDING`. Check AWS service health and other tools writing to the same account (Route53 limits API calls per account). |
 | `TXT record did not become visible in public DNS` | The change is in sync but the public resolvers do not see it: the domain's NS delegation does not point to this hosted zone, a more specific zone (or a CNAME at `_acme-challenge`) exists elsewhere, or negative caching from an earlier lookup. `dig +trace TXT _acme-challenge.<name>` and compare the NS set with the hosted zone's delegation set. Raise `propagation_timeout` only if it eventually appears. |
 | `name is outside managed zones` | The name has no managed zone; add the zone, or it is not an `_acme-challenge` record. |

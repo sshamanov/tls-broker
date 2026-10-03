@@ -11,6 +11,7 @@ import (
 
 	"tls-broker/internal/auth"
 	"tls-broker/internal/core"
+	"tls-broker/internal/core/coretest"
 	"tls-broker/internal/names"
 )
 
@@ -389,7 +390,9 @@ func TestActivityLog(t *testing.T) {
 	lacks(t, admin.get("/ui/audit?type=gate"), "issued.example.com")
 	see(t, admin.get("/ui/audit?q=DOH.internal"), "denied.example.com")
 	see(t, admin.get("/ui/audit?since=junk"), "invalid")
-	see(t, admin.get("/ui/"), "loginuser")
+	// The status page lists outcomes only, for everyone.
+	see(t, admin.get("/ui/"), "failed.example.com", "Issuance failed.")
+	lacks(t, admin.get("/ui/"), "loginuser")
 }
 
 func TestAuditPaging(t *testing.T) {
@@ -425,8 +428,8 @@ func TestDashboard(t *testing.T) {
 	admin := e.login("alice")
 	r := admin.get("/ui/")
 	account, _ := e.ca.AccountURL(bg)
-	see(t, r, "Broker accounts at providers", account, "example.com", "wide open zone", "is unprotected", "accounturi=", "LDAP is not configured", "circuit open", "too many")
-	see(t, r, "<b>1</b><span>valid ACME certificates", "is rate_limited until")
+	see(t, r, "Needs attention", "CA accounts for CAA", "DNS zones and CAA", account, "example.com", "wide open zone", "is unprotected", "accounturi=", "LDAP is not configured", "circuit open", "too many")
+	see(t, r, "1 valid ACME certificates; 1 direct entries (1 valid)", "is rate_limited until")
 	// Without a zone status source the configured hosted zone ID is shown.
 	see(t, r, "<code>Z0123456789ABC</code>", "configured")
 	lacks(t, r, "discovered by name", "no hosted zone")
@@ -453,8 +456,8 @@ func TestDashboard(t *testing.T) {
 
 	bob := e.login("bob")
 	r = bob.get("/ui/")
-	lacks(t, r, account, "unprotected", "Managed zones")
-	see(t, r, "valid ACME certificates", "letsencrypt")
+	lacks(t, r, account, "unprotected", "DNS zones and CAA", "Needs attention", "valid ACME certificates")
+	see(t, r, "letsencrypt", "operational", "www.example.com")
 
 	// LDAP untested -> test -> warning goes away.
 	e.cfg.Activate(bg, []byte(goodYAML+"ldap:\n  url: ldaps://ldap.example.com:636\n  base_dn: dc=example,dc=com\n  user_filter: (uid=%s)\n"))
@@ -471,15 +474,70 @@ func TestDashboard(t *testing.T) {
 	}
 }
 
+// TestStatusForUsers: users who are not admins get the simple status: one
+// state per CA, the queue, rate-limit gauges by level, recent outcomes and
+// what expires next, and none of the admin detail.
+func TestStatusForUsers(t *testing.T) {
+	e := newEnv(t)
+	now := e.clock.Now()
+	e.sched.SetSnapshot(core.SchedulerSnapshot{Providers: []core.ProviderSnapshot{{Name: "letsencrypt", Open: true, SlotsInUse: 1, SlotsTotal: 4, Waiting: 2,
+		State: core.ProviderState{Name: "letsencrypt", Health: core.ProviderHealthy, LastError: "secret upstream text"},
+		Budgets: []core.BudgetUsage{{Kind: core.BudgetNewOrder, Used: 150, Limit: 200, Window: 3 * time.Hour},
+			{Kind: core.BudgetCertDomain, Key: "example.com", Used: 50, Limit: 50, Window: 7 * 24 * time.Hour},
+			{Kind: core.BudgetCertDomain, Key: "quiet.example.com", Used: 1, Limit: 50, Window: 7 * 24 * time.Hour},
+			{Kind: core.BudgetCertSet, Key: "www.example.com", Used: 1, Limit: 5, Window: 7 * 24 * time.Hour}}}}})
+	seedCert(t, e, "c1", "www.example.com")
+	seedCert(t, e, "c2", "api.example.com")
+	e.audit.Record(bg, core.AuditEvent{Type: core.AuditIssue, Names: []string{"broken.example.com"}, Result: "failed", Detail: "upstream acct/99"})
+	e.audit.Record(bg, core.AuditEvent{Type: core.AuditOrder, Names: []string{"admitted.example.com"}, Decision: "allow", Result: "ok"})
+
+	bob := e.login("bob")
+	r := bob.get("/ui/")
+	code(t, r, 200)
+	see(t, r, "letsencrypt", "operational", "2 waiting for a slot", "1 of 4 slots",
+		"New orders", "150 / 200", "caution", "Certificates for example.com", "50 / 50", "exhausted", "Renewals of www.example.com", "1 / 5",
+		"broken.example.com", "Issuance failed.", "www.example.com", "api.example.com", "Expiring next")
+	lacks(t, r, "quiet.example.com", "admitted.example.com", "upstream acct/99", "secret upstream text", "Needs attention", "DNS zones and CAA", "CA accounts for CAA", "<h2>Budgets</h2>")
+
+	// A provider that answered with errors is degraded; one whose circuit is
+	// open is unavailable with its retry time.
+	e.sched.SetSnapshot(core.SchedulerSnapshot{Providers: []core.ProviderSnapshot{{Name: "letsencrypt", Open: true,
+		State: core.ProviderState{Name: "letsencrypt", Health: core.ProviderHealthy, Failures: 2}}}})
+	see(t, bob.get("/ui/"), "degraded")
+	e.sched.SetSnapshot(core.SchedulerSnapshot{Providers: []core.ProviderSnapshot{{Name: "letsencrypt", Open: false,
+		State: core.ProviderState{Name: "letsencrypt", Health: core.ProviderUnavailable, RetryAfter: now.Add(time.Hour)}}}})
+	see(t, bob.get("/ui/"), "unavailable", "retry in 1h00m")
+}
+
+func TestLifetime(t *testing.T) {
+	nb := coretest.At(2026, 1, 1, 0)
+	na := nb.Add(90 * 24 * time.Hour)
+	l := newLifetime(nb.Add(30*24*time.Hour), nb, na, time.Time{})
+	if l.NowPct != 33 || l.RenewPct != 66 || !l.RenewExpected || l.State != "ok" {
+		t.Errorf("ok: %+v", l)
+	}
+	l = newLifetime(nb.Add(80*24*time.Hour), nb, na, nb.Add(70*24*time.Hour))
+	if l.NowPct != 88 || l.RenewPct != 77 || l.RenewExpected || l.State != "due" {
+		t.Errorf("due: %+v", l)
+	}
+	if l = newLifetime(na.Add(time.Hour), nb, na, time.Time{}); l.State != "expired" || l.NowPct != 100 {
+		t.Errorf("expired: %+v", l)
+	}
+}
+
 // zonesStub is a fixed ZoneStatusSource.
 type zonesStub []ZoneStatus
 
 func (z zonesStub) ZoneStatuses() []ZoneStatus { return z }
 
-func seedCert(t *testing.T, e *env, id, name string) {
+func seedCert(t *testing.T, e *env, id, name string) { seedGrantCert(t, e, id, name, 0) }
+
+// seedGrantCert issues a certificate whose order was authorized by grantID
+// (0: by DNS match) from 10.0.0.5.
+func seedGrantCert(t *testing.T, e *env, id, name string, grantID int64) {
 	t.Helper()
 	now := e.clock.Now()
-	o := &core.Order{ID: "o-" + id, Mode: core.ModeACME, AccountID: "acct1", Names: names.MustSet(name), SourceIP: mustAddr("10.0.0.5"), Status: core.OrderReady, Prep: core.PrepIntent,
+	o := &core.Order{ID: "o-" + id, Mode: core.ModeACME, AccountID: "acct1", Names: names.MustSet(name), SourceIP: mustAddr("10.0.0.5"), GrantID: grantID, Status: core.OrderReady, Prep: core.PrepIntent,
 		Class: core.ClassACMEOrdinary, Provider: "letsencrypt", CreatedAt: now, ExpiresAt: now.Add(15 * time.Minute)}
 	st := e.store.Orders()
 	for _, err := range []error{
@@ -505,12 +563,27 @@ func TestCertificates(t *testing.T) {
 	now := e.clock.Now()
 	seedCert(t, e, "c1", "www.example.com")
 	seedCert(t, e, "c2", "api.example.com")
-	e.store.Direct().Put(bg, &core.DirectEntry{Identifier: "svc.example.com", Generation: 2, Provider: "letsencrypt", NotBefore: now.Add(-time.Hour), NotAfter: now.Add(30 * 24 * time.Hour),
-		RenewAt: now.Add(20 * 24 * time.Hour), LastFetchAt: now, LastFetchIP: mustAddr("10.2.2.2"), CreatedAt: now, UpdatedAt: now, LastError: "boom", Failures: 2})
 	bob := e.login("bob")
+	carol := e.login("carol")
+	code(t, carol.act("/ui/grants", url.Values{"prefix": {"10.0.0.0/24"}}), 303)
+	code(t, bob.act("/ui/grants", url.Values{"prefix": {"10.9.0.0/24"}}), 303)
+	cg, _ := e.store.Grants().List(bg, e.userID("carol"))
+	bgr, _ := e.store.Grants().List(bg, e.userID("bob"))
+	seedGrantCert(t, e, "c3", "carols.example.com", cg[0].ID)
+	seedGrantCert(t, e, "c4", "gone.example.com", bgr[0].ID)
+	seedGrantCert(t, e, "c5", "c5.example.com", cg[0].ID) // the direct entry's certificate
+	code(t, bob.act("/ui/grants/"+itoa(bgr[0].ID)+"/delete", nil), 303)
+	e.store.Direct().Put(bg, &core.DirectEntry{Identifier: "svc.example.com", Generation: 2, CertificateID: "c5", Provider: "letsencrypt", NotBefore: now.Add(-time.Hour), NotAfter: now.Add(30 * 24 * time.Hour),
+		RenewAt: now.Add(20 * 24 * time.Hour), LastFetchAt: now, LastFetchIP: mustAddr("10.2.2.2"), CreatedAt: now, UpdatedAt: now, LastError: "boom", Failures: 2})
 	r := bob.get("/ui/certificates")
-	see(t, r, "www.example.com", "api.example.com", "svc.example.com", "10.2.2.2", "boom")
-	lacks(t, r, "Rotate key")
+	see(t, r, "www.example.com", "api.example.com", "svc.example.com", "10.2.2.2", "renewal failing")
+	lacks(t, r, "Rotate key", "boom")
+	// Owners: the grant's owner and network, a deleted grant with the
+	// requesting address, or no owner for a DNS match.
+	see(t, r, "carol<br><span class=\"muted\">grant <code>10.0.0.0/24</code>", "deleted grant<br><span class=\"muted\">requested from 10.0.0.5", "no owner<br><span class=\"muted\">DNS match from 10.0.0.5")
+	if n := strings.Count(r.body, "grant <code>10.0.0.0/24</code>"); n != 3 { // c3, c5 and the direct entry
+		t.Errorf("carol owns %d rows, want 3", n)
+	}
 	lacks(t, bob.get("/ui/certificates?q=api"), "www.example.com", "svc.example.com")
 	see(t, bob.get("/ui/certificates?q=API"), "api.example.com")
 	lacks(t, bob.get("/ui/certificates?mode=direct"), "www.example.com")
@@ -518,7 +591,7 @@ func TestCertificates(t *testing.T) {
 	lacks(t, bob.get("/ui/certificates?provider=other"), "www.example.com", "svc.example.com")
 
 	admin := e.login("alice")
-	see(t, admin.get("/ui/certificates"), "Rotate key")
+	see(t, admin.get("/ui/certificates"), "Rotate key", "boom")
 	code(t, admin.act("/ui/certificates/rotate", url.Values{"identifier": {"svc.example.com"}}), 303)
 	if len(rot.got) != 1 || rot.got[0] != "svc.example.com" {
 		t.Errorf("rotated %v", rot.got)

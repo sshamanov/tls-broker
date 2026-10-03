@@ -97,7 +97,7 @@ sessions. Nothing needs to be scheduled from outside.
 
 ### Provider circuit open
 
-Symptoms: `tlsbroker_scheduler_circuit_open{provider} == 1`, the dashboard
+Symptoms: `tlsbroker_scheduler_circuit_open{provider} == 1`, the status page
 and *Admin → Providers* show the provider `rate_limited` or `down` with a
 retry-after; clients get `429 rateLimited` with `Retry-After`; the audit log
 has a `provider_state` event (admins only).
@@ -131,14 +131,14 @@ the window has room; *Admin → Providers* shows the bucket.
 
 ### Zone unprotected (wildcard CAA warning)
 
-Symptoms: a dashboard warning that the zone is unprotected and "no" in its
+Symptoms: a status page warning that the zone is unprotected and "no" in its
 *Wildcard protected* column; DNS-proxy requests for wildcard names are denied with
 `wildcard_unprotected`.
 
-1. Copy the suggested CAA records from the dashboard (`issue` and
+1. Copy the suggested CAA records from the status page (`issue` and
    `issuewild` with `accounturi=<the broker's account URL>`) into the zone in
    Route53 (or wherever the zone's CAA lives).
-2. Reload the dashboard until the zone's *Wildcard protected* column says
+2. Reload the status page until the zone's *Wildcard protected* column says
    "yes". Account
    URLs must match exactly (lower-case); a re-created CA account (lost
    `provider-account-key.*`) has a new URL and needs new records.

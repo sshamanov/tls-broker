@@ -94,7 +94,7 @@ The directory must be writable by the container user (`PUID:PGID`, default
    follow "First start" in `docs/ui.md`: secrets (Route53 keys unless the AWS
    environment chain is used, EAB keys, LDAP bind password), configuration
    (`server.external_url`, `server.trusted_proxies`, zones, providers, LDAP),
-   activate, then CAA records with the account URLs the dashboard shows.
+   activate, then CAA records with the account URLs the status page shows.
 3. Optional, without the UI: write the YAML to the data volume and activate it
    from the container, then restart (a running broker only picks up
    generations activated through the UI):

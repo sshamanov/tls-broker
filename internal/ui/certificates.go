@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -16,13 +17,71 @@ const certPageSize = 50
 type certRow struct {
 	core.Certificate
 	Interval time.Duration // lineage observed interval; 0 when unknown
+	Owner    ownerView
+}
+
+type directRow struct {
+	core.DirectEntry
+	Owner ownerView // of the active generation's certificate
+}
+
+// ownerView says who obtained a certificate: the owner of the grant that
+// authorized its order. Kind is grant (User and Prefix set), deleted (the
+// grant no longer exists), dns (authorized because the names resolved to
+// the requester; no owner) or unknown (issued before owners were recorded).
+type ownerView struct {
+	Kind    string
+	User    string
+	Prefix  string
+	GrantID int64
+	IP      string
+}
+
+// ownerResolver resolves certificate owners from the live grants and users.
+type ownerResolver struct {
+	grants map[int64]core.Grant
+	names  userNames
+}
+
+func (h *Handler) ownerResolver(ctx context.Context) (*ownerResolver, error) {
+	grants, err := h.Grants.List(ctx, 0)
+	if err != nil {
+		return nil, err
+	}
+	names, err := h.userNames(ctx)
+	if err != nil {
+		return nil, err
+	}
+	o := &ownerResolver{grants: map[int64]core.Grant{}, names: names}
+	for _, g := range grants {
+		o.grants[g.ID] = g
+	}
+	return o, nil
+}
+
+func (o *ownerResolver) owner(c *core.Certificate) ownerView {
+	v := ownerView{GrantID: c.GrantID}
+	if c.SourceIP.IsValid() {
+		v.IP = c.SourceIP.String()
+	}
+	switch g, ok := o.grants[c.GrantID]; {
+	case c.GrantID == 0 && v.IP == "":
+		v.Kind = "unknown"
+	case c.GrantID == 0:
+		v.Kind = "dns"
+	case ok:
+		v.Kind, v.User, v.Prefix = "grant", o.names.name(g.OwnerUserID), g.Prefix.String()
+	default:
+		v.Kind = "deleted"
+	}
+	return v
 }
 
 type certsData struct {
 	Q, Provider, Mode string
 	Expired           bool
 	ACME              []certRow
-	Direct            []core.DirectEntry
+	Direct            []directRow
 	Providers         []string
 	Offset            int
 	Prev, Next        string // query strings for paging, empty when none
@@ -45,6 +104,11 @@ func (h *Handler) certificates(w http.ResponseWriter, r *http.Request, cur *auth
 	d.Offset = max(d.Offset, 0)
 	ctx := r.Context()
 	now := h.Clock.Now()
+	owners, err := h.ownerResolver(ctx)
+	if err != nil {
+		h.serverError(w, r, cur, "list grants", err)
+		return
+	}
 	for _, p := range h.Config.Current().Providers {
 		d.Providers = append(d.Providers, p.Name)
 	}
@@ -64,7 +128,7 @@ func (h *Handler) certificates(w http.ResponseWriter, r *http.Request, cur *auth
 			certs = certs[:certPageSize]
 		}
 		for _, c := range certs {
-			row := certRow{Certificate: c}
+			row := certRow{Certificate: c, Owner: owners.owner(&c)}
 			if l, err := h.Lineages.Get(ctx, c.Names.Key()); err == nil && l.Samples > 0 {
 				row.Interval = l.ObservedInterval
 			}
@@ -94,7 +158,16 @@ func (h *Handler) certificates(w http.ResponseWriter, r *http.Request, cur *auth
 			if !d.Expired && !e.NotAfter.IsZero() && !e.NotAfter.After(now) {
 				continue
 			}
-			d.Direct = append(d.Direct, e)
+			row := directRow{DirectEntry: e, Owner: ownerView{Kind: "unknown"}}
+			if e.CertificateID != "" {
+				if c, err := h.Certs.Get(ctx, e.CertificateID); err == nil {
+					row.Owner = owners.owner(c)
+				} else if !isNotFound(err) {
+					h.serverError(w, r, cur, "get certificate", err)
+					return
+				}
+			}
+			d.Direct = append(d.Direct, row)
 		}
 	}
 	h.render(w, http.StatusOK, "certificates", h.newPage(w, r, cur, "Certificates", "certificates", d))
