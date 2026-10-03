@@ -558,6 +558,9 @@ func TestDNSPropagationFailure(t *testing.T) {
 	if o.Status != core.OrderInvalid || o.Prep != core.PrepFailed || o.Error == nil || o.Error.Type != core.ProblemDNS {
 		t.Fatalf("order after propagation failure: %+v %v", o, o.Error)
 	}
+	// failOrder marks the order invalid before it cleans up, refunds and
+	// audits (last), so wait for the audit event before checking the rest.
+	e.waitUntil("issue audit", func() bool { return len(e.events(core.AuditIssue)) > 0 })
 	if e.dns.ActiveCount() != 0 {
 		t.Fatal("TXT values left behind")
 	}
