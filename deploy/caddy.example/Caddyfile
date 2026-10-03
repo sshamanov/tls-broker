@@ -1,0 +1,38 @@
+# Caddy as a LAN test front with its own internal CA ("tls internal"):
+# HTTPS without a public certificate. ACME clients must trust Caddy's root
+# (docker compose exec caddy cat /data/caddy/pki/authorities/local/root.crt),
+# e.g. certbot with REQUESTS_CA_BUNDLE=/path/root.crt, acme.sh with --ca-bundle.
+# The broker listens on 127.0.0.1:8080 and its configuration must trust
+# this proxy:
+#
+#   server:
+#     external_url: https://broker.lan
+#     trusted_proxies: [127.0.0.1]
+#     real_ip_header: X-Real-IP
+#
+# Run it next to the broker with host networking, for example:
+#   docker run -d --name caddy --network host \
+#     -v $PWD/deploy/caddy.example/Caddyfile:/etc/caddy/Caddyfile:ro \
+#     -v caddy-data:/data caddy:2
+
+broker.lan {
+	tls internal
+
+	# Prometheus only from loopback and the monitoring network.
+	@metricsDenied {
+		path /metrics
+		not remote_ip 127.0.0.1 10.0.0.0/8
+	}
+	respond @metricsDenied 403
+
+	reverse_proxy 127.0.0.1:8080 {
+		# Exactly one address: the TCP peer Caddy saw.
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up -X-Forwarded-For
+		# ACME finalize and /cert/ issuance hold requests for minutes.
+		transport http {
+			response_header_timeout 6m
+		}
+	}
+}

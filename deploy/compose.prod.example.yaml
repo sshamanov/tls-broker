@@ -1,0 +1,54 @@
+# Template for a self-contained deployment with the environment INLINE (no
+# .env file). Copy it to compose.prod.yaml (or compose.test.yaml for a LAN
+# test box); both names are gitignored because they end up holding
+# credentials. Never commit the copy.
+#
+#   cp deploy/compose.prod.example.yaml deploy/compose.prod.yaml
+#   mkdir -p deploy/data && sudo chown 1000:1000 deploy/data
+#   docker compose -f deploy/compose.prod.yaml up -d
+#
+# See docs/deployment.md and docs/configuration.md.
+services:
+  tls-broker:
+    image: ghcr.io/sshamanov/tls-broker:latest   # or tls-broker:local from `make image`
+    container_name: tls-broker
+    network_mode: host
+    restart: unless-stopped
+    stop_grace_period: 30s
+    user: "1000:1000"
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/tls-broker", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    environment:
+      - TLS_BROKER_DATA_DIR=/data
+      # Loopback behind nginx/Caddy on the same host.
+      - TLS_BROKER_LISTEN=127.0.0.1:8080
+      - TLS_BROKER_LOG_LEVEL=info
+      # LDAP users that get the admin role at every login.
+      - TLS_BROKER_ADMINS=
+      # Break-glass admin (works without LDAP). A bcrypt hash is accepted;
+      # write every "$" of it as "$$" in this file.
+      - TLS_BROKER_LOCAL_ADMIN_USER=admin
+      - TLS_BROKER_LOCAL_ADMIN_PASSWORD=change-me
+      # Route53 through the standard AWS credential chain. Alternatively leave
+      # these out and store the keys as secrets in the UI (route53.*_secret).
+      - AWS_ACCESS_KEY_ID=
+      - AWS_SECRET_ACCESS_KEY=
+      # DEVELOPMENT ONLY: point the DNS gate at the mockdoh service below.
+      # - TLS_BROKER_DOH_ENDPOINTS=http://127.0.0.1:8053/dns-query
+
+  # DEVELOPMENT ONLY: static DNS answers for the DNS gate (docs/development.md).
+  # mockdoh:
+  #   image: ghcr.io/sshamanov/tls-broker:latest
+  #   network_mode: host
+  #   restart: unless-stopped
+  #   entrypoint: ["/usr/local/bin/mockdoh"]
+  #   command:
+  #     - --listen=127.0.0.1:8053
+  #     - --upstream=https://cloudflare-dns.com/dns-query
+  #     - --record=text2.example.com A 192.0.2.10

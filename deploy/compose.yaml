@@ -1,5 +1,7 @@
-# Copy .env.example to .env next to this file, adjust, then:
+# Shipping deployment. Copy .env.example to .env next to this file, adjust,
+# create ./data owned by PUID:PGID, then:
 #   docker compose up -d
+# See docs/deployment.md.
 services:
   tls-broker:
     image: ghcr.io/sshamanov/tls-broker:latest
@@ -9,4 +11,12 @@ services:
     user: "${PUID:-1000}:${PGID:-1000}"
     volumes:
       - ./data:/data
+    # Longer than server.shutdown_grace (default 25s) so in-flight requests
+    # and issuance can drain.
     stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/tls-broker", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3

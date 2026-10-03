@@ -12,6 +12,7 @@
 .env
 /data/
 deploy/data/
+deploy/data-test/
 *.db
 *.db-wal
 *.db-shm

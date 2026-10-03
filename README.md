@@ -18,25 +18,37 @@ Machines are authorized by source IP: an explicit IP grant, or the requested
 name resolving to the requester's address. Humans manage grants, configuration
 and audit views in an LDAP-backed web UI.
 
-> Status: under construction. The skeleton (contracts, tooling) is in place;
-> the service itself is being built in the order given in `docs/plan.md`.
-
 ## Quick start
 
 ```sh
 cd deploy
 cp .env.example .env        # set the break-glass admin user and password
-mkdir -p data
+mkdir -p data && sudo chown 1000:1000 data
 docker compose up -d
+docker compose logs -f tls-broker   # wait for "tls-broker ready"
 ```
 
-The container uses host networking and keeps all state in `deploy/data`. Put
-nginx in front for TLS and for passing the real client address. On first start
-the broker writes a default configuration; log in to the UI as the break-glass
-admin to add Route53 zones, providers and LDAP settings.
+The container uses host networking, listens on `127.0.0.1:8080` and keeps all
+state in `deploy/data`. Put nginx (`deploy/nginx.example.conf`) or Caddy in
+front for TLS and the real client address. On first start the broker writes a
+default configuration; log in at `/ui/` as the break-glass admin to add
+secrets, Route53 zones, providers and LDAP settings, then copy the account
+URLs from the dashboard into your CAA records. Reaching the UI over plain
+HTTP? Set `sessions.cookie_secure: false` first.
+
+From source: `make image` builds `tls-broker:local`; `make build`
+builds `bin/tls-broker`. Inside the container `tls-broker help` lists the
+maintenance commands (backup, config validate/apply, user roles and blocks).
 
 ## Documentation
 
 - [`architecture.md`](architecture.md) — what the system does and why.
+- [`docs/deployment.md`](docs/deployment.md) — compose, environment, reverse proxy, upgrades.
+- [`docs/operations.md`](docs/operations.md) — backup, restore, recovery, runbooks.
+- [`docs/configuration.md`](docs/configuration.md) — environment and YAML reference.
+- [`docs/ui.md`](docs/ui.md) — the web UI and first-start walkthrough.
+- [`docs/acme-proxy.md`](docs/acme-proxy.md), [`docs/dns-proxy.md`](docs/dns-proxy.md),
+  [`docs/direct-api.md`](docs/direct-api.md) — the three issuance modes.
+- [`docs/observability.md`](docs/observability.md) — audit log, metrics, health.
 - [`docs/plan.md`](docs/plan.md) — package layout, contracts, build order.
 - [`docs/development.md`](docs/development.md) — building and testing.
