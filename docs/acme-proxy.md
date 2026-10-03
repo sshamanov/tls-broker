@@ -265,14 +265,12 @@ runs it with a TTY.
 
 ## Audit and metrics
 
-The engine audits admitted orders and issuance results. The ACME server adds
-what never reaches the engine (`docs/observability.md`):
+The engine audits admitted and refused orders and issuance results. The ACME
+server adds what never reaches the engine (`docs/observability.md`):
 
 - `gate` / `deny` events for gate denials and for identifiers rejected before
   the gate (`outside_managed_zone`, `invalid_identifier`), at newOrder and at
   the finalize re-check;
-- `rate_limit` events when admission is refused (`rate_limited` or
-  `provider_unavailable`, with the provider and the budget in the detail);
 - `order` / `failed` events for finalize requests refused at the protocol
   level (bad or different CSR, order not ready).
 

@@ -242,15 +242,12 @@ func TestGrantRules(t *testing.T) {
 	code(t, admin.act("/ui/admin/grants/"+itoa(cg[0].ID)+"/delete", nil), 303)
 	code(t, bob.act("/ui/admin/grants/1/delete", nil), 403)
 
-	// Audit: grant changes are recorded, admin-visible only.
-	evs, _ := e.audit.Query(bg, core.AuditQuery{IncludeAdmin: true, Type: core.AuditGrantChange})
+	// Audit: grant changes are recorded and part of everyone's activity log.
+	evs, _ := e.audit.Query(bg, core.AuditQuery{Type: core.AuditGrantChange})
 	if len(evs) < 5 {
 		t.Errorf("grant audit events: %d", len(evs))
 	}
-	pub, _ := e.audit.Query(bg, core.AuditQuery{Type: core.AuditGrantChange})
-	if len(pub) != 0 {
-		t.Errorf("grant changes leaked to public view: %d", len(pub))
-	}
+	see(t, bob.get("/ui/audit"), "Created grant 10.9.9.0/24 (wildcards allowed).", "Deleted grant 10.1.2.3/32.", "carol")
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
@@ -310,46 +307,70 @@ func TestBlockedUserCannotCreate(t *testing.T) {
 	see(t, admin.follow(r), "own role")
 	code(t, admin.act("/ui/admin/users/999/block", nil), 404)
 
-	evs, _ := e.audit.Query(bg, core.AuditQuery{IncludeAdmin: true, Type: core.AuditUserChange})
+	evs, _ := e.audit.Query(bg, core.AuditQuery{Type: core.AuditUserChange})
 	if len(evs) != 3 {
 		t.Errorf("user_change events: %+v", evs)
 	}
 }
 
-func TestAuditVisibility(t *testing.T) {
+// TestActivityLog: users who are not admins see issuance activity and grant
+// changes (successes, denials and failures alike) but never Detail, and no
+// control-plane events; admins see everything.
+func TestActivityLog(t *testing.T) {
 	e := newEnv(t)
-	e.audit.Record(bg, core.AuditEvent{Type: core.AuditIssue, Visibility: core.AuditVisibilityAll, Mode: core.ModeACME, Names: []string{"public.example.com"}, Result: "ok"})
-	e.audit.Record(bg, core.AuditEvent{Type: core.AuditGate, Visibility: core.AuditVisibilityAdmin, Mode: core.ModeACME, Names: []string{"secretdeny.example.com"}, Decision: "deny", Reason: "no_grant"})
+	na := e.clock.Now().Add(90 * 24 * time.Hour)
+	for _, ev := range []core.AuditEvent{
+		{Type: core.AuditIssue, Mode: core.ModeACME, Names: []string{"issued.example.com"}, Provider: "letsencrypt", Result: "ok", CertNotAfter: &na},
+		{Type: core.AuditGate, Mode: core.ModeACME, SourceIP: "10.0.0.7", Names: []string{"denied.example.com"}, Decision: "deny", Reason: core.ReasonDNSMismatch, Result: "denied", Detail: "resolver https://doh.internal/x said 192.0.2.1"},
+		{Type: core.AuditOrder, Mode: core.ModeDirect, Names: []string{"refused.example.com"}, Decision: "deny", Reason: core.ReasonRateLimited, Result: "denied", Detail: "budget key internal"},
+		{Type: core.AuditIssue, Mode: core.ModeACME, Names: []string{"failed.example.com"}, Result: "failed", Detail: "upstream said acct/12345 boom"},
+		{Type: core.AuditDNSPresent, Mode: core.ModeDNSProxy, Names: []string{"_acme-challenge.proxy.example.com"}, Decision: "allow", Result: "ok"},
+		{Type: core.AuditLogin, Mode: core.ModeUI, SourceIP: "10.9.9.9", Username: "loginuser", Result: "failed", Detail: "ldap: invalid credentials"},
+		{Type: core.AuditConfigChange, Mode: core.ModeUI, Username: "alice", Detail: "activated generation 7"},
+		{Type: core.AuditProviderState, Provider: "letsencrypt", Detail: "circuit opened"},
+		{Type: core.AuditDirectFetch, Mode: core.ModeDirect, Names: []string{"fetched.example.com"}, Result: "ok", Detail: "hit: generation 1"},
+		{Type: core.AuditDNSCleanup, Mode: core.ModeDNSProxy, Names: []string{"_acme-challenge.cleaned.example.com"}, Result: "ok"},
+		{Type: core.AuditError, Detail: "LDAP test failed: dial tcp"},
+	} {
+		e.audit.Record(bg, ev)
+	}
 	bob := e.login("bob")
 	admin := e.login("alice")
 	dave := e.login("dave")
 	e.store.Users().SetBlocked(bg, e.userID("dave"), true)
 
+	hidden := []string{"loginuser", "10.9.9.9", "activated generation", "circuit opened", "fetched.example.com", "cleaned.example.com", "LDAP test failed"}
+	details := []string{"doh.internal", "budget key", "acct/12345", "invalid credentials", "hit: generation"}
 	for _, c := range []*client{bob, dave} {
 		r := c.get("/ui/audit")
-		see(t, r, "public.example.com")
-		lacks(t, r, "secretdeny.example.com")
-		// A normal user cannot ask for the admin view.
-		lacks(t, c.get("/ui/audit?scope=all&q=secretdeny"), "secretdeny.example.com")
-		lacks(t, c.get("/ui/"), "secretdeny.example.com")
+		see(t, r, "issued.example.com", "Certificate issued by letsencrypt, valid until",
+			"denied.example.com", "Request denied: a name does not resolve to the requesting address.",
+			"refused.example.com", "Order refused: a certificate authority rate limit is reached.",
+			"failed.example.com", "Issuance failed.", "proxy.example.com", "DNS-01 value published.")
+		lacks(t, r, append(hidden, details...)...)
+		// Neither a type filter nor a search reaches what is hidden.
+		lacks(t, c.get("/ui/audit?type=login"), "loginuser")
+		lacks(t, c.get("/ui/audit?type=config_change"), "activated generation")
+		lacks(t, c.get("/ui/audit?q=doh.internal"), "denied.example.com")
+		see(t, c.get("/ui/audit?q=DENIED.example"), "denied.example.com")
+		see(t, c.get("/ui/audit?scope=all&q=loginuser"), "No events.")
+		lacks(t, c.get("/ui/"), "loginuser", "doh.internal")
 	}
 	r := admin.get("/ui/audit")
-	see(t, r, "public.example.com", "secretdeny.example.com")
-	r = admin.get("/ui/audit?scope=public")
-	see(t, r, "public.example.com")
-	lacks(t, r, "secretdeny.example.com")
-	see(t, admin.get("/ui/audit?type=gate"), "secretdeny.example.com")
-	lacks(t, admin.get("/ui/audit?type=gate"), "public.example.com")
-	see(t, admin.get("/ui/audit?q=SECRETDENY"), "secretdeny.example.com")
+	see(t, r, "issued.example.com", "denied.example.com")
+	see(t, r, append(hidden, details...)...)
+	see(t, admin.get("/ui/audit?type=gate"), "denied.example.com")
+	lacks(t, admin.get("/ui/audit?type=gate"), "issued.example.com")
+	see(t, admin.get("/ui/audit?q=DOH.internal"), "denied.example.com")
 	see(t, admin.get("/ui/audit?since=junk"), "invalid")
-	see(t, admin.get("/ui/"), "secretdeny.example.com")
+	see(t, admin.get("/ui/"), "loginuser")
 }
 
 func TestAuditPaging(t *testing.T) {
 	e := newEnv(t)
 	for i := 0; i < 70; i++ {
 		e.clock.Advance(time.Second)
-		e.audit.Record(bg, core.AuditEvent{Type: core.AuditIssue, Visibility: core.AuditVisibilityAll, Names: []string{"n" + fmtI(int64(i)) + ".example.com"}})
+		e.audit.Record(bg, core.AuditEvent{Type: core.AuditIssue, Names: []string{"n" + fmtI(int64(i)) + ".example.com"}})
 	}
 	bob := e.login("bob")
 	r := bob.get("/ui/audit")
@@ -419,7 +440,7 @@ func TestDashboard(t *testing.T) {
 	e.ldap.set(nil)
 	see(t, admin.follow(admin.act("/ui/admin/config/test-ldap", nil)), "LDAP test succeeded")
 	lacks(t, admin.get("/ui/"), "LDAP has not been tested", "last LDAP test")
-	if evs, _ := e.audit.Query(bg, core.AuditQuery{IncludeAdmin: true, Type: core.AuditError}); len(evs) != 1 {
+	if evs, _ := e.audit.Query(bg, core.AuditQuery{Type: core.AuditError}); len(evs) != 1 {
 		t.Errorf("error events: %d", len(evs))
 	}
 }
@@ -542,7 +563,7 @@ func TestConfigFlow(t *testing.T) {
 	e.ldap.set(nil)
 	code(t, admin.act("/ui/admin/config/activate", url.Values{"yaml": {ldapYAML}}), 303)
 
-	evs, _ := e.audit.Query(bg, core.AuditQuery{IncludeAdmin: true, Type: core.AuditConfigChange})
+	evs, _ := e.audit.Query(bg, core.AuditQuery{Type: core.AuditConfigChange})
 	if len(evs) != 3 {
 		t.Errorf("config_change events: %d", len(evs))
 	}
@@ -611,7 +632,7 @@ func TestSecrets(t *testing.T) {
 	}
 
 	// Audit entries name the secret, never the value.
-	evs, _ := e.audit.Query(bg, core.AuditQuery{IncludeAdmin: true, Contains: "secret"})
+	evs, _ := e.audit.Query(bg, core.AuditQuery{Contains: "secret"})
 	if len(evs) == 0 {
 		t.Error("no secret audit events")
 	}

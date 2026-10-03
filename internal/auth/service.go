@@ -270,12 +270,11 @@ func (s *Service) auditLogin(ctx context.Context, name string, src netip.Addr, o
 		name = name[:maxAuditName]
 	}
 	ev := core.AuditEvent{
-		Type:       core.AuditLogin,
-		Visibility: core.AuditVisibilityAdmin,
-		SourceIP:   src.String(),
-		Username:   name,
-		Result:     core.AuditResultOK,
-		Detail:     method,
+		Type:     core.AuditLogin,
+		SourceIP: src.String(),
+		Username: name,
+		Result:   core.AuditResultOK,
+		Detail:   method,
 	}
 	if !ok {
 		ev.Result = core.AuditResultFailed

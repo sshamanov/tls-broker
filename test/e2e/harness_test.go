@@ -311,7 +311,7 @@ func (b *broker) grant(prefix string, wildcard bool) *core.Grant {
 func (b *broker) auditEvents(typ string) []core.AuditEvent {
 	b.t.Helper()
 	evs, err := audit.NewReader(filepath.Join(b.env.DataDir, "audit")).Query(context.Background(),
-		core.AuditQuery{IncludeAdmin: true, Type: typ, Limit: 1000})
+		core.AuditQuery{Type: typ, Limit: 1000})
 	if err != nil {
 		b.t.Fatal(err)
 	}

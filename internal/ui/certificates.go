@@ -141,7 +141,7 @@ func (h *Handler) rotateKey(w http.ResponseWriter, r *http.Request, cur *auth.Cu
 	}
 	if err := h.Rotator.Rotate(r.Context(), id); err != nil {
 		h.Logger.Warn("ui: key rotation failed", "identifier", id, "error", err)
-		h.redirect(w, r, base+"/certificates?mode=direct", "error", "Key rotation for "+id+" failed; see the audit log and server log.")
+		h.redirect(w, r, base+"/certificates?mode=direct", "error", "Key rotation for "+id+" failed; see the activity log and the server log.")
 		return
 	}
 	h.record(r, cur, core.AuditConfigChange, "rotated direct key of "+id, 0)

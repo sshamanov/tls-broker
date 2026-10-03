@@ -37,7 +37,7 @@ func (e *Engine) Finalize(ctx context.Context, req core.FinalizeRequest) (*core.
 	}
 	if !o.Finalized() && !d.Allowed {
 		ev := orderEvent(core.AuditGate, o)
-		ev.SourceIP, ev.Visibility = ipString(req.SourceIP), core.AuditVisibilityAdmin
+		ev.SourceIP = ipString(req.SourceIP)
 		ev.Decision, ev.Reason, ev.Result, ev.Detail = core.AuditDecisionDeny, d.Reason, core.AuditResultDenied, "finalize: "+d.Detail
 		e.audit(ctx, ev)
 		return nil, denied(d)

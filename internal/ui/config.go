@@ -157,7 +157,7 @@ func (h *Handler) configTestLDAP(w http.ResponseWriter, r *http.Request, cur *au
 	h.recordLDAPTest(err)
 	if err != nil {
 		h.Auditor.Record(r.Context(), core.AuditEvent{
-			Time: h.Clock.Now(), Type: core.AuditError, Visibility: core.AuditVisibilityAdmin, Mode: core.ModeUI,
+			Time: h.Clock.Now(), Type: core.AuditError, Mode: core.ModeUI,
 			SourceIP: sourceIP(r).String(), Username: cur.User.Username, Result: core.AuditResultFailed, Detail: "LDAP test failed: " + err.Error(),
 		})
 		h.redirect(w, r, back, "error", "LDAP test failed: "+err.Error())

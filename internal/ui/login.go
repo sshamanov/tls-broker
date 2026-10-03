@@ -70,7 +70,7 @@ func (h *Handler) loginSubmit(w http.ResponseWriter, r *http.Request, _ *auth.Cu
 	}
 	h.Auth.SetCookie(w, login.Token, login.Session.ExpiresAt, httpsRequest(r))
 	if login.User.Blocked {
-		h.setFlash(w, "warn", "Your account is blocked. You can view your grants and the public audit log only.")
+		h.setFlash(w, "warn", "Your account is blocked. You can view your grants and the activity log only.")
 	}
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }

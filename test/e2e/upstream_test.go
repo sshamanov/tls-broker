@@ -174,8 +174,14 @@ func testUpstream429(t *testing.T) {
 	if n := b.goog.Stats().OrdersCreated; n != 0 {
 		t.Fatalf("renewal moved to the fallback: %d", n)
 	}
-	if evs := b.auditEvents(core.AuditRateLimit); len(evs) == 0 {
-		t.Fatal("no rate_limit audit event")
+	refused := 0
+	for _, ev := range b.auditEvents(core.AuditOrder) {
+		if ev.Result == core.AuditResultDenied && ev.Reason == core.ReasonRateLimited {
+			refused++
+		}
+	}
+	if refused == 0 {
+		t.Fatal("no refused-order audit event for the rate limit")
 	}
 
 	b.advance(2*time.Hour + time.Minute)

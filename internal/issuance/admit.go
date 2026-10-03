@@ -191,7 +191,7 @@ func (e *Engine) auditAdmission(ctx context.Context, p admitParams, a *admitted,
 
 	if a.plan.failover != "" {
 		fo := orderEvent(core.AuditFailover, o)
-		fo.Visibility, fo.Result = core.AuditVisibilityAdmin, core.AuditResultOK
+		fo.Result = core.AuditResultOK
 		fo.Reason = core.ReasonProviderUnavailable
 		detail := a.plan.failover
 		for _, r := range refusals {
@@ -202,9 +202,9 @@ func (e *Engine) auditAdmission(ctx context.Context, p admitParams, a *admitted,
 	}
 }
 
-// auditRefusal records a request no provider admitted.
+// auditRefusal records a request no provider admitted: a refused order.
 func (e *Engine) auditRefusal(ctx context.Context, p admitParams, err error) {
-	ev := core.AuditEvent{Type: core.AuditRateLimit, Visibility: core.AuditVisibilityAdmin, Mode: p.mode,
+	ev := core.AuditEvent{Type: core.AuditOrder, Mode: p.mode,
 		SourceIP: ipString(p.src), Names: p.cls.set.Names(), Decision: core.AuditDecisionDeny,
 		Result: core.AuditResultDenied, GrantID: p.decision.GrantID, Reason: core.ReasonRateLimited}
 	if ae := core.AsAdmissionError(err); ae != nil {

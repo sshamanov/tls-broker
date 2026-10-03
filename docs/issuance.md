@@ -308,15 +308,18 @@ order TTL.
 
 ## Audit events
 
-| Type | When | Visibility |
-|---|---|---|
-| `order` allow | admitted: decision reason, grant, provider, class, renewal / ARI / emergency / adoption in `detail` | public |
-| `order` failed | expired without a CSR | admin |
-| `rate_limit` denied | no provider admitted the request (`rate_limited` or `provider_unavailable`, `Retry-After` in `detail`) | admin |
-| `provider_failover` | a fallback provider was chosen: new-issuance fallback, emergency switch, or lineage provider no longer enabled | admin |
-| `issue` ok | certificate stored: expiry, certificate ID, serial, predecessor | public |
-| `issue` failed | preparation or finalize failed, or recovery had to fail the order; the stored problem in `detail` | admin |
-| `gate` deny | `Finalize` from an address the gate refuses | admin |
+| Type | When |
+|---|---|
+| `order` allow | admitted: decision reason, grant, provider, class, renewal / ARI / emergency / adoption in `detail` |
+| `order` failed | expired without a CSR |
+| `order` denied | no provider admitted the request (`rate_limited` or `provider_unavailable`, `Retry-After` in `detail`) |
+| `provider_failover` | a fallback provider was chosen: new-issuance fallback, emergency switch, or lineage provider no longer enabled |
+| `issue` ok | certificate stored: expiry, certificate ID, serial, predecessor |
+| `issue` failed | preparation or finalize failed, or recovery had to fail the order; the stored problem in `detail` |
+| `gate` deny | `Finalize` from an address the gate refuses |
+
+Every type but `provider_failover` is part of the activity log that users who
+are not admins see, without `detail` (`docs/observability.md`).
 
 Grant attribution comes from the decision that admitted the order and is
 carried on every event of that order; DNS-gated orders have none.

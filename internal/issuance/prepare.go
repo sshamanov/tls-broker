@@ -215,7 +215,7 @@ func (e *Engine) failOrder(ctx context.Context, j *job, o *core.Order, cause err
 	e.cleanupDNS(bctx, core.OrderOwner(o.ID))
 	j.getTicket().Refund()
 	ev := orderEvent(core.AuditIssue, o)
-	ev.Visibility, ev.Result = core.AuditVisibilityAdmin, core.AuditResultFailed
+	ev.Result = core.AuditResultFailed
 	ev.Reason = failureReason(cause)
 	ev.Detail = problem.Error()
 	if ev.Detail != cause.Error() {

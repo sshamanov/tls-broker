@@ -141,7 +141,7 @@ func (s *Service) verifyEntry(ctx context.Context, cfg *core.Config, f *Files, e
 	detail := "direct cache repaired: " + strings.Join(repairs, "; ")
 	s.log.Warn("direct: "+detail, "identifier", id)
 	s.audit(ctx, core.AuditEvent{Type: core.AuditError, Mode: core.ModeDirect, Names: []string{id},
-		Visibility: core.AuditVisibilityAdmin, Result: core.AuditResultOK, Detail: detail})
+		Result: core.AuditResultOK, Detail: detail})
 	return nil
 }
 

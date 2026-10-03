@@ -75,7 +75,7 @@ func (s *Scheduler) ReportProvider(ctx context.Context, name string, err error) 
 		s.log.Error("sched: persist provider state", "provider", name, "err", perr)
 	}
 	if s.auditor != nil && (wasOpen != isOpen || (old.Health != st.Health && st.Health == core.ProviderHealthy)) {
-		ev := core.AuditEvent{Type: core.AuditProviderState, Visibility: core.AuditVisibilityAdmin, Provider: name}
+		ev := core.AuditEvent{Type: core.AuditProviderState, Provider: name}
 		if isOpen {
 			ev.Result = core.AuditResultOK
 			ev.Detail = "admission open"

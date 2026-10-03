@@ -5,10 +5,9 @@
 <label>Contains <input name="q" value="{{.Data.Q}}" placeholder="IP, name, user, reason"></label>
 <label>From <input type="date" name="since" value="{{.Data.Since}}"></label>
 <label>To <input type="date" name="until" value="{{.Data.Until}}"></label>
-{{if .Data.CanAdmin}}<label class="check"><input type="checkbox" name="scope" value="public"{{if .Data.PublicOnly}} checked{{end}}> public events only</label>{{end}}
 <button type="submit">Filter</button>
 </form>
-<p class="muted">{{if .Data.PublicOnly}}Showing the public view: events every logged-in user may see.{{else}}Showing everything, including admin-only events (denials, grant, user and config changes, errors).{{end}}</p>
-{{template "events" .Data.Events}}
+<p class="muted">{{if .Data.CanAdmin}}All events. Users who are not administrators see issuance requests and their outcome, DNS proxy publications and grant changes, without the detail column.{{else}}Issuance requests and their outcome, DNS proxy publications and grant changes.{{end}}</p>
+{{template "events" (events .Data.Events .Admin)}}
 <p>{{if .Data.Newer}}<a href="/ui/audit">Newest</a>{{end}} {{if .Data.Older}}<a href="/ui/audit{{.Data.Older}}">Older</a>{{end}}</p>
 {{end}}

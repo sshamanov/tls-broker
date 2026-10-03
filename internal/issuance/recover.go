@@ -148,7 +148,7 @@ func (e *Engine) recoverFail(ctx context.Context, o *core.Order, ticket core.Tic
 	e.cleanupDNS(ctx, core.OrderOwner(o.ID))
 	ticket.Refund()
 	ev := orderEvent(core.AuditIssue, o)
-	ev.Visibility, ev.Result, ev.Detail = core.AuditVisibilityAdmin, core.AuditResultFailed, why
+	ev.Result, ev.Detail = core.AuditResultFailed, why
 	e.audit(ctx, ev)
 	e.log.Warn("issuance: recovery failed order", "order", o.ID, "status", o.Status, "prep", o.Prep, "why", why)
 }
@@ -190,7 +190,7 @@ func (e *Engine) expireDue(ctx context.Context, now time.Time) error {
 		ticket.Refund()
 		e.cleanupDNS(ctx, core.OrderOwner(o.ID))
 		ev := orderEvent(core.AuditOrder, o)
-		ev.Visibility, ev.Result = core.AuditVisibilityAdmin, core.AuditResultFailed
+		ev.Result = core.AuditResultFailed
 		ev.Detail = "order expired without a CSR"
 		if o.Prep == core.PrepPrepared {
 			ev.Detail += "; upstream order kept for adoption"

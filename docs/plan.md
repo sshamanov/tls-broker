@@ -119,8 +119,10 @@ Domain types:
 - `Decision{Allowed, Reason, GrantID, Name, Detail}` with the `Reason*`
   constants (architecture §14 plus `wildcard_unprotected`, `dns_mismatch`,
   `dns_failure`, `invalid_identifier`, `not_ipv4`).
-- `AuditEvent` with the fields of architecture §14, `Audit*` type constants and
-  a `Visibility` (public | admin).
+- `AuditEvent` with the fields of architecture §14 and `Audit*` type
+  constants. Who sees an event is decided by its type in the UI (activity
+  allow-list), not stored on the event; `AuditQuery.Types` and `SkipDetail`
+  express that view.
 - `PriorityClass` 1–6 as in architecture §10.
 
 Errors:

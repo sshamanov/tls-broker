@@ -459,7 +459,7 @@ func TestCLIHelpers(t *testing.T) {
 	if err := HealthCheck(ctx, env); err == nil {
 		t.Fatal("health check of nothing succeeded")
 	}
-	evs, err := r.app.auditLog.Query(ctx, core.AuditQuery{IncludeAdmin: true, Type: core.AuditUserChange})
+	evs, err := r.app.auditLog.Query(ctx, core.AuditQuery{Type: core.AuditUserChange})
 	if err != nil || len(evs) != 2 {
 		t.Fatalf("user_change events: %d %v", len(evs), err)
 	}

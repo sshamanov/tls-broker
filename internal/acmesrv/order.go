@@ -246,7 +246,7 @@ func (s *Server) gateDenied(x *exchange, d core.Decision, src netip.Addr, set na
 		p.Subproblems = []core.Subproblem{{Type: core.ProblemUnauthorized, Detail: reasonText(d, src),
 			Identifier: &core.ProblemIdentifier{Type: "dns", Value: d.Name}}}
 	}
-	ev := core.AuditEvent{Type: core.AuditGate, Visibility: core.AuditVisibilityAdmin, Names: set.Names(),
+	ev := core.AuditEvent{Type: core.AuditGate, Names: set.Names(),
 		Decision: core.AuditDecisionDeny, Reason: d.Reason, Result: core.AuditResultDenied, OrderID: orderID, Detail: d.Detail}
 	if src.IsValid() {
 		ev.SourceIP = src.String()
@@ -301,7 +301,7 @@ func (s *Server) newOrderAuthed(x *exchange, a *authed) *core.Problem {
 	}
 	set, p, reason := parseIdentifiers(x.cfg, req.Identifiers)
 	if p != nil {
-		ev := core.AuditEvent{Type: core.AuditGate, Visibility: core.AuditVisibilityAdmin, Decision: core.AuditDecisionDeny,
+		ev := core.AuditEvent{Type: core.AuditGate, Decision: core.AuditDecisionDeny,
 			Reason: reason, Result: core.AuditResultDenied, Detail: p.Detail}
 		if src, ok := httpx.SourceIP(x.ctx); ok {
 			ev.SourceIP = src.String()
@@ -320,16 +320,9 @@ func (s *Server) newOrderAuthed(x *exchange, a *authed) *core.Problem {
 		AccountID: a.account.ID, Names: set, Replaces: req.Replaces, SourceIP: src, Decision: dec,
 	})
 	if err != nil {
+		// A refused admission is audited by the issuer as a refused order.
 		p := core.ProblemFromError(err)
-		if ae := core.AsAdmissionError(err); ae != nil {
-			reason := core.ReasonRateLimited
-			if ae.Kind == core.AdmissionProviderDown {
-				reason = core.ReasonProviderUnavailable
-			}
-			s.audit(x.ctx, core.AuditEvent{Type: core.AuditRateLimit, Visibility: core.AuditVisibilityAdmin,
-				SourceIP: src.String(), Names: set.Names(), Provider: ae.Provider, Reason: reason,
-				Result: core.AuditResultDenied, Detail: string(ae.Kind) + ": " + ae.Reason})
-		} else if core.AsProblem(err) == nil && p.Status >= 500 && p.RetryAfter == 0 {
+		if core.AsAdmissionError(err) == nil && core.AsProblem(err) == nil && p.Status >= 500 && p.RetryAfter == 0 {
 			s.log.ErrorContext(x.ctx, "admit failed", "err", err)
 		}
 		return p
@@ -445,7 +438,7 @@ func (s *Server) finalizeAuthed(x *exchange, a *authed, id string) *core.Problem
 // finalizeRejected records a finalize request refused at the protocol level
 // (bad CSR, CSR mismatch, order not ready) and returns the problem.
 func (s *Server) finalizeRejected(x *exchange, o *core.Order, p *core.Problem) *core.Problem {
-	ev := core.AuditEvent{Type: core.AuditOrder, Visibility: core.AuditVisibilityAdmin, Names: o.Names.Names(),
+	ev := core.AuditEvent{Type: core.AuditOrder, Names: o.Names.Names(),
 		Provider: o.Provider, Result: core.AuditResultFailed, OrderID: o.ID, Detail: "finalize refused: " + p.Error()}
 	if src, ok := httpx.SourceIP(x.ctx); ok {
 		ev.SourceIP = src.String()

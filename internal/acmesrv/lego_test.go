@@ -235,7 +235,8 @@ func TestProcessingRetryAfter(t *testing.T) {
 }
 
 // TestLegoRateLimited: an admission refusal reaches the client as 429
-// rateLimited with Retry-After, and is audited as a rate_limit event.
+// rateLimited with Retry-After. The issuer audits it (as a refused order);
+// the ACME server adds no second event.
 func TestLegoRateLimited(t *testing.T) {
 	e := newEnv(t)
 	c := e.lego(coretest.GenKey(), "")
@@ -247,8 +248,9 @@ func TestLegoRateLimited(t *testing.T) {
 	if !errors.As(err, &rl) || rl.RetryAfter != 90*time.Minute || !strings.Contains(rl.Detail, "example.com") {
 		t.Fatalf("rate limited: %#v", err)
 	}
-	evs := e.aud.OfType(core.AuditRateLimit)
-	if len(evs) != 1 || evs[0].Reason != core.ReasonRateLimited || evs[0].Provider != "primary" || evs[0].Mode != core.ModeACME {
-		t.Fatalf("audit %+v", evs)
+	for _, ev := range e.aud.Events() {
+		if ev.Type != core.AuditGate {
+			t.Fatalf("ACME server audited the refusal itself: %+v", ev)
+		}
 	}
 }

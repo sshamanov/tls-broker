@@ -54,7 +54,7 @@ func TestConcurrentWritesProduceValidLines(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < each; i++ {
-				l.Record(ctx, core.AuditEvent{Type: core.AuditGate, Visibility: core.AuditVisibilityAll,
+				l.Record(ctx, core.AuditEvent{Type: core.AuditGate,
 					Detail: strings.Repeat("x", 200), OrderID: fmt.Sprintf("w%d-%d", w, i)})
 			}
 		}()
@@ -112,7 +112,7 @@ func TestRotationByDateAndSize(t *testing.T) {
 	if !strings.Contains(string(b), `"b1"`) || strings.Contains(string(b), `"a3"`) {
 		t.Fatalf("day file: %s", b)
 	}
-	evs, err := l.Query(ctx, core.AuditQuery{IncludeAdmin: true})
+	evs, err := l.Query(ctx, core.AuditQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,12 +152,12 @@ func seed(t *testing.T) *Log {
 		l.Record(ctx, ev)
 		clock.Advance(time.Minute)
 	}
-	rec(core.AuditEvent{Type: core.AuditGate, Visibility: core.AuditVisibilityAll, Mode: core.ModeACME,
+	rec(core.AuditEvent{Type: core.AuditGate, Mode: core.ModeACME,
 		SourceIP: "10.0.0.5", Names: []string{"Web.Example.com"}, Decision: core.AuditDecisionAllow, Reason: core.ReasonDNSIPMatch})
 	rec(core.AuditEvent{Type: core.AuditGate, Mode: core.ModeACME, SourceIP: "10.0.0.6",
 		Names: []string{"db.example.com"}, Decision: core.AuditDecisionDeny, Reason: core.ReasonDNSMismatch})
 	clock.Advance(24 * time.Hour)
-	rec(core.AuditEvent{Type: core.AuditIssue, Visibility: core.AuditVisibilityAll, Mode: core.ModeDirect,
+	rec(core.AuditEvent{Type: core.AuditIssue, Mode: core.ModeDirect,
 		SourceIP: "10.0.0.5", Names: []string{"web.example.com"}, Provider: "letsencrypt", Result: core.AuditResultOK})
 	rec(core.AuditEvent{Type: core.AuditGrantChange, Mode: core.ModeUI, Username: "Alice", Detail: "grant 4 created"})
 	return l
@@ -181,51 +181,50 @@ func TestQueryFiltersAndOrder(t *testing.T) {
 		}
 		return evs
 	}
-	if got := q(core.AuditQuery{IncludeAdmin: true}); ids(got) != "grant_change/Alice issue/10.0.0.5 gate/10.0.0.6 gate/10.0.0.5" {
+	if got := q(core.AuditQuery{}); ids(got) != "grant_change/Alice issue/10.0.0.5 gate/10.0.0.6 gate/10.0.0.5" {
 		t.Fatalf("all: %s", ids(got))
 	}
-	if got := q(core.AuditQuery{Limit: 1, IncludeAdmin: true}); len(got) != 1 || got[0].Type != core.AuditGrantChange {
+	if got := q(core.AuditQuery{Limit: 1}); len(got) != 1 || got[0].Type != core.AuditGrantChange {
 		t.Fatalf("limit: %v", got)
 	}
-	if got := q(core.AuditQuery{Mode: core.ModeACME, IncludeAdmin: true}); len(got) != 2 {
+	if got := q(core.AuditQuery{Mode: core.ModeACME}); len(got) != 2 {
 		t.Fatalf("mode: %v", got)
 	}
-	if got := q(core.AuditQuery{Type: core.AuditIssue, IncludeAdmin: true}); len(got) != 1 {
+	if got := q(core.AuditQuery{Type: core.AuditIssue}); len(got) != 1 {
 		t.Fatalf("type: %v", got)
 	}
 	for needle, want := range map[string]int{"10.0.0.5": 2, "WEB.example": 2, "alice": 1, "letsencrypt": 1,
 		"dns_mismatch": 1, "grant 4": 1, "nothing": 0} {
-		if got := q(core.AuditQuery{Contains: needle, IncludeAdmin: true}); len(got) != want {
+		if got := q(core.AuditQuery{Contains: needle}); len(got) != want {
 			t.Errorf("contains %q: %d, want %d", needle, len(got), want)
 		}
 	}
 	// time range: Since inclusive, Until exclusive
 	t0 := time.Date(2026, 3, 1, 10, 1, 0, 0, time.UTC)
-	if got := q(core.AuditQuery{Since: t0, Until: t0.Add(time.Minute), IncludeAdmin: true}); len(got) != 1 || got[0].SourceIP != "10.0.0.6" {
+	if got := q(core.AuditQuery{Since: t0, Until: t0.Add(time.Minute)}); len(got) != 1 || got[0].SourceIP != "10.0.0.6" {
 		t.Fatalf("range: %v", got)
 	}
-	if got := q(core.AuditQuery{Since: time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC), IncludeAdmin: true}); len(got) != 2 {
+	if got := q(core.AuditQuery{Since: time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC)}); len(got) != 2 {
 		t.Fatalf("since: %v", got)
 	}
-	if got := q(core.AuditQuery{Until: t0, IncludeAdmin: true}); len(got) != 1 {
+	if got := q(core.AuditQuery{Until: t0}); len(got) != 1 {
 		t.Fatalf("until: %v", got)
 	}
 }
 
-func TestVisibility(t *testing.T) {
+// Types is an allow-list; SkipDetail keeps Detail out of the Contains match
+// (a view that hides Detail must not let a search probe it).
+func TestQueryTypesAndSkipDetail(t *testing.T) {
 	l := seed(t)
-	pub, _ := l.Query(ctx, core.AuditQuery{})
-	if ids(pub) != "issue/10.0.0.5 gate/10.0.0.5" {
-		t.Fatalf("public: %s", ids(pub))
+	got, _ := l.Query(ctx, core.AuditQuery{Types: []string{core.AuditIssue, core.AuditGrantChange}})
+	if ids(got) != "grant_change/Alice issue/10.0.0.5" {
+		t.Fatalf("types: %s", ids(got))
 	}
-	for _, e := range pub {
-		if e.Visibility != core.AuditVisibilityAll {
-			t.Fatalf("leak: %+v", e)
-		}
+	if got, _ := l.Query(ctx, core.AuditQuery{Contains: "grant 4", SkipDetail: true}); len(got) != 0 {
+		t.Fatalf("detail matched with SkipDetail: %s", ids(got))
 	}
-	adm, _ := l.Query(ctx, core.AuditQuery{IncludeAdmin: true})
-	if len(adm) != 4 {
-		t.Fatalf("admin: %d", len(adm))
+	if got, _ := l.Query(ctx, core.AuditQuery{Contains: "alice", SkipDetail: true}); len(got) != 1 {
+		t.Fatalf("username not matched with SkipDetail: %s", ids(got))
 	}
 }
 
@@ -233,7 +232,7 @@ func TestQueryAcrossFilesWithLimit(t *testing.T) {
 	clock := coretest.NewFakeClock()
 	l := open(t, Options{Clock: clock, MaxFileBytes: 150})
 	for i := 0; i < 12; i++ {
-		l.Record(ctx, core.AuditEvent{Type: core.AuditLogin, Visibility: core.AuditVisibilityAll, OrderID: fmt.Sprintf("%02d", i)})
+		l.Record(ctx, core.AuditEvent{Type: core.AuditLogin, OrderID: fmt.Sprintf("%02d", i)})
 	}
 	if len(names(t, l.dir)) < 3 {
 		t.Fatalf("expected several files: %v", names(t, l.dir))
@@ -265,7 +264,7 @@ func TestTruncatedTail(t *testing.T) {
 	// A writer reopening the file ends the partial line before appending.
 	clock := coretest.NewFakeClock(time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC))
 	l := open(t, Options{Dir: dir, Clock: clock})
-	l.Record(ctx, core.AuditEvent{Type: core.AuditLogout, Visibility: core.AuditVisibilityAll, Username: "bob"})
+	l.Record(ctx, core.AuditEvent{Type: core.AuditLogout, Username: "bob"})
 	evs, _ = l.Query(ctx, core.AuditQuery{})
 	if len(evs) != 2 || evs[0].Type != core.AuditLogout {
 		t.Fatalf("%v", evs)
@@ -288,16 +287,16 @@ func TestMissingDirAndCancel(t *testing.T) {
 func TestWriteFailureIsCountedAndRecovers(t *testing.T) {
 	var failures atomic.Int32
 	l := open(t, Options{OnError: func(error) { failures.Add(1) }, SyncInterval: -1})
-	l.Record(ctx, core.AuditEvent{Type: core.AuditLogin, Visibility: core.AuditVisibilityAll, OrderID: "1"})
+	l.Record(ctx, core.AuditEvent{Type: core.AuditLogin, OrderID: "1"})
 	// Break the writer: remove the directory and replace it with a file.
 	l.mu.Lock()
 	_ = l.f.Close() // writes to the closed handle now fail
 	l.mu.Unlock()
-	l.Record(ctx, core.AuditEvent{Type: core.AuditLogin, Visibility: core.AuditVisibilityAll, OrderID: "2"}) // must not panic
+	l.Record(ctx, core.AuditEvent{Type: core.AuditLogin, OrderID: "2"}) // must not panic
 	if failures.Load() != 1 {
 		t.Fatalf("failures = %d", failures.Load())
 	}
-	l.Record(ctx, core.AuditEvent{Type: core.AuditLogin, Visibility: core.AuditVisibilityAll, OrderID: "3"})
+	l.Record(ctx, core.AuditEvent{Type: core.AuditLogin, OrderID: "3"})
 	evs, _ := l.Query(ctx, core.AuditQuery{})
 	if len(evs) != 2 || evs[0].OrderID != "3" {
 		t.Fatalf("%v", evs)
@@ -322,7 +321,7 @@ func TestWriteFailureIsCountedAndRecovers(t *testing.T) {
 func TestCloseIsDurableAndRecordAfterCloseCounts(t *testing.T) {
 	var failures atomic.Int32
 	l := open(t, Options{OnError: func(error) { failures.Add(1) }})
-	l.Record(ctx, core.AuditEvent{Type: core.AuditLogin, Visibility: core.AuditVisibilityAll})
+	l.Record(ctx, core.AuditEvent{Type: core.AuditLogin})
 	if err := l.Close(); err != nil {
 		t.Fatal(err)
 	}

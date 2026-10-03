@@ -14,14 +14,13 @@ fields are omitted.
 | Field | Meaning |
 |---|---|
 | `time` | RFC 3339 UTC, set by the broker when the event is recorded |
-| `type` | `gate`, `order`, `issue`, `direct_fetch`, `dns_present`, `dns_cleanup`, `login`, `logout`, `grant_change`, `user_change`, `config_change`, `rate_limit`, `provider_state`, `provider_failover`, `error` |
-| `visibility` | `public` (every logged-in user) or absent (admins only) |
+| `type` | `gate`, `order`, `issue`, `direct_fetch`, `dns_present`, `dns_cleanup`, `login`, `logout`, `grant_change`, `user_change`, `config_change`, `provider_state`, `provider_failover`, `error` |
 | `mode` | `acme`, `direct`, `dnsproxy` or `ui` |
 | `source_ip` | real source IPv4 of the request |
 | `names` | normalized identifier set |
 | `decision`, `reason` | `allow`/`deny` and the gate reason (`dns_ip_match`, `ip_grant`, `wildcard_grant_required`, `dns_mismatch`, `outside_managed_zone`, `blocked`, `rate_limited`, `provider_unavailable`, ...). The reason records the actual authorization method |
 | `provider` | upstream CA involved |
-| `result` | `ok`, `denied` or `failed` |
+| `result` | `ok`, `denied` or `failed`. An `order` that no provider admitted is `denied` with reason `rate_limited` or `provider_unavailable` |
 | `cert_not_after` | expiry of the certificate issued or served |
 | `username` | LDAP user, only for human control-plane actions |
 | `grant_id` | only when that grant caused the authorization |
@@ -32,19 +31,19 @@ Example line per event type (wrapped here for reading; in the file each is one
 line):
 
 ```json
-{"time":"2026-10-02T09:15:01Z","type":"gate","visibility":"public","mode":"acme","source_ip":"10.1.2.3","names":["web.example.com"],"decision":"allow","reason":"dns_ip_match"}
-{"time":"2026-10-02T09:15:02Z","type":"order","visibility":"public","mode":"acme","source_ip":"10.1.2.3","names":["web.example.com"],"decision":"allow","reason":"dns_ip_match","provider":"letsencrypt","order_id":"o_8f2c"}
-{"time":"2026-10-02T09:15:41Z","type":"issue","visibility":"public","mode":"acme","source_ip":"10.1.2.3","names":["web.example.com"],"provider":"letsencrypt","result":"ok","cert_not_after":"2027-01-01T09:15:40Z","order_id":"o_8f2c","certificate_id":"c_19ab"}
-{"time":"2026-10-02T09:20:00Z","type":"direct_fetch","visibility":"public","mode":"direct","source_ip":"10.1.2.4","names":["db.example.com"],"decision":"allow","reason":"ip_grant","grant_id":7,"result":"ok","cert_not_after":"2026-12-20T00:00:00Z"}
-{"time":"2026-10-02T09:21:10Z","type":"dns_present","visibility":"public","mode":"dnsproxy","source_ip":"10.1.2.5","names":["_acme-challenge.app.example.com"],"decision":"allow","reason":"dns_ip_match","result":"ok"}
-{"time":"2026-10-02T09:22:30Z","type":"dns_cleanup","visibility":"public","mode":"dnsproxy","source_ip":"10.1.2.5","names":["_acme-challenge.app.example.com"],"result":"ok"}
-{"time":"2026-10-02T09:30:00Z","type":"login","visibility":"public","mode":"ui","source_ip":"10.1.2.9","username":"alice","result":"ok"}
-{"time":"2026-10-02T09:45:00Z","type":"logout","visibility":"public","mode":"ui","source_ip":"10.1.2.9","username":"alice"}
+{"time":"2026-10-02T09:15:01Z","type":"gate","mode":"acme","source_ip":"10.1.2.3","names":["web.example.com"],"decision":"allow","reason":"dns_ip_match"}
+{"time":"2026-10-02T09:15:02Z","type":"order","mode":"acme","source_ip":"10.1.2.3","names":["web.example.com"],"decision":"allow","reason":"dns_ip_match","provider":"letsencrypt","order_id":"o_8f2c"}
+{"time":"2026-10-02T09:15:41Z","type":"issue","mode":"acme","source_ip":"10.1.2.3","names":["web.example.com"],"provider":"letsencrypt","result":"ok","cert_not_after":"2027-01-01T09:15:40Z","order_id":"o_8f2c","certificate_id":"c_19ab"}
+{"time":"2026-10-02T09:20:00Z","type":"direct_fetch","mode":"direct","source_ip":"10.1.2.4","names":["db.example.com"],"decision":"allow","reason":"ip_grant","grant_id":7,"result":"ok","cert_not_after":"2026-12-20T00:00:00Z","detail":"hit: generation 3"}
+{"time":"2026-10-02T09:21:10Z","type":"dns_present","mode":"dnsproxy","source_ip":"10.1.2.5","names":["_acme-challenge.app.example.com"],"decision":"allow","reason":"dns_ip_match","result":"ok"}
+{"time":"2026-10-02T09:22:30Z","type":"dns_cleanup","mode":"dnsproxy","source_ip":"10.1.2.5","names":["_acme-challenge.app.example.com"],"result":"ok"}
+{"time":"2026-10-02T09:30:00Z","type":"login","mode":"ui","source_ip":"10.1.2.9","username":"alice","result":"ok"}
+{"time":"2026-10-02T09:45:00Z","type":"logout","mode":"ui","source_ip":"10.1.2.9","username":"alice"}
 {"time":"2026-10-02T10:00:00Z","type":"grant_change","mode":"ui","source_ip":"10.1.2.9","username":"alice","grant_id":8,"detail":"created grant 10.1.2.0/24 wildcard=false"}
 {"time":"2026-10-02T10:01:00Z","type":"user_change","mode":"ui","source_ip":"10.1.2.9","username":"alice","detail":"bob: blocked=true"}
 {"time":"2026-10-02T10:05:00Z","type":"config_change","mode":"ui","username":"alice","detail":"activated generation 12"}
 {"time":"2026-10-02T10:10:00Z","type":"gate","mode":"acme","source_ip":"10.9.9.9","names":["*.example.com"],"decision":"deny","reason":"wildcard_grant_required","result":"denied"}
-{"time":"2026-10-02T10:11:00Z","type":"rate_limit","mode":"acme","source_ip":"10.1.2.3","names":["web.example.com"],"provider":"letsencrypt","reason":"rate_limited","result":"denied","detail":"cert_domain budget example.com exhausted"}
+{"time":"2026-10-02T10:11:00Z","type":"order","mode":"acme","source_ip":"10.1.2.3","names":["web.example.com"],"provider":"letsencrypt","decision":"deny","reason":"rate_limited","result":"denied","detail":"certificates per registered domain example.com; retry after 1h12m0s"}
 {"time":"2026-10-02T10:12:00Z","type":"provider_state","provider":"letsencrypt","detail":"circuit opened (rate_limited) until 2026-10-02T11:12:00Z"}
 {"time":"2026-10-02T10:13:00Z","type":"provider_failover","mode":"acme","names":["web.example.com"],"provider":"gts","detail":"emergency switch from letsencrypt"}
 {"time":"2026-10-02T10:14:00Z","type":"error","detail":"LDAP unreachable: dial timeout"}
@@ -72,16 +71,17 @@ line):
 
 ### Who sees what in the UI
 
+The UI decides by event type (an allow-list in `internal/ui`), not by a flag
+on the event:
+
 | Viewer | Sees |
 |---|---|
-| Logged-in user | events with `visibility: public`: full source IP, username, names and wildcards, timestamps, provider and result of gate decisions, orders, issuances, direct fetches, DNS present/cleanup, logins |
-| Admin | everything: additionally denied requests, grant changes, role changes, blocks, LDAP/config errors, rate-limit events, provider state and failover |
+| Logged-in user (not admin) | the issuance activity: `gate` (allowed and denied requests, every mode), `order` (admitted, refused, ended), `issue` (issued, failed), `dns_present` (published, denied, failed) and `grant_change`. Full source IP, username, names and wildcards, timestamps, provider, outcome and the reason in words. Never `detail`: it can carry resolver, upstream or internal error text, so these users get a sentence built from type, result and reason instead (grant changes show the UI's own detail), and their search does not match `detail` |
+| Admin | everything, with `detail`: additionally logins and logouts, role and block changes, configuration and secret changes, provider state and failover, errors, DNS cleanups and direct-mode fetches (cache hits and misses) |
 
-An event without `visibility` is admin-only, so forgetting to classify an event
-fails closed. The UI filters by time range, type, mode and a case-insensitive
-substring that matches source IP, names, username, provider, reason and detail
-(this is how decision, identifier, IP and username filters are expressed);
-results are newest first, capped at 200 by default.
+The activity log filters by time range, type, mode and a case-insensitive
+substring that matches source IP, names, username, provider, reason and (for
+admins) detail; results are newest first, capped at 200 by default.
 
 ## Metrics
 

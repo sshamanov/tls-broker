@@ -308,7 +308,7 @@ If blocked:
 - no issuance/control rights regardless of role;
 - existing certificates remain untouched;
 - existing IP grants remain separate capability objects;
-- user may still access public audit views depending on UI/session policy.
+- user may still see their own grants and the activity log (§14).
 
 An `admin + blocked` state is valid and simply means blocked.
 
@@ -932,23 +932,26 @@ For DNS-gated anonymous machine issuance, do not falsely attribute the request t
 
 Record the actual authorization method.
 
-Public/authenticated audit may show:
+Every authenticated user sees the issuance activity:
 
-- full IP;
-- full username;
-- hostname/wildcard;
-- timestamps;
-- provider/result.
+- issuance requests and their outcome: gate decisions including denials,
+  orders admitted or refused, certificates issued or failed, DNS-proxy
+  publications;
+- grant changes (created, enabled, disabled, deleted);
+- full IP, full username, hostname/wildcard, timestamps, provider, result and
+  the decision reason in words — not the free-text detail, which can carry
+  resolver, upstream or internal error text.
 
-Admin audit additionally shows:
+Admin audit additionally shows the detail and the control plane:
 
-- all grant changes;
-- role changes;
-- blocks;
-- denied requests;
+- logins and logouts;
+- role changes and blocks;
+- configuration and secret changes;
 - LDAP/config errors;
-- rate-limit events;
-- provider failover.
+- provider state and failover;
+- DNS cleanups and direct-cache fetches.
+
+Visibility is decided by event type in the UI, not stored per event.
 
 ---
 

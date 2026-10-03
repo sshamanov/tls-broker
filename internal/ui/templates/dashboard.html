@@ -1,6 +1,6 @@
 {{define "content"}}
 {{if .Blocked}}
-<p>Nothing to show while your account is blocked. See <a href="/ui/grants">your grants</a> or the <a href="/ui/audit">public audit log</a>.</p>
+<p>Nothing to show while your account is blocked. See <a href="/ui/grants">your grants</a> or the <a href="/ui/audit">activity log</a>.</p>
 {{else}}
 {{if .Data.Warnings}}
 <section><h2>Warnings</h2><ul class="warnings">{{range .Data.Warnings}}<li>{{.}}</li>{{end}}</ul></section>
@@ -62,9 +62,9 @@
 </section>
 {{end}}
 
-<section><h2>Recent audit events</h2>
-{{template "events" .Data.Recent}}
-<p><a href="/ui/audit">Full audit log</a></p>
+<section><h2>Recent activity</h2>
+{{template "events" (events .Data.Recent .Admin)}}
+<p><a href="/ui/audit">Activity log</a></p>
 </section>
 {{end}}
 {{end}}

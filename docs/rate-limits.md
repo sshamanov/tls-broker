@@ -41,7 +41,7 @@ scheduler:
 - Circuit state is persisted on every change and restored at startup, so a
   restart does not forget an upstream `Retry-After`.
 - Opening and closing are recorded in the audit log as `provider_state`
-  events (admin-only).
+  events (admins only in the activity log).
 
 ### 2. Rate budgets
 
@@ -162,8 +162,8 @@ window). The client sees a refusal only when no provider admitted the request,
 with the smallest retry time among them; `503` only when every provider was
 down. The problem detail names the exhausted budget (for example
 "certificates per registered domain example.com"), never upstream error text.
-The scheduler does not audit refusals itself; the code that answers the
-client records them with the full request context.
+The scheduler does not audit refusals itself; the issuance engine records each
+as an `order` event with result `denied` and the full request context.
 
 ## Restart
 

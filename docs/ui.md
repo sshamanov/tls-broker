@@ -44,10 +44,10 @@ the route's role check.
 | | blocked | normal | wildcard_allowed | admin |
 |---|---|---|---|---|
 | Log in, see banner | yes | yes | yes | yes |
-| Dashboard | banner only | counts, providers, budgets, recent public audit | same | plus accounts, zones, warnings, admin audit |
+| Dashboard | banner only | counts, providers, budgets, recent issuance activity | same | plus accounts, zones, warnings, all recent events |
 | My grants | read only | create, enable, disable, delete own | plus `wildcard` | same |
 | Certificates | no | yes | yes | yes (plus rotate hook) |
-| Audit | public view | public view | public view | all, or public only |
+| Activity log | issuance activity | issuance activity | issuance activity | all events, with detail |
 | Admin pages | no | no | no | yes |
 
 Role and block changes apply to open sessions at once (auth reads the user on
@@ -86,7 +86,7 @@ top of every page, the login page included, to every user.
   `CAAChecker` with ready-to-paste CAA records. CAA and account lookups run in
   parallel with an 8 s limit, so a slow resolver delays the page, never breaks
   it.
-- Recent audit events (public events; admins also see admin-only ones).
+- Recent activity (the activity log's first ten events for the viewer).
 
 **My grants** (`/ui/grants`). Lists your grants; create one from an IPv4
 address (stored as /32) or IPv4 CIDR (stored masked) with a note. `/0` and IPv6
@@ -104,12 +104,16 @@ are paged. Hook: when `Deps.Rotator` (`ui.KeyRotator`) is set, admins get a
 it the button is absent and the route is 404. `internal/direct` is expected to
 provide the implementation when the app is wired.
 
-**Audit** (`/ui/audit`). Filters: type, mode, contains (IP, name, user, reason,
-detail), from and to date. Paging by time ("Older" continues before the last
-event shown; events with exactly the same timestamp at a page boundary may be
-skipped). Everyone sees the public view; admins see public and admin-only events
-(denials, grant, user and config changes, errors) and can restrict themselves to
-the public view.
+**Activity log** (`/ui/audit`). Filters: type, mode, contains (IP, name, user,
+reason; admins also detail), from and to date. Paging by time ("Older"
+continues before the last event shown; events with exactly the same timestamp
+at a page boundary may be skipped). Users who are not admins see the issuance
+activity: `gate`, `order`, `issue`, `dns_present` and `grant_change` events,
+successes, denials and failures alike, each with its outcome and a sentence
+built from type, result and reason (never the free-text detail, which can hold
+resolver or upstream error text; their search does not match it either).
+Admins see every event type with the detail column. See
+`docs/observability.md`.
 
 **Admin, Users** (`/ui/admin/users`). List with source (LDAP or local), role,
 state and last login. Set role, block, unblock. The local break-glass admin and

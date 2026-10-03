@@ -156,7 +156,7 @@ func withUser(ctx context.Context, env config.Env, username string, local, creat
 	if err != nil {
 		return err
 	}
-	al.Record(ctx, core.AuditEvent{Type: core.AuditUserChange, Visibility: core.AuditVisibilityAdmin,
+	al.Record(ctx, core.AuditEvent{Type: core.AuditUserChange,
 		Mode: core.ModeUI, Username: "cli", Result: core.AuditResultOK, Detail: detail + " (command line)"})
 	if err := al.Close(); err != nil {
 		return err

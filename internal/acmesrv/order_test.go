@@ -128,8 +128,8 @@ func TestNewOrderProviderDown(t *testing.T) {
 	if r.Header.Get("Retry-After") != "300" {
 		t.Fatalf("Retry-After %q", r.Header.Get("Retry-After"))
 	}
-	if evs := e.aud.OfType(core.AuditRateLimit); len(evs) != 1 || evs[0].Reason != core.ReasonProviderUnavailable {
-		t.Fatalf("audit %+v", evs)
+	if evs := e.aud.OfType(core.AuditOrder); len(evs) != 0 {
+		t.Fatalf("refusal audited twice (the issuer audits it): %+v", evs)
 	}
 	e.iss.setAdmitErr(&core.AdmissionError{Kind: core.AdmissionBusy, RetryAfter: 30 * time.Second})
 	r = c.post(e.url(pathNewOrder), map[string]any{"identifiers": ids("a.example.com")})

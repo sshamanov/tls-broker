@@ -91,9 +91,9 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request, cur *auth.Cu
 			d.Counts.DirectLive++
 		}
 	}
-	if d.Recent, err = h.Audit.Query(ctx, core.AuditQuery{IncludeAdmin: p.Admin, Limit: 10}); err != nil {
+	if d.Recent, err = h.Audit.Query(ctx, activityQuery(core.AuditQuery{Limit: 10}, p.Admin)); err != nil {
 		h.Logger.Warn("ui: audit query failed", "error", err)
-		p.Flash = firstFlash(p.Flash, &flash{Kind: "error", Text: "The audit log could not be read."})
+		p.Flash = firstFlash(p.Flash, &flash{Kind: "error", Text: "The activity log could not be read."})
 	}
 
 	if p.Admin {

@@ -300,9 +300,6 @@ func (e *Engine) audit(ctx context.Context, ev core.AuditEvent) {
 	if e.auditor == nil {
 		return
 	}
-	if ev.Visibility == "" {
-		ev.Visibility = core.AuditVisibilityAll
-	}
 	e.auditor.Record(context.WithoutCancel(ctx), ev)
 }
 

@@ -193,11 +193,14 @@ func (s *Service) audit(ctx context.Context, ev core.AuditEvent) {
 // certificate and issuance not possible now (with RetryAfter).
 func (s *Service) Get(ctx context.Context, src netip.Addr, raw string) (*Cert, error) {
 	cfg := s.cfg.Current()
-	ev := core.AuditEvent{Type: core.AuditDirectFetch, Mode: core.ModeDirect, Visibility: core.AuditVisibilityAdmin}
+	ev := core.AuditEvent{Type: core.AuditDirectFetch, Mode: core.ModeDirect}
 	if src.IsValid() {
 		ev.SourceIP = src.String()
 	}
+	// A denial is an authorization decision: it is audited as a gate
+	// event, like the other modes' denials; everything else is a fetch.
 	deny := func(reason string, p *core.Problem) (*Cert, error) {
+		ev.Type = core.AuditGate
 		ev.Decision, ev.Reason, ev.Result = core.AuditDecisionDeny, reason, core.AuditResultDenied
 		if ev.Detail == "" {
 			ev.Detail = p.Detail
@@ -225,7 +228,7 @@ func (s *Service) Get(ctx context.Context, src netip.Addr, raw string) (*Cert, e
 	dec, err := s.gate.Authorize(ctx, core.ModeDirect, src, set)
 	if err != nil {
 		ev.Detail = "authorization failed: " + err.Error()
-		ev.Decision, ev.Result = core.AuditDecisionDeny, core.AuditResultFailed
+		ev.Type, ev.Decision, ev.Result = core.AuditGate, core.AuditDecisionDeny, core.AuditResultFailed
 		s.audit(ctx, ev)
 		return nil, unavailable("authorization could not be decided; retry later", gateRetryAfter)
 	}
@@ -316,7 +319,7 @@ func (s *Service) Get(ctx context.Context, src netip.Addr, raw string) (*Cert, e
 func (s *Service) served(ctx context.Context, ev core.AuditEvent, id string, g *Generation) (*Cert, error) {
 	leaf := g.Leaf()
 	na := leaf.NotAfter
-	ev.Result, ev.Visibility, ev.CertNotAfter = core.AuditResultOK, core.AuditVisibilityAll, &na
+	ev.Result, ev.CertNotAfter = core.AuditResultOK, &na
 	s.audit(ctx, ev)
 	return &Cert{
 		Identifier: id, Generation: g.Number, KeyPEM: g.KeyPEM, ChainPEM: g.ChainPEM,

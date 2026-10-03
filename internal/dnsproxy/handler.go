@@ -133,10 +133,6 @@ func validValue(v string) bool {
 }
 
 func (h *Handler) audit(ctx context.Context, typ, src string, set []string, d core.Decision, result, detail, challengeID string) {
-	vis := core.AuditVisibilityAll
-	if !d.Allowed || result != "ok" {
-		vis = core.AuditVisibilityAdmin
-	}
 	dec := "deny"
 	if d.Allowed {
 		dec = "allow"
@@ -151,7 +147,7 @@ func (h *Handler) audit(ctx context.Context, typ, src string, set []string, d co
 		detail += "challenge=" + challengeID
 	}
 	h.o.Auditor.Record(ctx, core.AuditEvent{
-		Type: typ, Visibility: vis, Mode: core.ModeDNSProxy, SourceIP: src, Names: set,
+		Type: typ, Mode: core.ModeDNSProxy, SourceIP: src, Names: set,
 		Decision: dec, Reason: d.Reason, Result: result, GrantID: d.GrantID, Detail: detail,
 	})
 }

@@ -78,7 +78,7 @@ ready on `/healthz` only after all of it:
 - **Direct cache:** every entry is checked against the files; a missing or
   broken generation falls back to the newest complete one, and an entry with
   nothing usable is reset (the next fetch issues again). Repairs are logged
-  and audited as admin-only `error` events "direct cache repaired".
+  and audited as `error` events "direct cache repaired" (admins only).
 - **Route53 zones** are verified against AWS; a failure is only a warning
   (on a first start AWS is usually not configured yet).
 
@@ -100,7 +100,7 @@ sessions. Nothing needs to be scheduled from outside.
 Symptoms: `tlsbroker_scheduler_circuit_open{provider} == 1`, the dashboard
 and *Admin → Providers* show the provider `rate_limited` or `down` with a
 retry-after; clients get `429 rateLimited` with `Retry-After`; the audit log
-has an admin-only `provider_state` event.
+has a `provider_state` event (admins only).
 
 1. Read the last error on *Admin → Providers*. `rate_limited` means the CA
    said so: wait; the broker reopens at the CA's Retry-After. `down` means

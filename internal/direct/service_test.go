@@ -56,7 +56,7 @@ func TestMissThenHit(t *testing.T) {
 		t.Fatalf("lineage %+v %v", lin, err)
 	}
 	fetches := e.aud.OfType(core.AuditDirectFetch)
-	if len(fetches) != 2 || fetches[1].Result != core.AuditResultOK || fetches[1].Visibility != core.AuditVisibilityAll {
+	if len(fetches) != 2 || fetches[1].Result != core.AuditResultOK {
 		t.Fatalf("audit %+v", fetches)
 	}
 }
@@ -325,8 +325,16 @@ func TestAuthorizationAndValidation(t *testing.T) {
 	if len(e.gate.Calls()) != 2 {
 		t.Fatalf("gate consulted %d times; only valid in-zone IPv4 requests reach it", len(e.gate.Calls()))
 	}
-	for _, ev := range e.aud.OfType(core.AuditDirectFetch) {
-		if ev.Decision != core.AuditDecisionDeny || ev.Visibility != core.AuditVisibilityAdmin {
+	// Denials are gate events, not fetches.
+	if evs := e.aud.OfType(core.AuditDirectFetch); len(evs) != 0 {
+		t.Fatalf("denials audited as fetches: %+v", evs)
+	}
+	denials := e.aud.OfType(core.AuditGate)
+	if len(denials) != 7 {
+		t.Fatalf("%d gate audit events for 7 denials", len(denials))
+	}
+	for _, ev := range denials {
+		if ev.Decision != core.AuditDecisionDeny || ev.Mode != core.ModeDirect || ev.Result != core.AuditResultDenied {
 			t.Fatalf("audit %+v", ev)
 		}
 	}

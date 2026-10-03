@@ -73,8 +73,7 @@ func TestNewIssuance(t *testing.T) {
 		t.Fatalf("order audit: %+v", orders)
 	}
 	issues := e.events(core.AuditIssue)
-	if len(issues) != 1 || issues[0].Result != core.AuditResultOK || issues[0].CertNotAfter == nil || issues[0].CertificateID != cert.ID ||
-		issues[0].Visibility != core.AuditVisibilityAll {
+	if len(issues) != 1 || issues[0].Result != core.AuditResultOK || issues[0].CertNotAfter == nil || issues[0].CertificateID != cert.ID {
 		t.Fatalf("issue audit: %+v", issues)
 	}
 	e.assertOneUpstreamPerOrder()
@@ -374,9 +373,15 @@ func TestUpstreamRateLimitClosesAdmission(t *testing.T) {
 	if p := core.ProblemFromError(err); p.Status != 429 || p.RetryAfter != ae.RetryAfter {
 		t.Fatalf("client problem: %+v", p)
 	}
-	rl := e.events(core.AuditRateLimit)
-	if len(rl) != 1 || rl[0].Reason != core.ReasonRateLimited || rl[0].Visibility != core.AuditVisibilityAdmin {
-		t.Fatalf("rate-limit audit: %+v", rl)
+	// The refusal is audited as a refused order.
+	var rl []core.AuditEvent
+	for _, ev := range e.events(core.AuditOrder) {
+		if ev.Result == core.AuditResultDenied {
+			rl = append(rl, ev)
+		}
+	}
+	if len(rl) != 1 || rl[0].Reason != core.ReasonRateLimited || rl[0].Decision != core.AuditDecisionDeny {
+		t.Fatalf("refused-order audit: %+v", rl)
 	}
 	// After the Retry-After the provider is tried again.
 	e.primary.ClearFaults()

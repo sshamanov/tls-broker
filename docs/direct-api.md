@@ -187,7 +187,7 @@ identifier), and the renewal schedule (reset, so ARI is read again on the
 next fetch); `current` is pointed at it. If no complete generation is left,
 the entry is reset to "no certificate" and the next fetch issues a new one
 with a new key. Every repair is logged at warning level and written to the
-audit log as an admin-only `error` event starting with "direct cache
+audit log as an `error` event (admins only) starting with "direct cache
 repaired". Leftover temporary directories are removed and the expiry gauge
 is seeded for every entry.
 
@@ -213,10 +213,14 @@ budget. Devices pick it up on their next fetch (the `ETag` changes).
   `tlsbroker_direct_renewals_total{result}` (background renewals),
   `tlsbroker_cert_not_after_timestamp_seconds{identifier}` per cache entry, front-end requests by outcome and gate decisions (see
   `observability.md`).
-- Audit: one `direct_fetch` event per request with source IP, identifier,
+- Audit: one event per request. A denial (invalid or out-of-zone identifier,
+  not IPv4, refused by the gate, or the gate could not decide) is a `gate`
+  event with mode `direct`, like the other modes' denials. Every other
+  request is a `direct_fetch` event with source IP, identifier,
   gate decision and reason, result and certificate expiry; the detail says
   `hit`, `miss` or `expired`, the generation served and whether this fetch
   started a background job (renewal, emergency renewal, renewal-information
   check); fetches that merely join a job already running say nothing.
-  Served fetches are visible to every logged-in user; denials and failures
-  to admins only. Issuance itself is audited by the issuance engine.
+  Fetches are admin-only in the activity log (they are cache traffic); the
+  denials and the issuance itself, audited by the issuance engine, are
+  visible to every logged-in user.

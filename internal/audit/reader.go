@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -111,8 +112,8 @@ func parseLine(line []byte) (core.AuditEvent, bool) {
 }
 
 func matches(ev *core.AuditEvent, q core.AuditQuery, needle string) bool {
-	if !q.IncludeAdmin && ev.Visibility != core.AuditVisibilityAll {
-		return false // empty visibility means admin
+	if len(q.Types) > 0 && !slices.Contains(q.Types, ev.Type) {
+		return false
 	}
 	if !q.Since.IsZero() && ev.Time.Before(q.Since) {
 		return false
@@ -129,10 +130,13 @@ func matches(ev *core.AuditEvent, q core.AuditQuery, needle string) bool {
 	if needle == "" {
 		return true
 	}
-	for _, s := range []string{ev.SourceIP, ev.Username, ev.Provider, ev.Reason, ev.Detail} {
+	for _, s := range []string{ev.SourceIP, ev.Username, ev.Provider, ev.Reason} {
 		if strings.Contains(strings.ToLower(s), needle) {
 			return true
 		}
+	}
+	if !q.SkipDetail && strings.Contains(strings.ToLower(ev.Detail), needle) {
+		return true
 	}
 	for _, s := range ev.Names {
 		if strings.Contains(strings.ToLower(s), needle) {

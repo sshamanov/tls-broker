@@ -314,6 +314,12 @@ type page struct {
 	Data    any
 }
 
+// eventsView is the input of the "events" table template.
+type eventsView struct {
+	Events []core.AuditEvent
+	Admin  bool
+}
+
 type flash struct {
 	Kind string // ok | error | warn
 	Text string
@@ -426,19 +432,18 @@ func sourceIP(r *http.Request) netip.Addr {
 	return a.Unmap()
 }
 
-// record writes a control-plane audit event. Grant, user and config changes
-// are admin-visible only (architecture §14).
+// record writes a control-plane audit event. Who sees it is decided by its
+// type (activityTypes); keep Detail free of anything but what is shown.
 func (h *Handler) record(r *http.Request, cur *auth.Current, typ, detail string, grantID int64) {
 	h.Auditor.Record(r.Context(), core.AuditEvent{
-		Time:       h.Clock.Now(),
-		Type:       typ,
-		Visibility: core.AuditVisibilityAdmin,
-		Mode:       core.ModeUI,
-		SourceIP:   sourceIP(r).String(),
-		Username:   cur.User.Username,
-		GrantID:    grantID,
-		Result:     core.AuditResultOK,
-		Detail:     detail,
+		Time:     h.Clock.Now(),
+		Type:     typ,
+		Mode:     core.ModeUI,
+		SourceIP: sourceIP(r).String(),
+		Username: cur.User.Username,
+		GrantID:  grantID,
+		Result:   core.AuditResultOK,
+		Detail:   detail,
 	})
 }
 
@@ -492,6 +497,9 @@ func (h *Handler) loadTemplates() error {
 		"isZero":    func(t time.Time) bool { return t.IsZero() },
 		"lower":     strings.ToLower,
 		"roleStr":   func(r core.Role) string { return string(r) },
+		"summary":   activitySummary,
+		"events":    func(evs []core.AuditEvent, admin bool) eventsView { return eventsView{evs, admin} },
+		"outcome":   outcome,
 	}
 	entries, err := fs.Glob(templateFS, "templates/*.html")
 	if err != nil {

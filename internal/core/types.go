@@ -668,13 +668,12 @@ const (
 	AuditGrantChange   = "grant_change"      // grant created, updated or deleted
 	AuditUserChange    = "user_change"       // role or blocked flag changed
 	AuditConfigChange  = "config_change"     // generation activated, rolled back; secret set
-	AuditRateLimit     = "rate_limit"        // local or upstream rate-limit event
 	AuditProviderState = "provider_state"    // provider circuit opened or closed
 	AuditFailover      = "provider_failover" // emergency or new-issuance provider switch
 	AuditError         = "error"             // LDAP, config or internal error worth attention
 )
 
-// Values of AuditEvent.Decision, AuditEvent.Result and AuditEvent.Visibility.
+// Values of AuditEvent.Decision and AuditEvent.Result.
 const (
 	AuditDecisionAllow = "allow"
 	AuditDecisionDeny  = "deny"
@@ -682,23 +681,16 @@ const (
 	AuditResultOK     = "ok"
 	AuditResultDenied = "denied"
 	AuditResultFailed = "failed"
-
-	AuditVisibilityAll   = "public" // every logged-in user may see it
-	AuditVisibilityAdmin = "admin"  // admins only
 )
 
 // AuditEvent is one line of the audit log (architecture §14). Unused fields
 // are left zero and omitted from the JSON line.
 type AuditEvent struct {
 	// Time is filled in by the Auditor from its clock when zero.
-	Time time.Time `json:"time"`
-	Type string    `json:"type"` // one of the Audit* event types
-	// Visibility is AuditVisibilityAll or AuditVisibilityAdmin; empty means
-	// admin. Denied requests, grant/role/block changes, LDAP/config errors,
-	// rate-limit events and failover are admin-only.
-	Visibility string `json:"visibility,omitempty"`
-	Mode       Mode   `json:"mode,omitempty"`
-	SourceIP   string `json:"source_ip,omitempty"`
+	Time     time.Time `json:"time"`
+	Type     string    `json:"type"` // one of the Audit* event types
+	Mode     Mode      `json:"mode,omitempty"`
+	SourceIP string    `json:"source_ip,omitempty"`
 	// Names is the identifier set involved, normalized.
 	Names    []string `json:"names,omitempty"`
 	Decision string   `json:"decision,omitempty"` // allow | deny

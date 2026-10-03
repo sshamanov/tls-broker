@@ -304,13 +304,16 @@ func testUI(t *testing.T) {
 	b.dns.SetA("lab.example.com", "192.0.2.7")
 	m.acme().issue("", "lab.example.com")
 
-	// Audit visibility: grant changes are admin-only, issuance is public.
-	if code, body := alice.do(http.MethodGet, "/ui/audit", nil); code != http.StatusOK || !strings.Contains(body, "created grant 10.0.3.0/24") {
-		t.Fatalf("admin audit page: %d", code)
+	// Activity log: everyone sees grant changes and issuance; only admins
+	// see logins and the raw detail.
+	if code, body := alice.do(http.MethodGet, "/ui/audit", nil); code != http.StatusOK || !strings.Contains(body, "created grant 10.0.3.0/24") ||
+		!strings.Contains(body, "<td>login</td>") {
+		t.Fatalf("admin activity page: %d", code)
 	}
 	code, body := bob.do(http.MethodGet, "/ui/audit", nil)
-	if code != http.StatusOK || strings.Contains(body, "created grant 10.0.3.0/24") || !strings.Contains(body, "lab.example.com") {
-		t.Fatalf("public audit page: %d", code)
+	if code != http.StatusOK || !strings.Contains(body, "Created grant 10.0.3.0/24.") || !strings.Contains(body, "lab.example.com") ||
+		strings.Contains(body, "created grant 10.0.3.0/24") || strings.Contains(body, "<td>login</td>") {
+		t.Fatalf("user activity page: %d", code)
 	}
 	if evs := b.auditEvents(core.AuditGrantChange); len(evs) != 1 || evs[0].Username != "bob" {
 		t.Fatalf("grant_change audit %+v", evs)

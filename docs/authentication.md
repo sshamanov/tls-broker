@@ -146,14 +146,14 @@ also while LDAP is down: its wrong passwords are "invalid credentials", never
 
 - Existing sessions keep working; nothing on the request path calls LDAP.
 - New LDAP logins fail with `core.ErrDirectoryUnavailable` (the UI shows
-  "directory unavailable", not "wrong password") and an admin-only `error`
-  audit event is written.
+  "directory unavailable", not "wrong password") and an `error` audit event
+  (admins only) is written.
 - The local break-glass admin logs in normally, and can fix the LDAP settings.
 - A broken filter, wrong base DN, rejected service account or missing bind
   secret behave the same as an unreachable server.
 
 ## Audit
 
-Every login attempt writes an admin-only `login` event (username, source IP,
+Every login attempt writes a `login` event (admins only) (username, source IP,
 result, reason `invalid_credentials`, `throttled` or `directory_unavailable`,
 method `ldap` or `local`); logout writes `logout`. Passwords are never logged.

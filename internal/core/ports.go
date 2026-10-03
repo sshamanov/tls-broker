@@ -594,8 +594,9 @@ type Auditor interface {
 
 // AuditQuery selects audit events for the UI.
 type AuditQuery struct {
-	// IncludeAdmin includes admin-only events; false returns public ones.
-	IncludeAdmin bool
+	// Types, when non-empty, keeps only events of these types. Who may see
+	// which types is the UI's decision (docs/ui.md, Activity log).
+	Types []string
 	// Since / Until bound Time (inclusive / exclusive); zero is unbounded.
 	Since, Until time.Time
 	// Type, Mode filter exactly when non-empty.
@@ -604,6 +605,9 @@ type AuditQuery struct {
 	// Contains is a case-insensitive substring matched against source IP,
 	// names, username, provider, reason and detail; empty matches all.
 	Contains string
+	// SkipDetail leaves Detail out of the Contains match, for views that
+	// do not show Detail (it must not become a search oracle there).
+	SkipDetail bool
 	// Limit caps the result; 0 means 200.
 	Limit int
 }
