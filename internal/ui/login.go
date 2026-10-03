@@ -61,6 +61,13 @@ func (h *Handler) loginSubmit(w http.ResponseWriter, r *http.Request, _ *auth.Cu
 		h.serverError(w, r, nil, "login", err)
 		return
 	}
+	// A browser that still carried a session gets a fresh one; the old row
+	// must not stay valid until its expiry.
+	if c, err := r.Cookie(h.sessionCookieName()); err == nil && c.Value != "" {
+		if err := h.Auth.Logout(r.Context(), c.Value); err != nil {
+			h.Logger.Warn("ui: dropping previous session at login", "err", err)
+		}
+	}
 	h.Auth.SetCookie(w, login.Token, login.Session.ExpiresAt, httpsRequest(r))
 	if login.User.Blocked {
 		h.setFlash(w, "warn", "Your account is blocked. You can view your grants and the public audit log only.")

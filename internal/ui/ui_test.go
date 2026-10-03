@@ -150,6 +150,18 @@ func TestLogin(t *testing.T) {
 	code(t, c2.get("/ui/grants"), 200)
 	code(t, c2.act("/ui/logout", nil), 303)
 	code(t, c2.get("/ui/grants"), 303)
+	// Logging in again from a browser that still holds a session drops the
+	// old session: its token no longer works.
+	c3 := e.login("bob")
+	old := c3.cookies[e.h.sessionCookieName()]
+	code(t, c3.act("/ui/login", url.Values{"username": {"bob"}, "password": {"bob-pw"}}), 303)
+	if c3.cookies[e.h.sessionCookieName()] == old {
+		t.Fatal("login kept the old session token")
+	}
+	stale := e.client()
+	stale.cookies[e.h.sessionCookieName()] = old
+	code(t, stale.get("/ui/grants"), 303)
+	code(t, c3.get("/ui/grants"), 200)
 	// Cross-site login posts are refused.
 	req, _ := http.NewRequest("POST", e.srv.URL+"/ui/login", strings.NewReader("username=bob&password=bob-pw"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")

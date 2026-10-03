@@ -59,7 +59,9 @@ in force (grants are independent of their owner).
 **Login** (`/ui/login`). Local admin (break-glass) or LDAP, through
 `core.Authenticator`. Wrong credentials: 401 "Invalid username or password".
 LDAP down or unconfigured (and not the local admin): 503 with a clear message.
-Five failures per minute lock the pair out (429). Logout is a POST.
+Five failures per minute lock the pair out (429). A login from a browser
+that still holds a session replaces it: the old session row is deleted.
+Logout is a POST.
 
 **Banners.** `Deps.Banners` are process-level warnings the app passes in,
 such as a development build whose DNS gate is mocked. They are shown at the
