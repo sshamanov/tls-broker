@@ -140,24 +140,25 @@ same account that obtained the predecessor.
 
 ## CAA records
 
-Every managed zone must authorize every enabled provider, or a fallback
-cannot issue when it is needed:
+Every managed zone must authorize every enabled provider in `issue`, or a
+fallback cannot issue ordinary names when it is needed. Wildcards follow the
+architecture §9 policy: Let's Encrypt only, pinned with `accounturi`:
 
 ```text
-example.com.  CAA 0 issue     "letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/123456789"
-example.com.  CAA 0 issuewild "letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/123456789"
+example.com.  CAA 0 issue     "letsencrypt.org"
 example.com.  CAA 0 issue     "pki.goog"
-example.com.  CAA 0 issuewild "pki.goog"
+example.com.  CAA 0 issuewild "letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/123456789"
 ```
 
-- `accounturi` pins issuance to the broker's account. Use it for every CA with
-  `AccountURIHonoured`; it is what makes DNS-proxy mode safe for zones whose
-  grants do not allow wildcards (architecture §3.2). The account URL is shown
-  in the UI once the provider has registered.
+- `accounturi` pins wildcard issuance to the accounts you list (the broker's,
+  plus one line per ACME account of your own that needs wildcards). It is
+  what makes DNS-proxy mode safe for zones whose grants do not allow
+  wildcards (architecture §3.2). The broker's account URL is shown in the UI
+  once the provider has registered.
 - Google's `accounturi` support is unconfirmed, so its presets set
   `AccountURIHonoured` false and the gate does not count a `pki.goog` record
-  as protection.
-- If you publish `issuewild` at all, include every provider there too.
+  as protection; keep it out of `issuewild`. Wildcards therefore do not fall
+  back to Google (`docs/authorization.md`, trade-off section).
 
 ## Error classes
 

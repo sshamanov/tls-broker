@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -920,4 +921,38 @@ func TestDashboardZonesCAA(t *testing.T) {
 	r = e.login("alice").get("/ui/")
 	see(t, r, "broker's account not pinned", "the broker itself cannot issue *.example.com (ACME proxy, direct API)")
 	lacks(t, r, "is unprotected")
+}
+
+// Suggested records follow architecture §9: unpinned issue for every CA,
+// issuewild only for the broker's account at the most preferred provider
+// that honours accounturi (not one per provider), and a reminder for the
+// operator's own accounts.
+func TestSuggestCAA(t *testing.T) {
+	le := accountView{Provider: "letsencrypt", URL: "https://acme-v02.api.letsencrypt.org/acme/acct/1", Honoured: true, Issuers: []string{"letsencrypt.org"}}
+	goog := accountView{Provider: "google", URL: "https://dv.acme-v02.api.pki.goog/account/x", Honoured: false, Issuers: []string{"pki.goog"}}
+	goog2 := goog
+	goog2.Honoured = true
+	want := []string{
+		`example.com. CAA 0 issue "letsencrypt.org"`,
+		`example.com. CAA 0 issue "pki.goog"`,
+		`example.com. CAA 0 issuewild "letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/1"`,
+		"; add one issuewild line like the above, with its own accounturi, for each ACME account of yours that needs wildcards",
+	}
+	for _, accts := range [][]accountView{{le, goog}, {le, goog2}} {
+		if got := suggestCAA("example.com", accts); !slices.Equal(got, want) {
+			t.Fatalf("%v:\n%q", accts, got)
+		}
+	}
+	// The primary does not honour accounturi: the next one that does gets it.
+	got := suggestCAA("example.com", []accountView{goog, {Provider: "le", URL: le.URL, Honoured: true, Issuers: le.Issuers}})
+	if len(got) != 4 || got[2] != want[2] {
+		t.Fatalf("%q", got)
+	}
+	// None honours it, or none has an account URL yet.
+	if got := suggestCAA("example.com", []accountView{goog}); len(got) != 2 || !strings.Contains(got[1], "wildcards cannot be pinned") {
+		t.Fatalf("%q", got)
+	}
+	if got := suggestCAA("example.com", []accountView{{Provider: "le", Err: "down", Honoured: true, Issuers: le.Issuers}}); got != nil {
+		t.Fatalf("%q", got)
+	}
 }

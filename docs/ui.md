@@ -106,10 +106,11 @@ Admins additionally see:
   `CAAChecker` (for a protected zone that pins accounts: "broker's account
   pinned", "not pinned" or "unknown", with a warning when it is not pinned,
   because the broker then cannot issue the zone's wildcards itself) and
-  ready-to-paste CAA records: an unpinned `issue` per CA, one `issuewild`
-  pinned with `accounturi` to the broker's account at each CA, and a reminder
-  to add one pinned `issuewild` line per ACME account of your own that needs
-  wildcards. CAA and account lookups run in
+  ready-to-paste CAA records following the architecture §9 policy: an
+  unpinned `issue` per CA, one `issuewild` pinned with `accounturi` to the
+  broker's account at the most preferred provider that honours `accounturi`
+  (Let's Encrypt; never one per provider), and a reminder to add one pinned
+  `issuewild` line per ACME account of your own that needs wildcards. CAA and account lookups run in
   parallel with an 8 s limit, so a slow resolver delays the page, never breaks
   it.
 

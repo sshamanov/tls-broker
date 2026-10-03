@@ -190,9 +190,10 @@ cannot issue its wildcards.
 Requesters with a `wildcard=true` grant skip this check. Operators are expected
 to publish such CAA records at each managed zone apex; the UI shows the CAA
 status of every managed zone (how many accounts are pinned at which CA, and
-whether the broker's account is among them) and suggests records: an unpinned
-`issue` per CA and `issuewild` pinned to the broker's account, plus one
-`issuewild` line per ACME account of the operator's own that needs wildcards.
+whether the broker's account is among them) and suggests records following
+the policy of section 9: an unpinned `issue` per CA and one `issuewild` pinned
+to the broker's account at Let's Encrypt, plus one `issuewild` line per ACME
+account of the operator's own that needs wildcards.
 
 Suggested API:
 

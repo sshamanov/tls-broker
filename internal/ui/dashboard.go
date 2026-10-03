@@ -436,13 +436,14 @@ func (h *Handler) zoneStatuses(cfg *core.Config) map[string]ZoneStatus {
 	return out
 }
 
-// suggestCAA builds CAA records for a zone that keep wildcards to pinned
-// accounts: an unpinned issue record per CA (ordinary names may come from
-// any of them, including the operator's own clients; the DNS-proxy condition
-// of architecture §3.2 only judges issuewild when there is one), one
-// issuewild record pinned with accounturi to the broker's account at each
-// CA, and a reminder that every other ACME account needing wildcards gets an
-// issuewild line of its own.
+// suggestCAA builds the CAA records of the architecture §9 policy for a
+// zone: an unpinned issue record per CA (ordinary names may come from any of
+// them, so the broker can fall back and the operator's own clients keep
+// working), and a single issuewild record pinned with accounturi to the
+// broker's account at the most preferred enabled provider that honours
+// accounturi (Let's Encrypt), so wildcards never fall back to a CA whose
+// accounturi support is unconfirmed. A reminder follows: every other ACME
+// account that needs wildcards gets a pinned issuewild line of its own.
 func suggestCAA(zone string, accounts []accountView) []string {
 	var issue, wild []string
 	for _, a := range accounts {
@@ -452,10 +453,15 @@ func suggestCAA(zone string, accounts []accountView) []string {
 		if r := fmt.Sprintf(`%s. CAA 0 issue "%s"`, zone, a.Issuers[0]); !slices.Contains(issue, r) {
 			issue = append(issue, r)
 		}
-		wild = append(wild, fmt.Sprintf(`%s. CAA 0 issuewild "%s; accounturi=%s"`, zone, a.Issuers[0], a.URL))
+		if a.Honoured && len(wild) == 0 {
+			wild = append(wild, fmt.Sprintf(`%s. CAA 0 issuewild "%s; accounturi=%s"`, zone, a.Issuers[0], a.URL))
+		}
+	}
+	if len(issue) == 0 {
+		return nil
 	}
 	if len(wild) == 0 {
-		return nil
+		return append(issue, "; no enabled provider with a known account URL honours accounturi: wildcards cannot be pinned")
 	}
 	wild = append(wild, "; add one issuewild line like the above, with its own accounturi, for each ACME account of yours that needs wildcards")
 	return append(issue, wild...)

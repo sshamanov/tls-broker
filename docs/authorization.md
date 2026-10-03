@@ -147,8 +147,10 @@ own account URLs at those CAs.
 
 Recommended (what the status page suggests): normal names from every CA, so
 the broker can fall back and your own clients keep working; wildcards only
-through the broker's account at a CA that honours `accounturi`. The DNS-proxy
-condition only judges `issuewild`, so `issue` stays unpinned:
+through the broker's account at Let's Encrypt (architecture §9: the most
+preferred provider that honours `accounturi`; never one `issuewild` per
+provider). The DNS-proxy condition only judges `issuewild`, so `issue` stays
+unpinned:
 
 ```text
 example.com. CAA 0 issue     "letsencrypt.org"
