@@ -38,10 +38,14 @@ RRset is kept verbatim. When nothing remains, the RRset is deleted.
    it is reused (idempotent; this is how preparation resumes after a
    restart). Otherwise a challenge row is created in state `pending`.
 3. `presenting`: the record name is queued on the zone's write queue (below).
-4. `waiting_dns`: the change is submitted. The engine now polls the public
-   resolver (DoH) until the exact value is visible; it does **not** wait for
-   Route53 `INSYNC` first. While the value is still invisible it also asks
-   Route53 for the change status.
+4. `waiting_dns`: the change is submitted. The engine polls Route53 for the
+   change status until it is `INSYNC`, and only then polls the public
+   resolver (DoH) until the exact value is visible. It never queries public
+   DNS before `INSYNC`: an authoritative server that has not received the
+   change yet answers NXDOMAIN, and the public resolvers cache that for the
+   zone's negative TTL (the SOA minimum, capped by the SOA TTL; 15 minutes
+   for a default Route53 zone), long past the propagation timeout. The CA
+   would see the same cached NXDOMAIN.
 5. `ready`: the value is visible; `Present` returns the challenge ID.
 
 If anything fails after the row exists (Route53 error, timeout, caller gave
@@ -76,9 +80,9 @@ longer, `"` and `\` escaped) with the configured TTL (60 s by default).
 |---|---|
 | One Route53 API call | 30 s, then retried |
 | Write of a batch (read, change, retries) | `route53.change_timeout` |
-| Change reaching `INSYNC` while the value is still invisible | `route53.change_timeout` from submission |
+| Change reaching `INSYNC` (no public lookups yet) | `route53.change_timeout` from submission |
 | Value becoming visible after `INSYNC` | `route53.propagation_timeout` |
-| Visibility poll interval | starts at `route53.poll_interval`, grows ×1.5 up to 4× |
+| Change-status and visibility poll interval | starts at `route53.poll_interval`, grows ×1.5 up to 4× (restarts at `INSYNC`) |
 
 Throttling (`Throttling`, `ThrottlingException`, `PriorRequestNotComplete`),
 Route53 server errors, transport errors and call timeouts are retried with

@@ -329,11 +329,15 @@ func (e *Engine) present(ctx context.Context, ch *core.Challenge) error {
 	return e.advance(ctx, ch, core.ChallengeReady)
 }
 
-// waitVisible polls the public resolver until the challenge's value is
-// visible. While the change is not yet INSYNC it also asks Route53 for its
-// status; the propagation timeout starts once the change is in sync (or
-// right away when there is no change to wait for). It stops with
-// errCleanedUp when the challenge is cleaned up meanwhile.
+// waitVisible waits until the challenge's value is visible in public DNS.
+// While the change is not yet INSYNC it only asks Route53 for the change
+// status and does not query the public resolver: a lookup that reaches an
+// authoritative server before the change does gets NXDOMAIN, which the
+// public resolvers then cache for the zone's negative TTL (often 15 minutes
+// or more), far longer than the propagation timeout. Once the change is in
+// sync (or right away when there is no change to wait for) it polls the
+// resolver, and the propagation timeout starts. It stops with errCleanedUp
+// when the challenge is cleaned up meanwhile.
 func (e *Engine) waitVisible(ctx context.Context, ch *core.Challenge, changeID string) error {
 	rec, value := ch.RecordName, ch.Value
 	cfg := e.route53()
@@ -343,25 +347,13 @@ func (e *Engine) waitVisible(ctx context.Context, ch *core.Challenge, changeID s
 	delay := cfg.PollInterval
 	var lastErr error
 	for {
-		vals, err := e.resolver.LookupTXT(ctx, rec)
-		if err == nil && slices.Contains(vals, value) {
-			return nil
-		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if err != nil {
-			lastErr = err
-		}
-		if cur, err := e.store.Get(ctx, ch.ID); err == nil && !cur.State.WantsRecord() {
-			return errCleanedUp
-		}
-		now := e.clock.Now()
 		if !insync {
 			st, err := e.changeStatus(ctx, changeID)
+			now := e.clock.Now()
 			switch {
 			case err == nil && st == "INSYNC":
 				insync, insyncAt = true, now
+				delay = cfg.PollInterval
 			case now.Sub(start) >= cfg.ChangeTimeout:
 				if err != nil {
 					return fmt.Errorf("%w: change %s: %v", ErrChangeTimeout, changeID, err)
@@ -369,6 +361,22 @@ func (e *Engine) waitVisible(ctx context.Context, ch *core.Challenge, changeID s
 				return fmt.Errorf("%w: change %s still %s after %s", ErrChangeTimeout, changeID, st, cfg.ChangeTimeout)
 			}
 		}
+		if insync {
+			vals, err := e.resolver.LookupTXT(ctx, rec)
+			if err == nil && slices.Contains(vals, value) {
+				return nil
+			}
+			if err != nil {
+				lastErr = err
+			}
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if cur, err := e.store.Get(ctx, ch.ID); err == nil && !cur.State.WantsRecord() {
+			return errCleanedUp
+		}
+		now := e.clock.Now()
 		var deadline time.Time
 		if insync {
 			deadline = insyncAt.Add(cfg.PropagationTimeout)

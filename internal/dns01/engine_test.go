@@ -299,14 +299,52 @@ func TestConcurrentIdenticalPresentsShareOneChallenge(t *testing.T) {
 	}
 }
 
-func TestPresentReturnsBeforeInsyncWhenVisible(t *testing.T) {
+// lookupLog is a resolver that records when TXT lookups happen.
+type lookupLog struct {
+	core.Resolver
+	clock core.Clock
+	mu    sync.Mutex
+	at    []time.Time
+}
+
+func (l *lookupLog) LookupTXT(ctx context.Context, name string) ([]string, error) {
+	l.mu.Lock()
+	l.at = append(l.at, l.clock.Now())
+	l.mu.Unlock()
+	return l.Resolver.LookupTXT(ctx, name)
+}
+
+// Public resolvers cache an NXDOMAIN for the zone's negative TTL, so the
+// engine must not look the record up before Route53 says the change is
+// INSYNC (found against real Route53: a lookup 1 s after the change pinned
+// NXDOMAIN at the resolver for 15 minutes). The value being visible early
+// does not matter; the first lookup waits for INSYNC.
+func TestPresentDoesNotLookUpBeforeInsync(t *testing.T) {
 	e := newEnv(t)
+	log := &lookupLog{Resolver: e.r53.Resolver(nil), clock: e.clock}
+	eng, err := New(Options{Config: e.cfg, Store: e.store, Resolver: log, API: e.r53, Clock: e.clock, CallTimeout: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = eng.Close(context.Background()) })
+	e.eng = eng
 	e.r53.SetPublicDelay(10 * time.Second)
 	e.r53.SetSyncDelay(90 * time.Second)
 	start := e.clock.Now()
 	e.mustPresent("order:1", names.ChallengeRecord("foo.example.com"), "V")
-	if took := e.clock.Now().Sub(start); took < 10*time.Second || took >= 90*time.Second {
-		t.Fatalf("present took %s; want after the value is public and before INSYNC", took)
+	if took := e.clock.Now().Sub(start); took < 90*time.Second || took >= 2*time.Minute {
+		t.Fatalf("present took %s; want shortly after INSYNC (90 s)", took)
+	}
+	log.mu.Lock()
+	defer log.mu.Unlock()
+	if len(log.at) == 0 {
+		t.Fatal("never looked the value up")
+	}
+	if first := log.at[0].Sub(start); first < 90*time.Second {
+		t.Fatalf("first TXT lookup %s after the change, before INSYNC at 90 s", first)
+	}
+	if e.r53.Calls(OpGetChange) == 0 {
+		t.Fatal("never asked Route53 for the change status")
 	}
 }
 
