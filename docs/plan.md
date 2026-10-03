@@ -46,8 +46,6 @@ internal/httpx/        real source IP, middleware, problem responses
 internal/metrics/      Prometheus collectors
 internal/app/          wiring, lifecycle, config reload, startup reconciliation
 internal/version/      build info set by ldflags
-internal/deps/         temporary blank imports that keep go.mod complete; removed
-                       by the app-wiring step once everything is imported
 test/e2e/              in-process end-to-end tests on fakes; Pebble-backed tests
 test/compat/           scripts running real certbot / acme.sh against the broker
 deploy/                Dockerfile, compose.yaml, .env.example, nginx example

@@ -46,9 +46,10 @@ for shipping (`deploy/compose.yaml`).
 - `internal/names` — identifier normalization, identifier sets, zone matching.
 - `internal/<pkg>` — one package per subsystem, depending on `core` and
   `names` rather than on each other.
-- `internal/deps` — temporary blank imports that keep `go.mod` complete (see
-  below).
-- `deploy/` — Dockerfile, compose file, `.env.example`.
+- `internal/app` — wiring, startup recovery, HTTP mounts, housekeeping,
+  shutdown, and the helpers behind the maintenance subcommands.
+- `deploy/` — Dockerfile, compose files, `.env.example`, reverse-proxy
+  examples.
 
 ## Testing layers
 
@@ -73,15 +74,54 @@ Rules that keep tests trustworthy:
 - Scratch files go in `.claude/tmp/` or `t.TempDir()`, never the system temp
   directory.
 
+## Running the broker locally
+
+```sh
+make build
+mkdir -p .claude/tmp/data
+TLS_BROKER_DATA_DIR=$PWD/.claude/tmp/data TLS_BROKER_LOCAL_ADMIN_USER=admin \
+  TLS_BROKER_LOCAL_ADMIN_PASSWORD=admin bin/tls-broker
+```
+
+Then open <http://127.0.0.1:8080/ui/> and log in as `admin`. On plain HTTP
+set `sessions.cookie_secure: false` in the configuration first (for example
+with `bin/tls-broker config apply <file>` before the start), or the browser
+drops the session cookie. `bin/tls-broker help` lists the maintenance
+subcommands.
+
+## Wiring the broker in tests (`internal/app`)
+
+`app.New(ctx, env, app.Options{...})` builds the complete broker and runs
+startup recovery; `Run(ctx)` serves until `ctx` ends and then shuts down in
+order. `Options` is the injection point for every external dependency; the
+zero value is production:
+
+| Option | Inject | Notes |
+|---|---|---|
+| `Clock` | `coretest.NewFakeClock(...)` | used by every package and by the housekeeping loop |
+| `Providers` | `coretest.NewFakeProviders(coretest.NewFakeCA("primary", clock))` | replaces the upstream registry; the YAML must still list providers with the same names |
+| `UpstreamRootCAs` | Pebble's root pool | real adapter against Pebble (when `Providers` is nil) |
+| `Route53` | `dns01.NewFakeRoute53(clock)` with `AddZone(id, name)` | replaces the AWS client |
+| `Resolver` | `fakeR53.Resolver(coretest.NewFakeResolver())` | public view: the fake resolver plus Route53's published TXT records |
+| `Directory` | `coretest.NewFakeDirectory()` | LDAP logins |
+| `LDAPTester` | any `core.LDAPTester` | config activation and the UI's *Test LDAP* |
+| `Listener` | `net.Listen("tcp", "127.0.0.1:0")` | `App.Addr()` reports it |
+| `NewDirectKey` | a pre-generated RSA key | RSA generation is slow under `-race` |
+| `HousekeepingInterval` | negative to disable | `App.Housekeep(ctx)` runs one round on demand |
+| `Logger` | `slog.New(slog.NewTextHandler(io.Discard, nil))` | |
+
+For the fake CA to validate DNS-01 against what the broker published, call
+`ca.SetTXTLookup(fakeR53.LookupTXT)`. After `New`, `App.Config()` (activate
+YAML), `App.Store()` (grants, users) and `App.Secrets()` are available;
+`App.Handler()` is the full middleware chain for in-process requests (it
+answers 503 until `Run` marked the broker ready). An activation before `Run`
+is picked up when `Run` starts. `internal/app/app_test.go` boots the whole
+broker this way, issues one direct-mode certificate end to end and checks
+that shutdown leaves no goroutines behind.
+
 ## Dependencies
 
-`go.mod` and `go.sum` are written by the skeleton step and pin everything the
-project needs. `internal/deps/deps.go` blank-imports each dependency so
-`go mod tidy` keeps them until real code imports them; the app-wiring step
-removes that file.
-
-While packages are being built in parallel, do not edit `go.mod`. If a
-dependency is missing, report it. Outside that phase, to add one:
+To add a dependency:
 
 ```sh
 scripts/dev go get example.com/module@latest

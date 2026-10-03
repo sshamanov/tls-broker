@@ -114,7 +114,11 @@ the direct-mode cache).
 | `go_*`, `process_*` | | | Go runtime and process collectors |
 
 Scheduler metrics are read from the scheduler's in-memory snapshot at scrape
-time; a scrape does no I/O.
+time; a scrape does no I/O. The issuance engine, the DNS-01 engine and the
+upstream adapter take no recorder: `internal/app` counts `issuance_*` from
+the engine's `issue` audit events (class and admission time from the order
+row), `upstream_errors_*` from every failed provider call, and `dns01_*`
+around the DNS engine port.
 
 ### Suggested alerts
 
@@ -160,8 +164,9 @@ outage does not make orchestration restart the broker.
 | 503 | `{"status":"shutting_down"}` | shutdown begun; stop sending traffic |
 
 Error text is never included. The app marks the broker ready after
-`Orchestrator.Recover` and clears it first thing on shutdown
-(`httpx.Health.SetReady`).
+startup recovery (issuance `Recover`, direct cache `Verify`) and clears it
+first thing on shutdown (`httpx.Health.SetReady`); while not ready every path
+except `/healthz` and `/metrics` answers 503.
 
 ## Real source address
 
