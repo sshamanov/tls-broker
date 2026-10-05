@@ -327,7 +327,7 @@ table+p{margin-top:.8rem}
 .docs-nav a{display:block;padding:.3rem .6rem;color:var(--ink);text-decoration:none;border-left:2px solid var(--rule);line-height:1.35}
 .docs-nav a:hover{color:var(--intaglio);border-left-color:var(--rule-2)}
 .docs-nav a[aria-current="page"]{color:var(--intaglio);background:var(--intaglio-tint);border-left-color:var(--intaglio);font-weight:500}
-.docs-group-title{font-size:.76rem;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-2);margin:0 0 .4rem .6rem}
+.docs-group-title{font-size:.84rem;font-weight:600;color:var(--ink-2);margin:0 0 .4rem .6rem}
 .doc-toc .docs-group-title{margin-left:0}
 .doc-toc{font-size:.86rem}
 .doc-toc a{display:block;padding:.22rem 0 .22rem .7rem;border-left:1px solid var(--rule);color:var(--ink-2);text-decoration:none;line-height:1.35}
