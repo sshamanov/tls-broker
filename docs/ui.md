@@ -4,7 +4,8 @@ The UI is the primary operator surface. It is server-rendered `html/template`
 with embedded assets (`internal/ui/static`): one stylesheet, self-hosted IBM
 Plex fonts, an SVG favicon and two small scripts: `theme.js` applies the saved
 colour theme before the page paints, `ui.js` asks for confirmation before
-destructive forms and drives the theme switch and the narrow-screen menu.
+destructive forms, drives the theme switch and the narrow-screen menu, and
+adds copy buttons to the documentation's code blocks.
 Every page works without JavaScript. There is no build step. Everything lives
 under `/ui/`.
 
@@ -51,6 +52,7 @@ the route's role check.
 | Client access | own, read only | see all with owner; create single-address grants, enable, disable, delete own | plus `wildcard` | plus network ranges, change anyone's |
 | Certificates | no | all, with owner | same | plus last error and rotate hook |
 | Activity log | issuance activity | issuance activity | issuance activity | all events, with detail |
+| Documentation | yes | yes | yes | yes |
 | Admin pages | no | no | no | yes |
 
 Role and block changes apply to open sessions at once (auth reads the user on
@@ -160,6 +162,31 @@ resolver or upstream error text; their search does not match it either).
 Admins see every event type with the detail column. See
 `docs/observability.md`.
 
+**Documentation** (`/ui/docs`, `/ui/docs/{page}`). A reader for the user
+guide, `docs/guide` in the repository, shipped in the image at
+`/usr/share/tls-broker/docs` (there is no setting to move it). Every
+logged-in user may read it, blocked users included: it is reading only and
+explains how access works. Only the usage pages are served: the index
+(`docs/guide/README.md`, at `/ui/docs`) and the pages it lists, by file name
+without `.md`; any other name, `README`, a path with `..` or more segments
+is the 404 page, and there is no directory listing. The engineering and
+operator references in `docs/` are not served. The guide's navigation, in
+the index's order and groups, is on the left (a block of links above the
+page on narrow screens), the page in a readable column of at most 75
+characters, and "On this page" (its h2 and h3 headings) on the right on
+wide screens. Pages are rendered by `internal/guide` with goldmark (GFM,
+GitHub-compatible heading IDs, raw HTML never passed through) on first
+request and cached per file by modification time and size. While
+rendering: `https://broker.example.com` becomes the active configuration's
+`server.external_url`; links to listed guide pages go to `/ui/docs/<name>`
+(anchors kept); links to other repository files show their text followed by
+"(in the repository: docs/...)" instead of a broken link; images show
+their alternative text. Code blocks scroll inside themselves and get a
+Copy button (clipboard API, or a selected textarea on plain-HTTP pages).
+Without the documentation directory the page says so (logged once). The
+Status page ("How to get a certificate") and Client access ("How access
+works") link into the guide.
+
 **Users and roles** (`/ui/admin/users`, admin). List with source (LDAP or local), role,
 state and last login. Set role, block, unblock. The local break-glass admin and
 your own account cannot be changed here. Each change is audited as
@@ -211,7 +238,7 @@ and every state also has a word: green *ok*, brass *caution* or *due*, seal red
   500, 600 and Mono 400 are served from `/ui/static/fonts/` under the SIL Open
   Font License (`OFL.txt` next to them).
 - Layout: a left sidebar (brand, Status, Certificates, Client access,
-  Activity, an Administration group for admins, then the user, the theme
+  Activity, Documentation, an Administration group for admins, then the user, the theme
   switch and Log out). Below 48rem it folds into a top bar with a Menu button.
   Every page has a title, a one-line description and, where there is one,
   its primary action. The status page is a two-column grid on wide screens.

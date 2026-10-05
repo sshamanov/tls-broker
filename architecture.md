@@ -330,7 +330,7 @@ If blocked:
 - no issuance/control rights regardless of role;
 - existing certificates remain untouched;
 - existing IP grants remain separate capability objects;
-- user may still see their own grants and the activity log (§14).
+- user may still see their own grants, the activity log (§14) and the user guide in the UI.
 
 An `admin + blocked` state is valid and simply means blocked.
 

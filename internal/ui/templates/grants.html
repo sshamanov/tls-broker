@@ -1,4 +1,4 @@
-{{define "lede"}}<p class="lede">Networks allowed to request certificates. A machine at a listed address may request any name in the managed zones; without an entry, a name must resolve to the requesting machine.</p>{{end}}
+{{define "lede"}}<p class="lede">Networks allowed to request certificates. A machine at a listed address may request any name in the managed zones; without an entry, a name must resolve to the requesting machine. <a href="/ui/docs/getting-started#getting-access">How access works</a></p>{{end}}
 {{define "actions"}}{{if not .Blocked}}<a class="btn primary" href="#add">Add network</a>{{end}}{{end}}
 
 {{define "content"}}

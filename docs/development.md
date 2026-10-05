@@ -265,6 +265,7 @@ zero value is production:
 | `Listener` | `net.Listen("tcp", "127.0.0.1:0")` | `App.Addr()` reports it |
 | `NewDirectKey` | a pre-generated RSA key | RSA generation is slow under `-race` |
 | `HousekeepingInterval` | negative to disable | `App.Housekeep(ctx)` runs one round on demand |
+| `Docs` | `os.DirFS("docs/guide")` | the user guide for the UI reader; nil reads `/usr/share/tls-broker/docs` (`guide.DefaultDir`), which only the image has |
 | `Logger` | `slog.New(slog.NewTextHandler(io.Discard, nil))` | |
 
 For the fake CA to validate DNS-01 against what the broker published, call
@@ -305,6 +306,17 @@ holds it to portable Markdown:
   test until it is documented there.
 - The Certbot DNS-proxy hooks in `docs/guide/dns-proxy.md` and
   `docs/dns-proxy.md` are identical (`make compat` runs the guide's).
+
+Shipping: `deploy/Dockerfile` copies `docs/guide` to
+`/usr/share/tls-broker/docs` (`.dockerignore` excludes `docs` except that
+directory) and the broker reads it from there; there is no environment
+variable or override directory. `app.Options.Docs` and `ui.Deps.Docs`
+take any `fs.FS`, so tests and a locally built binary use
+`os.DirFS("docs/guide")`; `internal/ui` tests read the repository's guide,
+`internal/guide` tests render every page of it. A binary run outside the
+image without `Options.Docs` shows "not available in this build" under
+Documentation. Markdown changes need no rebuild of the Go code, only of the
+image.
 
 ## Dependencies
 

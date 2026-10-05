@@ -27,6 +27,7 @@
 {{if not .Blocked}}<a href="/ui/certificates"{{if eq .Nav "certificates"}} aria-current="page"{{end}}>Certificates</a>{{end}}
 <a href="/ui/grants"{{if eq .Nav "grants"}} aria-current="page"{{end}}>Client access</a>
 <a href="/ui/audit"{{if eq .Nav "audit"}} aria-current="page"{{end}}>Activity</a>
+<a href="/ui/docs"{{if eq .Nav "docs"}} aria-current="page"{{end}}>Documentation</a>
 {{if and .Admin (not .Blocked)}}
 <div class="nav-group" id="nav-admin">Administration</div>
 <a href="/ui/admin/users"{{if eq .Nav "admin-users"}} aria-current="page"{{end}}>Users</a>
@@ -64,7 +65,7 @@
 
 {{define "notices"}}{{range .Banners}}<div class="notice error banner" role="status"><p>{{.}}</p></div>{{end}}
 {{if .Flash}}<div class="notice {{.Flash.Kind}}" role="status"><p>{{.Flash.Text}}</p></div>{{end}}
-{{if and .User .Blocked}}<div class="notice error" role="status"><p>Your account is blocked. You cannot request certificates or change anything; you can still see your networks and the activity log. Ask an administrator to unblock you.</p></div>{{end}}{{end}}
+{{if and .User .Blocked}}<div class="notice error" role="status"><p>Your account is blocked. You cannot request certificates or change anything; you can still see your networks, the activity log and the documentation. Ask an administrator to unblock you.</p></div>{{end}}{{end}}
 
 {{define "outcome"}}{{$o := outcome .}}<span class="pill {{if eq $o "ok"}}ok{{else if eq $o "denied"}}caution{{else if eq $o "failed"}}bad{{else}}quiet{{end}}">{{if $o}}{{$o}}{{else}}noted{{end}}</span>{{end}}
 

@@ -11,6 +11,7 @@
 package guide
 
 import (
+	"html"
 	"strconv"
 	"strings"
 	"unicode"
@@ -18,7 +19,9 @@ import (
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/renderer"
 	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
 )
 
 // IndexFile is the guide's index page: its title, its navigation (the
@@ -27,9 +30,47 @@ const IndexFile = "README.md"
 
 // newMarkdown is the one Markdown dialect of the guide: CommonMark plus GFM
 // (tables, strikethrough, autolinks, task lists). Raw HTML stays disabled
-// (goldmark's default; never add html.WithUnsafe).
+// (goldmark's default; never add html.WithUnsafe): it renders as an HTML
+// comment saying it was omitted, and javascript: and similar link targets
+// are dropped.
 func newMarkdown() goldmark.Markdown {
-	return goldmark.New(goldmark.WithExtensions(extension.GFM))
+	return goldmark.New(
+		goldmark.WithExtensions(extension.GFM),
+		goldmark.WithRendererOptions(renderer.WithNodeRenderers(util.Prioritized(repoRefRenderer{}, 100))),
+	)
+}
+
+// repoRef replaces a link the reader cannot serve (a file elsewhere in the
+// repository) and an image: its children, the link text, stay; with a Path,
+// a note names the file in the repository.
+type repoRef struct {
+	ast.BaseInline
+	Path string
+}
+
+var kindRepoRef = ast.NewNodeKind("RepoRef")
+
+func (n *repoRef) Kind() ast.NodeKind { return kindRepoRef }
+
+func (n *repoRef) Dump(src []byte, level int) {
+	ast.DumpHelper(n, src, level, map[string]string{"Path": n.Path}, nil)
+}
+
+type repoRefRenderer struct{}
+
+func (repoRefRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
+	reg.Register(kindRepoRef, func(w util.BufWriter, _ []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
+		ref := n.(*repoRef)
+		if ref.Path == "" {
+			return ast.WalkContinue, nil
+		}
+		if entering {
+			_, _ = w.WriteString(`<span class="doc-repo">`)
+		} else {
+			_, _ = w.WriteString(`<span class="doc-repo-path"> (in the repository: <code>` + html.EscapeString(ref.Path) + `</code>)</span></span>`)
+		}
+		return ast.WalkContinue, nil
+	})
 }
 
 // Heading is a section heading with its GitHub-compatible ID.

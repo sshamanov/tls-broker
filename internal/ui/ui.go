@@ -1,7 +1,8 @@
 // Package ui is the web UI: server-rendered html/template pages under /ui/,
 // embedded assets (one stylesheet, self-hosted fonts, a favicon) and two small
 // same-origin scripts: static/theme.js applies the saved colour theme before
-// the page paints, static/ui.js confirms destructive forms and drives the
+// the page paints, static/ui.js confirms destructive forms, adds copy buttons
+// to the documentation's code blocks and drives the
 // theme switch and the narrow-screen menu. There is no build step and the CSP
 // allows no inline script or style; pages work without JavaScript.
 //
@@ -32,6 +33,7 @@ import (
 
 	"tls-broker/internal/auth"
 	"tls-broker/internal/core"
+	"tls-broker/internal/guide"
 	"tls-broker/internal/httpx"
 )
 
@@ -103,13 +105,19 @@ type Deps struct {
 	// Banners are process-level warnings shown at the top of every page,
 	// logged in or not (for example "the DNS gate is mocked"). Optional.
 	Banners []string
-	Logger  *slog.Logger
+	// Docs is the user guide (docs/guide in the repository,
+	// guide.DefaultDir in the image) for the Documentation reader. Nil or
+	// a directory without an index: the page says the documentation is not
+	// available in this build.
+	Docs   fs.FS
+	Logger *slog.Logger
 }
 
 // Handler serves everything under /ui/. Mount it at "/ui/" (and "/ui").
 type Handler struct {
 	Deps
 	tmpl   map[string]*template.Template
+	guide  *guide.Library
 	mux    *http.ServeMux
 	root   http.Handler
 	static http.Handler
@@ -134,7 +142,7 @@ func New(d Deps) (*Handler, error) {
 	if d.Clock == nil {
 		d.Clock = core.SystemClock{}
 	}
-	h := &Handler{Deps: d, mux: http.NewServeMux()}
+	h := &Handler{Deps: d, mux: http.NewServeMux(), guide: guide.New(d.Docs, d.Logger)}
 	if err := h.loadTemplates(); err != nil {
 		return nil, err
 	}
@@ -252,6 +260,11 @@ func (h *Handler) routes() {
 	h.route("POST /ui/certificates/rotate", accessAdmin, h.rotateKey)
 
 	h.route("GET /ui/audit", accessAny, h.auditPage)
+
+	// Documentation: readable by every logged-in user, blocked ones too
+	// (it is reading only, and explains how to get access again).
+	h.route("GET /ui/docs", accessAny, h.docsIndex)
+	h.route("GET /ui/docs/{page}", accessAny, h.docsPage)
 
 	h.route("GET /ui/admin/users", accessAdmin, h.usersPage)
 	h.route("POST /ui/admin/users/{id}/{action}", accessAdmin, h.userAction)

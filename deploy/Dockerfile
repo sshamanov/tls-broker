@@ -3,7 +3,8 @@
 #   docker build --network host -f deploy/Dockerfile -t tls-broker:local .
 #
 # The image holds two static binaries: tls-broker (the service, entrypoint)
-# and mockdoh (a development-only DoH mock, see docs/development.md).
+# and mockdoh (a development-only DoH mock, see docs/development.md), and
+# the user guide (docs/guide) that the web UI's Documentation reader serves.
 FROM golang:1.27 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -19,6 +20,7 @@ RUN go build -trimpath -buildvcs=false \
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/tls-broker /out/mockdoh /usr/local/bin/
+COPY docs/guide /usr/share/tls-broker/docs
 ENV TLS_BROKER_DATA_DIR=/data
 VOLUME /data
 # Probes TLS_BROKER_LISTEN (a wildcard host is probed on 127.0.0.1).

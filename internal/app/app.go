@@ -19,6 +19,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -40,6 +41,7 @@ import (
 	"tls-broker/internal/dnsproxy"
 	"tls-broker/internal/doh"
 	"tls-broker/internal/gate"
+	"tls-broker/internal/guide"
 	"tls-broker/internal/httpx"
 	"tls-broker/internal/issuance"
 	"tls-broker/internal/metrics"
@@ -102,6 +104,10 @@ type Options struct {
 	// HousekeepingInterval is the period of the maintenance round; zero
 	// means DefaultHousekeepingInterval, negative disables the loop.
 	HousekeepingInterval time.Duration
+	// Docs is the user guide for the UI's Documentation reader; nil reads
+	// guide.DefaultDir, where the image ships docs/guide. Tests and
+	// development pass os.DirFS("docs/guide").
+	Docs fs.FS
 }
 
 // App is the wired broker.
@@ -310,12 +316,16 @@ func New(ctx context.Context, env config.Env, opts Options) (_ *App, err error) 
 		Config: a.cfg, Users: a.store.Users(), Sessions: a.store.Sessions(), Directory: directory,
 		Clock: a.clock, Audit: a.auditor,
 	})
+	docs := opts.Docs
+	if docs == nil {
+		docs = os.DirFS(guide.DefaultDir)
+	}
 	if a.ui, err = ui.New(ui.Deps{
 		Auth: a.auth, Config: a.cfg, Admin: a.cfg, Secrets: a.secrets, LDAP: tester, CAA: a.gate,
 		Providers: a.providers, Scheduler: a.sched, Audit: a.auditLog, Auditor: a.auditor,
 		Users: a.store.Users(), Grants: a.store.Grants(), Certs: a.store.Certificates(), Orders: a.store.Orders(),
 		Direct: a.store.Direct(), Lineages: a.store.Lineages(), Clock: a.clock, Rotator: a.direct,
-		Zones: zoneStatusSource{a.dnsEngine}, Banners: a.banners, Logger: a.log,
+		Zones: zoneStatusSource{a.dnsEngine}, Banners: a.banners, Docs: docs, Logger: a.log,
 	}); err != nil {
 		return nil, fmt.Errorf("web ui: %w", err)
 	}

@@ -51,3 +51,49 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   }
 });
+
+// Documentation: a copy button on every code block.
+document.addEventListener("DOMContentLoaded", function () {
+  var blocks = document.querySelectorAll(".doc pre");
+  var copy = function (text, done) {
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(done, function () { fallback(text, done); });
+    } else {
+      fallback(text, done);
+    }
+  };
+  // Plain-HTTP pages have no clipboard API; a selected textarea still copies.
+  var fallback = function (text, done) {
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.className = "sr";
+    document.body.appendChild(ta);
+    ta.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (err) { ok = false; }
+    document.body.removeChild(ta);
+    if (ok) done();
+  };
+  for (var i = 0; i < blocks.length; i++) {
+    (function (pre) {
+      var wrap = document.createElement("div");
+      wrap.className = "code-block";
+      pre.parentNode.insertBefore(wrap, pre);
+      wrap.appendChild(pre);
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "copy-btn";
+      btn.textContent = "Copy";
+      btn.setAttribute("aria-label", "Copy code");
+      btn.addEventListener("click", function () {
+        copy(pre.textContent.replace(/\n$/, ""), function () {
+          btn.textContent = "Copied";
+          btn.classList.add("done");
+          setTimeout(function () { btn.textContent = "Copy"; btn.classList.remove("done"); }, 1500);
+        });
+      });
+      wrap.appendChild(btn);
+    })(blocks[i]);
+  }
+});

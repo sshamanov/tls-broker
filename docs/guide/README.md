@@ -2,8 +2,8 @@
 
 How to get publicly trusted TLS certificates for machines on the LAN from the
 TLS broker. These pages are also shown in the broker's web interface under
-**Documentation**, with the real broker address filled in for
-`https://broker.example.com`.
+**Documentation**, where the examples carry the broker's real address
+instead of `broker.example.com`.
 
 ## Start here
 

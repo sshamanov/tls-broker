@@ -47,7 +47,7 @@ internal/dnsproxy/     /dns/present and /dns/cleanup
 internal/auth/         LDAP login, local admin, sessions, CSRF
 internal/ui/           web UI
 internal/guide/        user guide (docs/guide): index parsing, GitHub-compatible
-                       heading IDs, docs lint
+                       heading IDs, rendering and cache for the UI reader, docs lint
 internal/httpx/        real source IP, middleware, problem responses
 internal/metrics/      Prometheus collectors
 internal/app/          wiring, lifecycle, config reload, startup reconciliation
