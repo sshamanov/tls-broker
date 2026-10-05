@@ -153,7 +153,6 @@ nobody fetches is not renewed. For example, daily from cron:
 | `not_ipv4` | Reach the broker over IPv4. |
 | `badCSR`, `orderNotReady` | Run the client again (certbot: add `--reuse-key`). |
 | `accountDoesNotExist` | Register again: `certbot register --server https://broker.example.com/acme/directory`. |
-| `wildcard_unprotected` (DNS proxy) | Use the ACME proxy for this zone. |
 | DNS proxy `504` | Try again. |
 | "Only administrators can add an address range" | Add each machine's address (`10.1.2.3`). |
 | Service still shows the old certificate | Add a reload ([ACME proxy](#reload-the-service), [direct download](#direct-download)). |
