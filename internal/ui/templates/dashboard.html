@@ -32,20 +32,44 @@
 </div>
 
 <div class="stack">
-<section class="panel" aria-labelledby="h-expiring"><h2 id="h-expiring">Expiring next <a class="more" href="/ui/certificates">All certificates</a></h2>
+<section class="panel" aria-labelledby="h-ct"><h2 id="h-ct">Certificates in managed zones <a class="more" href="/ui/certificates/zones">All in managed zones</a></h2>
+{{template "ctnote" .}}
+{{with .Data.CT}}{{if eq .Status "ready"}}
+<p class="ct-summary">{{if .Certs}}{{plural (len .Certs) "current certificate" "current certificates"}} in {{plural .Zones "zone" "zones"}}; {{if eq .Report.Problems 0}}none needs attention{{else if eq .Report.Problems 1}}<span class="t-bad">1 needs attention</span>{{else}}<span class="t-bad">{{.Report.Problems}} need attention</span>{{end}}.{{else}}No certificates for the managed zones in the Certificate Transparency logs.{{end}} Updated {{rel .UpdatedAt}}.</p>
+<ul class="rows expiring">
+{{range .Top}}<li><div class="line"><span class="name">{{range $i, $n := .Names}}{{if $i}}, {{end}}<code>{{$n}}</code>{{end}}</span><span class="end">{{template "ctstate" .}}</span></div>{{template "ctlife" .Life}}
+<p class="ct-meta">{{.Issuer}}, {{template "ctsource" .Source}}{{if .UnexpectedCA}}. <span class="t-bad">{{.CAADetail}}</span>{{end}}</p></li>
+{{end}}
+</ul>
+{{end}}{{end}}
+</section>
+
+<section class="panel" aria-labelledby="h-ctrecent"><h2 id="h-ctrecent">Issuance in the last 14 days <a class="more" href="/ui/certificates/zones">All in managed zones</a></h2>
+{{with .Data.CT}}{{if eq .Status "ready"}}
+{{if .Recent}}<p class="ct-summary">{{plural (len .Recent) "certificate" "certificates"}} issued: {{plural .Report.RecentRenewals "renewal" "renewals"}} and {{.Report.RecentNew}} for new or changed names.</p>{{end}}
+<ul class="rows">
+{{range .TopRecent}}<li><span class="name">{{range $i, $n := .Names}}{{if $i}}, {{end}}<code>{{$n}}</code>{{end}}<span class="sub">{{.Issuer}}, {{template "ctsource" .Source}}</span></span><span class="end">{{template "ctkind" .Kind}}<span class="sub">{{rel .NotBefore}}</span></span></li>
+{{else}}<li class="muted">Nothing was issued for the managed zones in the last 14 days.</li>{{end}}
+</ul>
+{{else}}<p class="muted">Shown with the certificates above once the inventory is available.</p>{{end}}{{end}}
+</section>
+</div>
+</div>
+
+<div class="grid">
+<section class="panel" aria-labelledby="h-expiring"><h2 id="h-expiring">Expiring next (broker) <a class="more" href="/ui/certificates">Broker certificates</a></h2>
 <ul class="rows expiring">
 {{range .Data.Expiring}}<li><div class="line"><span class="name">{{range $i, $n := .Names}}{{if $i}}, {{end}}<code>{{$n}}</code>{{end}}</span><span class="muted small">{{if eq .Mode "direct"}}direct, {{end}}{{.Provider}}</span></div>{{template "life" .Life}}</li>
-{{else}}<li class="empty-state"><p class="muted">No valid certificates yet. Point an ACME client such as certbot or acme.sh at this broker from a machine listed under <a href="/ui/grants">Client access</a>.</p></li>{{end}}
+{{else}}<li class="empty-state"><p class="muted">The broker holds no valid certificates yet. Point an ACME client such as certbot or acme.sh at this broker from a machine listed under <a href="/ui/grants">Client access</a>.</p></li>{{end}}
 </ul>
 </section>
 
-<section class="panel" aria-labelledby="h-recent"><h2 id="h-recent">Recent issuance <a class="more" href="/ui/audit">Activity log</a></h2>
+<section class="panel" aria-labelledby="h-recent"><h2 id="h-recent">Recent issuance (broker) <a class="more" href="/ui/audit">Activity log</a></h2>
 <ul class="rows">
 {{range .Data.Recent}}<li><span class="name">{{if .Names}}{{range $i, $n := .Names}}{{if $i}}, {{end}}<code>{{$n}}</code>{{end}}{{else}}{{.Type}}{{end}}<span class="sub">{{summary .}}</span></span><span class="end">{{template "outcome" .}}<span class="sub">{{rel .Time}}</span></span></li>
 {{else}}<li class="muted">No issuance yet.</li>{{end}}
 </ul>
 </section>
-</div>
 </div>
 
 {{if .Admin}}

@@ -1,0 +1,30 @@
+{{define "lede"}}<p class="lede">Every certificate that Certificate Transparency logs show for the managed zones, whoever requested it: the broker, your own ACME clients or anyone else. One row per set of names, with its newest certificate.</p>{{end}}
+
+{{define "content"}}
+<nav class="tabs" aria-label="Certificate lists"><a href="/ui/certificates">Issued by the broker</a><a href="/ui/certificates/zones" aria-current="page">All in managed zones</a></nav>
+{{template "ctnote" .}}
+{{with .Data.CT}}{{if eq .Status "ready"}}<p class="ct-summary">{{plural (len .Certs) "set of names" "sets of names"}} in {{plural .Zones "zone" "zones"}}, {{plural (len .Snap.Issuances) "certificate" "certificates"}} including earlier ones and those that expired in the last 30 days. Updated {{rel .UpdatedAt}}; next refresh {{rel .Snap.NextRun}}.</p>{{end}}{{end}}
+
+<form method="get" action="/ui/certificates/zones" class="filters" role="search" aria-label="Filter certificates">
+<label>Name contains <input name="q" value="{{.Data.Q}}" placeholder="part of a name" spellcheck="false"></label>
+<label>Zone <select name="zone"><option value="">Any</option>{{$z := .Data.Zone}}{{range .Data.ZoneNames}}<option value="{{.}}"{{if eq . $z}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+<label>State <select name="state">{{$s := .Data.State}}{{range .Data.States}}<option value="{{.Value}}"{{if eq .Value $s}} selected{{end}}>{{.Label}}</option>{{end}}</select></label>
+<label>Obtained <select name="source"><option value="">By anyone</option><option value="broker"{{if eq .Data.Src "broker"}} selected{{end}}>Via the broker</option><option value="outside"{{if eq .Data.Src "outside"}} selected{{end}}>Outside the broker</option></select></label>
+<button type="submit">Show</button>
+</form>
+
+{{if eq .Data.CT.Status "ready"}}
+<table>
+<tr><th>Names</th><th>State</th><th>Lifetime</th><th>Authority</th><th>Obtained</th><th>Earlier certificates</th></tr>
+{{range .Data.Rows}}
+<tr><td class="names">{{range $i, $n := .Names}}{{if $i}}<br>{{end}}<code>{{$n}}</code>{{end}}</td>
+<td class="nowrap">{{template "ctstate" .}}{{if .UnexpectedCA}}<span class="cell-sub t-bad wrap">{{.CAADetail}}</span>{{end}}</td>
+<td>{{template "ctlife" .Life}}</td>
+<td>{{.Issuer}}{{if .Serial}}<span class="cell-sub">serial <code>{{.Serial}}</code></span>{{end}}</td>
+<td class="nowrap">{{template "ctsource" .Source}}</td>
+<td>{{if .History}}<details><summary>{{len .History}}</summary><ul class="ct-history">{{range .History}}<li>{{date .NotBefore}} to {{date .NotAfter}}, {{.Issuer}}{{if .Revoked}}, revoked{{end}}</li>{{end}}</ul></details>{{else}}<span class="muted">none</span>{{end}}</td></tr>
+{{else}}<tr><td colspan="6" class="empty">{{if or .Data.Q .Data.Zone .Data.State .Data.Src}}No certificates match the filter.{{else}}No certificates for the managed zones in the Certificate Transparency logs.{{end}}</td></tr>{{end}}
+</table>
+<p class="muted small">The state is that of the newest certificate of each set of names. Renewal is expected at two thirds of the lifetime; <em>overdue</em> means less than seven days (or the last tenth of the lifetime) are left and no newer certificate exists; <em>replaced</em> means every name is in a newer certificate of another set. <em>Unexpected CA</em> means the zone's CAA records, as they are now, do not allow the issuing CA. "Via the broker" is matched by serial number; Certificate Transparency does not show which ACME account was used.</p>
+{{end}}
+{{end}}

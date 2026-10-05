@@ -76,8 +76,8 @@ type ZoneStatusSource interface {
 	ZoneStatuses() []ZoneStatus
 }
 
-// Deps are the collaborators of the UI. Everything except Zones, Rotator and
-// Logger is required.
+// Deps are the collaborators of the UI. Everything except Zones, Rotator,
+// Inventory, Banners, Docs and Logger is required.
 type Deps struct {
 	Auth      *auth.Service
 	Config    core.ConfigSource
@@ -102,6 +102,9 @@ type Deps struct {
 	Zones ZoneStatusSource
 	// Rotator is optional; see KeyRotator.
 	Rotator KeyRotator
+	// Inventory is the Certificate Transparency inventory; nil shows it
+	// as switched off.
+	Inventory CTInventory
 	// Banners are process-level warnings shown at the top of every page,
 	// logged in or not (for example "the DNS gate is mocked"). Optional.
 	Banners []string
@@ -257,6 +260,7 @@ func (h *Handler) routes() {
 	h.route("POST /ui/grants/{id}/{action}", accessUser, h.grantAction)
 
 	h.route("GET /ui/certificates", accessUser, h.certificates)
+	h.route("GET /ui/certificates/zones", accessUser, h.ctList)
 	h.route("POST /ui/certificates/rotate", accessAdmin, h.rotateKey)
 
 	h.route("GET /ui/audit", accessAny, h.auditPage)
@@ -509,6 +513,7 @@ func (h *Handler) loadTemplates() error {
 		"exhausted": budgetExhausted,
 		"inc":       func(i int) int { return i + 1 },
 		"isZero":    func(t time.Time) bool { return t.IsZero() },
+		"isPast":    func(t time.Time) bool { return !t.After(h.Clock.Now()) },
 		"lower":     strings.ToLower,
 		"roleStr":   func(r core.Role) string { return string(r) },
 		"roleName":  roleName,
@@ -517,6 +522,8 @@ func (h *Handler) loadTemplates() error {
 		"summary":   activitySummary,
 		"events":    func(evs []core.AuditEvent, admin bool) eventsView { return eventsView{evs, admin} },
 		"outcome":   outcome,
+		"plural":    plural,
+		"ctState":   ctState,
 	}
 	entries, err := fs.Glob(templateFS, "templates/*.html")
 	if err != nil {

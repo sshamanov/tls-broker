@@ -399,3 +399,14 @@ table+p{margin-top:.8rem}
   .doc pre{padding:.7rem .75rem}
   .code-block pre{padding-right:4.25rem}
 }
+
+/* Certificate list tabs and the Certificate Transparency inventory */
+.tabs{display:flex;flex-wrap:wrap;gap:.25rem 1.5rem;margin:0 0 1.1rem;border-bottom:1px solid var(--rule)}
+.tabs a{padding:.35rem 0 .45rem;color:var(--ink-2);text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a:hover{color:var(--ink)}
+.tabs a[aria-current="page"]{color:var(--intaglio);border-bottom-color:var(--intaglio);font-weight:500}
+.ct-summary{margin:0 0 .85rem}
+.ct-meta{margin:.25rem 0 0;font-size:.84rem;color:var(--ink-2)}
+.ct-errors{margin:.35rem 0 0;padding-left:1.1rem}
+.ct-history{margin:.3rem 0 0;padding-left:1rem;font-size:.84rem;white-space:nowrap}
+.rows .end .pill+.pill{margin-left:.25rem}

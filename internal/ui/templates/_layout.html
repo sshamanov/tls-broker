@@ -81,6 +81,20 @@
 {{define "life"}}<div class="life {{.State}}"><svg viewBox="0 0 100 14" preserveAspectRatio="none" role="img" aria-label="{{.State}}: issued {{date .NotBefore}}, renewal {{if .RenewExpected}}expected {{end}}{{date .RenewAt}}, expires {{date .NotAfter}}"><rect class="track" x="0" y="4" width="100" height="6" rx="1"/><rect class="elapsed" x="0" y="4" width="{{.NowPct}}" height="6" rx="1"/><line class="renew" x1="{{.RenewPct}}" x2="{{.RenewPct}}" y1="1" y2="13" vector-effect="non-scaling-stroke"/><line class="now" x1="{{.NowPct}}" x2="{{.NowPct}}" y1="0" y2="14" vector-effect="non-scaling-stroke"/></svg>
 <div class="life-text"><span class="state">{{if eq .State "ok"}}Valid{{else if eq .State "due"}}Renewal due{{else if eq .State "expired"}}Expired{{else}}Replaced{{end}}</span><span>{{if eq .State "expired"}}expired {{rel .NotAfter}}{{else}}renews {{if .RenewExpected}}about {{end}}{{date .RenewAt}}, expires {{rel .NotAfter}}{{end}}</span></div></div>{{end}}
 
+{{define "ctlife"}}<div class="life {{.State}}"><svg viewBox="0 0 100 14" preserveAspectRatio="none" role="img" aria-label="issued {{date .NotBefore}}, renewal expected {{date .RenewAt}}, expires {{date .NotAfter}}"><rect class="track" x="0" y="4" width="100" height="6" rx="1"/><rect class="elapsed" x="0" y="4" width="{{.NowPct}}" height="6" rx="1"/><line class="renew" x1="{{.RenewPct}}" x2="{{.RenewPct}}" y1="1" y2="13" vector-effect="non-scaling-stroke"/><line class="now" x1="{{.NowPct}}" x2="{{.NowPct}}" y1="0" y2="14" vector-effect="non-scaling-stroke"/></svg>
+<div class="life-text"><span>issued {{date .NotBefore}}, renewal about {{date .RenewAt}}</span><span>{{if isPast .NotAfter}}expired{{else}}expires{{end}} {{rel .NotAfter}}</span></div></div>{{end}}
+
+{{define "ctstate"}}<span class="pill {{if eq .State "ok"}}ok{{else if eq .State "due"}}caution{{else if eq .State "replaced"}}quiet{{else}}bad{{end}}">{{ctState .State}}</span>{{if .UnexpectedCA}} <span class="pill bad">unexpected CA</span>{{end}}{{end}}
+
+{{define "ctsource"}}{{if eq . "broker"}}via the broker{{else}}outside the broker{{end}}{{end}}
+
+{{define "ctkind"}}<span class="pill {{if eq . "renewal"}}ok{{else}}info{{end}}">{{if eq . "renewal"}}renewal{{else if eq . "changed"}}changed names{{else}}new names{{end}}</span>{{end}}
+
+{{define "ctnote"}}{{$a := .Admin}}{{with .Data.CT}}{{if eq .Status "off"}}<p class="muted">The Certificate Transparency inventory is switched off{{if $a}} (<code>ct_inventory.disabled</code> under <a href="/ui/admin/config">Configuration</a>){{end}}.</p>
+{{else if eq .Status "loading"}}<p class="muted">Reading Certificate Transparency logs for the managed zones. The list appears here once the first refresh has finished; reload in a minute.</p>
+{{else if eq .Status "unavailable"}}<p class="t-bad">The inventory is not available right now: the Certificate Transparency source could not be read. It is tried again {{rel .Snap.NextRun}}.</p>{{if $a}}<ul class="ct-errors small">{{range .Stale}}<li><code>{{.Zone}}</code>: {{.Err}}</li>{{end}}</ul>{{end}}
+{{else if .Stale}}<p class="t-caution small">Partly out of date: {{range $i, $z := .Stale}}{{if $i}}, {{end}}<code>{{$z.Zone}}</code>{{end}} could not be refreshed{{if $a}} ({{range $i, $z := .Stale}}{{if $i}}; {{end}}{{$z.Err}}{{end}}){{end}}. It is tried again {{rel .Snap.NextRun}}.</p>{{end}}{{end}}{{end}}
+
 {{define "gauge"}}<div class="gauge {{.Level}}"><div class="gauge-head"><span class="label">{{.Label}}</span><span class="num">{{.Used}} of {{.Limit}} used</span></div>
 <svg class="bar" viewBox="0 0 100 8" preserveAspectRatio="none" role="img" aria-label="{{.Pct}} percent used"><rect class="track" x="0" y="0" width="100" height="8" rx="1"/><rect class="fill" x="0" y="0" width="{{.Pct}}" height="8" rx="1"/></svg>
 <div class="gauge-foot"><span class="{{if eq .Level "ok"}}t-ok{{else if eq .Level "caution"}}t-caution{{else}}t-bad{{end}}">{{if eq .Level "ok"}}OK{{else if eq .Level "caution"}}Caution{{else}}Exhausted{{end}}</span><span>{{if .RenewalOnly}}{{.RenewalOnly}} kept for renewals, {{end}}{{dur .Window}} window</span></div></div>{{end}}

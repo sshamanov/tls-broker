@@ -333,7 +333,7 @@ func New(ctx context.Context, env config.Env, opts Options) (_ *App, err error) 
 		Providers: a.providers, Scheduler: a.sched, Audit: a.auditLog, Auditor: a.auditor,
 		Users: a.store.Users(), Grants: a.store.Grants(), Certs: a.store.Certificates(), Orders: a.store.Orders(),
 		Direct: a.store.Direct(), Lineages: a.store.Lineages(), Clock: a.clock, Rotator: a.direct,
-		Zones: zoneStatusSource{a.dnsEngine}, Banners: a.banners, Docs: docs, Logger: a.log,
+		Zones: zoneStatusSource{a.dnsEngine}, Inventory: a.ct, Banners: a.banners, Docs: docs, Logger: a.log,
 	}); err != nil {
 		return nil, fmt.Errorf("web ui: %w", err)
 	}

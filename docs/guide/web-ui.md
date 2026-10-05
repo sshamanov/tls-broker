@@ -16,12 +16,48 @@ The start page. It shows:
 - **Rate-limit headroom**: how much of each CA's limits is used. *Caution*
   from 75 %, *exhausted* when nothing is left; new requests then wait or are
   refused until the window moves on.
-- **Recent issuance** and **Expiring next**: the latest results and the
-  certificates that expire soonest.
+- **Certificates in managed zones**: every certificate of the managed
+  zones that the public Certificate Transparency logs show, whoever
+  requested it: the broker, your own certbot or acme.sh, anyone. The ones
+  that need attention come first. Each row shows the names, a state, the
+  lifetime bar, the CA and whether it came **via the broker** or from
+  **outside the broker** (both are fine; outside only means the broker did
+  not issue it).
+- **Issuance in the last 14 days**: what was issued recently in the managed
+  zones, newest first: a **renewal** (newer certificate for the same names),
+  **changed names** or **new names**.
+- **Expiring next (broker)** and **Recent issuance (broker)**, below: the
+  certificates the broker itself holds that expire soonest, and the latest
+  results of requests to the broker (issued, failed, refused, denied).
+
+The states of certificates in the managed zones:
+
+| State | Means |
+|---|---|
+| ok | valid, renewal not due yet |
+| renewal due | two thirds of the lifetime have passed (30 days before expiry for a 90-day certificate) and no newer certificate exists yet; clients usually renew now |
+| overdue | less than seven days left and still no newer certificate: check the client that renews it |
+| expired | expired in the last 30 days without a newer certificate |
+| replaced | past its renewal point, but all its names are in a newer certificate with other names |
+| revoked | the CA revoked it and no newer certificate exists |
+| unexpected CA | issued by a CA that the zone's CAA records do not allow |
+
+The list is read from Certificate Transparency when the broker starts and
+then every few hours (4 hours by default), so a certificate issued a moment
+ago appears with the next refresh. After a restart, certificates that expired
+before the restart are not shown again. Certificate Transparency does not say
+which ACME account obtained a certificate.
 
 ## Certificates
 
-Every certificate the broker obtained, in two lists:
+Two tabs. **All in managed zones** lists every set of names in the managed
+zones from Certificate Transparency, with the state of its newest
+certificate (see [Status](#status)) and its earlier certificates. Filter by
+name, zone, state (for example *needs attention*) and whether it was
+obtained via the broker or outside it.
+
+**Issued by the broker** shows every certificate the broker obtained, in two
+lists:
 
 - **Issued to ACME clients**: certificates of ACME-proxy clients. Each row
   shows the names, the **owner**, the CA, serial, validity and whether it
@@ -82,7 +118,9 @@ first; [Troubleshooting](troubleshooting.md) explains the reasons.
 
 Administrators additionally see:
 
-- on **Status**: problems that need attention, CA details and all rate-limit
+- on **Status**: problems that need attention (including certificates in
+  the managed zones that expired, are overdue, revoked or from an unexpected
+  CA, and zones whose Certificate Transparency refresh failed), CA details and all rate-limit
   budgets, the broker's CA account URLs, the managed DNS zones and whether
   their CAA records protect wildcards;
 - **Users**: set roles, block and unblock accounts;

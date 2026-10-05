@@ -26,6 +26,8 @@ type dashboardData struct {
 	Headroom []providerHeadroom
 	Recent   []core.AuditEvent
 	Expiring []expiringCert
+	// CT is the Certificate Transparency inventory of the managed zones.
+	CT *ctView
 	// Admin only.
 	Counts   dashCounts
 	Warnings []string
@@ -337,6 +339,10 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request, cur *auth.Cu
 		}
 	}
 	d.Expiring = expiringNext(certs, renewAt, now)
+	if d.CT, err = h.ctReport(ctx, now); err != nil {
+		h.serverError(w, r, cur, "list certificates", err)
+		return
+	}
 	if evs, err := h.Audit.Query(ctx, activityQuery(core.AuditQuery{Types: activityTypes, Limit: 50}, p.Admin)); err != nil {
 		h.Logger.Warn("ui: audit query failed", "error", err)
 		p.Flash = firstFlash(p.Flash, &flash{Kind: "error", Text: "The activity log could not be read."})
@@ -513,6 +519,7 @@ func (h *Handler) warnings(ctx context.Context, d *dashboardData) []string {
 				z.Zone.Name+" (ACME proxy, direct API). Add an issuewild record with the broker's account if it should.")
 		}
 	}
+	w = append(w, ctWarnings(d.CT)...)
 	for _, a := range d.Accounts {
 		if a.Err != "" {
 			w = append(w, "Provider "+a.Provider+": "+a.Err)

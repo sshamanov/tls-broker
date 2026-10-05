@@ -48,9 +48,9 @@ the route's role check.
 | | blocked | normal | wildcard_allowed | admin |
 |---|---|---|---|---|
 | Log in, see banner | yes | yes | yes | yes |
-| Status | banner only | CA states, queue, rate-limit headroom, recent issuance, expiring next | same | plus needs attention, provider details, full budgets, CA accounts, zones and CAA |
+| Status | banner only | CA states, queue, rate-limit headroom, certificates in managed zones and their recent issuance (CT), the broker's expiring next and recent issuance | same | plus needs attention (CT problems and refresh errors included), provider details, full budgets, CA accounts, zones and CAA |
 | Client access | own, read only | see all with owner; create single-address grants, enable, disable, delete own | plus `wildcard` | plus address ranges, change anyone's |
-| Certificates | no | all, with owner | same | plus last error and rotate hook |
+| Certificates | no | all, with owner; all in managed zones (CT) | same | plus last error and rotate hook |
 | Activity log | issuance activity | issuance activity | issuance activity | all events, with detail |
 | Documentation | yes | yes | yes | yes |
 | Admin pages | no | no | no | yes |
@@ -81,13 +81,40 @@ top of every page, the login page included, to every user.
 - Rate-limit headroom: per CA the new-order budget and the most used
   per-domain and per-set budget, as gauges with a level: *ok*, *caution*
   from 75 % used, *exhausted* when nothing is left.
-- Recent issuance: the latest outcomes from the activity log (certificates
-  issued or failed, orders refused, requests denied, DNS proxy
-  publications), in the same words as the activity log.
-- Expiring next: the current certificate of each identifier set, soonest
-  expiry first, with its state (*ok*, *due* for renewal, *expired*; renewal
-  is the direct cache's schedule, or two thirds of the lifetime for ACME
-  certificates, whose clients decide).
+- Certificates in managed zones (right column, first): the Certificate
+  Transparency inventory (architecture §31, `internal/ctlog`, through
+  `Deps.Inventory`), so every certificate of the zones counts, whoever
+  requested it. A sentence on top ("38 current certificates in 4 zones; 2
+  need attention. Updated 3h00m ago."), then the first eight identifier sets
+  by urgency (expired, then revoked or overdue, then unexpected CA, then
+  renewal due, then the rest by renewal point; replaced last). Each row:
+  the names, a state badge (*ok*, *renewal due*, *overdue*, *expired*,
+  *revoked*, *replaced*, plus *unexpected CA*), a lifetime bar (issue,
+  renewal point at two thirds, now, expiry), the CA and "via the broker"
+  (serial matches a certificate in the broker's store) or "outside the
+  broker"; for an unexpected CA the reason ("Google Trust Services is not
+  allowed by the CAA issue records of example.com (allowed:
+  letsencrypt.org)"). Link "All in managed zones" to the full list.
+  Instead of the list: "switched off" (`ct_inventory.disabled` or no
+  inventory wired; admins get the setting's name), "Reading Certificate
+  Transparency logs ..." until the first refresh has finished, "not
+  available right now" when every zone failed and nothing is known (admins
+  also see each zone's error). When some zone failed, a line says the list
+  is partly out of date and when it is tried again; only admins see the
+  error text.
+- Issuance in the last 14 days (right column, second): CT issuances of the
+  last 14 days, newest first, at most eight, each a *renewal*, *changed
+  names* or *new names*, with CA, source and age, and a count sentence
+  ("12 certificates issued: 9 renewals and 3 for new or changed names.").
+- Expiring next (broker) and Recent issuance (broker), in a row below:
+  the broker's own view, unchanged. Expiring next (broker): the current
+  certificate of each identifier set the broker issued, soonest expiry
+  first, with its state (*ok*, *due* for renewal, *expired*; renewal is the
+  direct cache's schedule, or two thirds of the lifetime for ACME
+  certificates, whose clients decide). Recent issuance (broker): the latest
+  outcomes from the activity log (certificates issued or failed, orders
+  refused, requests denied, DNS proxy publications), in the same words as
+  the activity log.
 
 Admins additionally see:
 - Needs attention: problems and warnings of the active configuration, no
@@ -97,7 +124,10 @@ Admins additionally see:
   `docs/authentication.md`), zones without a hosted zone (no `hosted_zone_id` and discovery
   by name failed), zones whose CAA does not protect wildcards, zones whose CAA
   does not authorize a configured provider, providers whose account URL cannot
-  be read, open provider circuits.
+  be read, open provider circuits, CT zones that could not be refreshed
+  (with the last success and the error), CT certificates expired, overdue
+  or revoked without a successor, and CT certificates from a CA the zone's
+  CAA does not allow (at most five named per line).
 - Provider details (health, circuit, retry-after, slots, waiting, last error)
   and every budget bucket with its meter (yellow at 50 %, red at 80 %; a
   bucket with `Used >= Limit` carries an "exhausted" badge), plus counts of
@@ -171,6 +201,18 @@ name substring, provider, kind, include expired; ACME results are paged.
 Hook: when `Deps.Rotator` (`ui.KeyRotator`) is set, admins get a "Rotate key"
 button per direct entry (`POST /ui/certificates/rotate`); without it the
 button is absent and the route is 404.
+
+Two tabs on top: "Issued by the broker" (the lists above) and "All in
+managed zones" (`/ui/certificates/zones`): one row per identifier set of
+the CT inventory with its newest certificate: names, state badge (and the
+CAA reason for an unexpected CA), lifetime bar, CA and serial, "via the
+broker" or "outside the broker", and the earlier certificates of the set in
+a disclosure (dates, CA, revoked). A sentence on top counts sets, zones and
+certificates and says when the data was updated and the next refresh.
+Filters: name substring, zone (any managed zone), state (needs attention,
+renewal due, ok, expired, replaced) and who obtained it (via the broker,
+outside). A note under the table explains the states and that CT does not
+show which ACME account was used. Same access as the certificates page.
 
 **Activity log** (`/ui/audit`). Filters: type, mode, contains (IP, name, user,
 reason; admins also detail), from and to date. Paging by time ("Older"
@@ -263,7 +305,7 @@ and every state also has a word: green *ok*, brass *caution* or *due*, seal red
   switch and Log out). Below 48rem it folds into a top bar with a Menu button.
   Every page has a title, a one-line description and, where there is one,
   its primary action. The status page is a two-column grid on wide screens.
-- The lifetime bar (status page, certificates page) shows a certificate's
+- The lifetime bar (status page, certificates pages) shows a certificate's
   validity from issue to expiry with the renewal point as a tick and now as a
   marker; the elapsed part is blue, brass once renewal is due, red when
   expired. Rate-limit gauges use the same drawing. Both are SVG whose

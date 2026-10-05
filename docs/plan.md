@@ -63,8 +63,10 @@ docs/guide/            user guide (also shown in the UI)
 
 Dependency rule: packages depend on `core` and `names`, not on each other
 (`guide` depends on neither), except `issuance` (uses the ports), the three front ends and `ui` (use
-`issuance`/`gate` through interfaces declared in `core`), and `app` (wires
-concrete types). No package imports `app`.
+`issuance`/`gate` through interfaces declared in `core`; `ui` also renders
+`guide` pages and `ctlog` snapshots, reading the inventory through its own
+`ui.CTInventory` interface), and `app` (wires concrete types). No package
+imports `app`.
 
 ## Contracts (`internal/core`)
 

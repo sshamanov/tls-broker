@@ -1,6 +1,7 @@
 {{define "lede"}}<p class="lede">Every certificate the broker obtained, who it belongs to, and where it is in its lifetime. The owner is the owner of the client access address that requested it.</p>{{end}}
 
 {{define "content"}}
+<nav class="tabs" aria-label="Certificate lists"><a href="/ui/certificates" aria-current="page">Issued by the broker</a><a href="/ui/certificates/zones">All in managed zones</a></nav>
 <form method="get" action="/ui/certificates" class="filters" role="search" aria-label="Filter certificates">
 <label>Name contains <input name="q" value="{{.Data.Q}}" placeholder="part of a name" spellcheck="false"></label>
 <label>Certificate authority <select name="provider"><option value="">Any</option>{{$p := .Data.Provider}}{{range .Data.Providers}}<option value="{{.}}"{{if eq . $p}} selected{{end}}>{{.}}</option>{{end}}</select></label>
