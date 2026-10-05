@@ -371,7 +371,12 @@ The web UI calls grants "client access" entries: a grant is an "address", a
 grant wider than /32 an "address range". "Grant" stays the engineering term
 (types, routes, audit type `grant_change`).
 
-Only admins create or enable grants that cover more than one address. A user
+Grants are created, edited (note and `wildcard` only; the prefix and owner
+never change), enabled, disabled and deleted. Users edit their own
+single-address grants; admins edit any grant. Turning `wildcard` on needs
+`wildcard_allowed` or admin, as creating a wildcard grant does.
+
+Only admins create, enable or edit grants that cover more than one address. A user
 who is not an admin may still disable or delete such a grant they own, but
 not enable it again. Wider grants that non-admins created before this rule
 stay in force (no migration); admins review them on the Client access page.

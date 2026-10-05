@@ -19,7 +19,8 @@
 <tr><td><code>{{.Prefix}}</code></td><td class="nowrap">{{.Owner}}{{if .Mine}} <span class="pill info plain">you</span>{{end}}</td>{{if $.Data.CanWildcard}}<td>{{if .Wildcard}}allowed{{else}}<span class="muted">no</span>{{end}}</td>{{end}}
 <td><span class="pill {{if .Enabled}}ok{{else}}quiet{{end}}">{{if .Enabled}}enabled{{else}}disabled{{end}}</span></td>
 <td class="wrap">{{.Note}}</td><td>{{ts .CreatedAt}}</td>
-<td class="actions">{{if .CanEdit}}
+<td class="actions">{{if .CanManage}}
+{{if .CanEdit}}<a class="btn small" href="/ui/grants/{{.ID}}/edit{{if $.Data.Owner}}?owner={{$.Data.Owner}}{{end}}">Edit</a>{{end}}
 {{if or .Enabled .CanEnable}}<form method="post" action="/ui/grants/{{.ID}}/{{if .Enabled}}disable{{else}}enable{{end}}">{{template "csrf" $}}<input type="hidden" name="owner" value="{{$.Data.Owner}}"><button type="submit" class="small">{{if .Enabled}}Disable{{else}}Enable{{end}}</button></form>{{end}}
 <form method="post" action="/ui/grants/{{.ID}}/delete" data-confirm="Delete address {{.Prefix}} of {{.Owner}}? Machines there lose access unless their names resolve to them.">{{template "csrf" $}}<input type="hidden" name="owner" value="{{$.Data.Owner}}"><button type="submit" class="small danger">Delete</button></form>
 {{end}}</td></tr>
@@ -35,7 +36,7 @@
 <label>Note <input name="note" value="{{.Data.Form.Note}}" maxlength="200" placeholder="build server"><span class="hint">Optional; helps others know what the machine is.</span></label>
 {{if .Data.CanWildcard}}<label class="check"><input type="checkbox" name="wildcard" value="true"{{if .Data.Form.Wildcard}} checked{{end}}> <span>Allow wildcard certificates (<code>*.example.com</code>)</span></label>{{end}}
 <div class="buttons"><button type="submit" class="primary">Add address</button></div>
-<p class="muted small">{{if .Data.CanWildcard}}The note and the wildcard choice apply{{else}}The note applies{{end}} to every address added. Each address is yours: you and administrators can disable or delete it.</p>
+<p class="muted small">{{if .Data.CanWildcard}}The note and the wildcard choice apply{{else}}The note applies{{end}} to every address added. Each address is yours: you and administrators can edit, disable or delete it. To change the note{{if .Data.CanWildcard}} or the wildcard choice{{end}} of an address already listed, use Edit on its row.</p>
 </form>
 </section>
 {{end}}

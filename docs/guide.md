@@ -136,7 +136,7 @@ nobody fetches is not renewed. For example, daily from cron:
 - **Certificates**: every certificate in the managed zones, and those the
   broker issued, with owner, CA and validity.
 - **Client access**: addresses allowed to request certificates. Add yours
-  here; disable or delete your own entries.
+  here; disable or delete your own entries. To change a note, use Edit.
 - **Activity**: every request with its outcome and the reason for a
   refusal. Look here first when something fails.
 - **Documentation**: this guide.

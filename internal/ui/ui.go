@@ -257,6 +257,8 @@ func (h *Handler) routes() {
 
 	h.route("GET /ui/grants", accessAny, h.grantsPage)
 	h.route("POST /ui/grants", accessUser, h.grantCreate)
+	h.route("GET /ui/grants/{id}/edit", accessUser, h.grantEditPage)
+	h.route("POST /ui/grants/{id}/edit", accessUser, h.grantEdit)
 	h.route("POST /ui/grants/{id}/{action}", accessUser, h.grantAction)
 
 	h.route("GET /ui/certificates", accessUser, h.certificates)

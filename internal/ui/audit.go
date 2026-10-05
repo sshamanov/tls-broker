@@ -207,13 +207,15 @@ func activitySummary(ev core.AuditEvent) string {
 		}
 		return "DNS-01 publication failed."
 	case core.AuditGrantChange:
-		// The UI writes "<verb> grant <prefix>[ wildcard=<bool>]".
+		// The UI writes "<verb> grant <prefix>[ wildcard=<bool>]", or
+		// "updated grant <prefix>: <changes>" for an edit.
 		verb, rest, ok := strings.Cut(ev.Detail, " grant ")
 		if !ok {
 			return "Client access changed."
 		}
 		prefix, wild, _ := strings.Cut(rest, " ")
-		word := map[string]string{"created": "Added", "enabled": "Enabled", "disabled": "Disabled", "deleted": "Deleted"}[verb]
+		prefix = strings.TrimSuffix(prefix, ":")
+		word := map[string]string{"created": "Added", "enabled": "Enabled", "disabled": "Disabled", "deleted": "Deleted", "updated": "Changed"}[verb]
 		if word == "" {
 			return "Client access changed."
 		}

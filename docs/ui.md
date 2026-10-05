@@ -49,7 +49,7 @@ the route's role check.
 |---|---|---|---|---|
 | Log in, see banner | yes | yes | yes | yes |
 | Status | banner only | CA states, queue, rate-limit headroom, certificates in managed zones and their recent issuance (CT), the broker's expiring next and recent issuance | same | plus needs attention (CT problems and refresh errors included), provider details, full budgets, CA accounts, zones and CAA |
-| Client access | own, read only | see all with owner; create single-address grants, enable, disable, delete own | plus `wildcard` | plus address ranges, change anyone's |
+| Client access | own, read only | see all with owner; create single-address grants, edit, enable, disable, delete own | plus `wildcard` | plus address ranges, change anyone's |
 | Certificates | no | all, with owner; all in managed zones (CT) | same | plus last error and rotate hook |
 | Activity log | issuance activity | issuance activity | issuance activity | all events, with detail |
 | Documentation | yes | yes | yes | yes |
@@ -171,9 +171,12 @@ form keeps the text and lists each refused entry with its reason ("Nothing
 was added: 2 of 4 entries were refused."; 400 if any entry is malformed or
 too wide, else 403). Duplicates in the input collapse after masking
 (`10.1.2.3` and `10.1.2.3/32` are one). An entry the user already owns with
-the same prefix is skipped, not an error, and the flash names it ("Already
-yours, skipped: …"); another user's grant for the same prefix does not
-count. The note and the wildcard choice apply to every new grant, and each
+the same prefix is skipped, not an error, and adding it again never changes
+it: the flash names it and points to Edit ("10.1.2.4/32 is already listed as
+yours; use Edit on its row to change it."), as a warning when nothing was
+added. Another user's grant for the same prefix does not count: the entry is
+added as a separate grant owned by you (grants are per owner; either can be
+deleted without affecting the other). The note and the wildcard choice apply to every new grant, and each
 is audited as its own `grant_change`. The flash lists what was added
 ("Added 3 addresses: …", the first ten named). The wildcard checkbox and the "Wildcards"
 column appear only for `wildcard_allowed` and `admin`; for other users the
@@ -182,7 +185,19 @@ delete appear on your own grants, and on all grants for an admin; posting an
 action on someone else's grant answers 403. A non-admin's own disabled grant
 wider than /32 (from before ranges became admin-only) offers delete but not
 enable, and enabling it answers 403; such grants stay in force while enabled,
-and admins review them here. A blocked user sees only their own
+and admins review them here. Edit (`GET`/`POST /ui/grants/{id}/edit`, a separate
+page, no script needed) changes the note and, for `wildcard_allowed` and
+`admin`, the wildcard switch; the address, owner and enabled state stay (the
+page says to delete and add to use another address). It appears on your own
+single addresses, and on every grant for an admin, who keeps the owner when
+editing someone else's. Someone else's grant answers 403, and so does a
+non-admin's own grant wider than /32 ("Only administrators can edit an
+address range."). Without the wildcard role the form has only the note and
+keeps the switch as it is; posting `wildcard=true` answers 403 and changes
+nothing. A saved edit flashes "Saved address 10.1.2.3/32." and is audited
+as one `grant_change` ("updated grant 10.1.2.3/32: wildcard false→true, note
+changed"; the activity log reads "Changed address 10.1.2.3/32."); an edit
+that changes nothing is not audited. A blocked user sees only their own
 grants, read-only. Changes are audited as `grant_change`.
 
 **Certificates** (`/ui/certificates`). Every user who is not blocked sees all

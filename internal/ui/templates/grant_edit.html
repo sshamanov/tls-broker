@@ -1,0 +1,13 @@
+{{define "lede"}}<p class="lede">Change the note{{if .Data.CanWildcard}} or the wildcard choice{{end}} of a listed address.</p>{{end}}
+
+{{define "content"}}
+{{if .Data.Error}}<div class="notice error" role="alert"><p>{{.Data.Error}}</p></div>{{end}}
+<section class="panel" aria-labelledby="h-edit"><h2 id="h-edit"><span>Address <code>{{.Data.Grant.Prefix}}</code></span></h2>
+<p class="muted small">Owner: {{.Data.Owner}}{{if .Data.Mine}} (you){{end}} · {{if .Data.Grant.Enabled}}enabled{{else}}disabled{{end}}. The address itself cannot be changed: to use another one, delete this address and add the new one.</p>
+<form method="post" action="/ui/grants/{{.Data.Grant.ID}}/edit" class="form">{{template "csrf" .}}<input type="hidden" name="owner" value="{{.Data.Filter}}">
+<label>Note <input name="note" value="{{.Data.Note}}" maxlength="200" placeholder="build server"><span class="hint">Optional; helps others know what the machine is.</span></label>
+{{if .Data.CanWildcard}}<label class="check"><input type="checkbox" name="wildcard" value="true"{{if .Data.Wildcard}} checked{{end}}> <span>Allow wildcard certificates (<code>*.example.com</code>)</span></label>{{end}}
+<div class="buttons"><button type="submit" class="primary">Save</button><a class="btn" href="/ui/grants{{if .Data.Filter}}?owner={{.Data.Filter}}{{end}}">Cancel</a></div>
+</form>
+</section>
+{{end}}

@@ -442,12 +442,20 @@ func TestGrantMultipleEntries(t *testing.T) {
 		t.Errorf("audit events: %d, want 3", len(evs))
 	}
 
-	// An address the user already owns is skipped and named; someone else's
-	// same address does not count.
+	// An address the user already owns is skipped and named, with a pointer
+	// to Edit; someone else's same address does not count.
 	code(t, carol.act("/ui/grants", url.Values{"prefix": {"10.1.2.4 10.1.2.6"}}), 303)
-	see(t, carol.get("/ui/grants"), "Added address 10.1.2.6/32. Machines there can request certificates now. Already yours, skipped: 10.1.2.4/32.")
-	code(t, carol.act("/ui/grants", url.Values{"prefix": {"10.1.2.4"}}), 303)
-	see(t, carol.get("/ui/grants"), "Nothing was added. Already yours, skipped: 10.1.2.4/32.")
+	see(t, carol.get("/ui/grants"), `<div class="notice ok" role="status"><p>Added address 10.1.2.6/32. Machines there can request certificates now. 10.1.2.4/32 is already listed as yours; use Edit on its row to change it.</p>`)
+	// Adding it again with a different note or wildcard choice changes
+	// nothing and says so as a warning, not as success.
+	r = carol.act("/ui/grants", url.Values{"prefix": {"10.1.2.4"}, "note": {"new note"}, "wildcard": {"true"}})
+	code(t, r, 303)
+	see(t, carol.follow(r), `<div class="notice warn" role="status"><p>Nothing was added. 10.1.2.4/32 is already listed as yours; use Edit on its row to change it.</p>`)
+	code(t, carol.act("/ui/grants", url.Values{"prefix": {"10.1.2.4, 10.1.2.5"}}), 303)
+	see(t, carol.get("/ui/grants"), "Nothing was added. 10.1.2.4/32, 10.1.2.5/32 are already listed as yours; use Edit on their rows to change them.")
+	if g := grantOf(t, e, cid, "10.1.2.4/32"); g.Note != "rack 4" {
+		t.Errorf("a skipped add changed the grant: %+v", g)
+	}
 	code(t, bob.act("/ui/grants", url.Values{"prefix": {"10.1.2.4, 10.1.2.7/32"}}), 303)
 	if got := prefixes(bid); !slices.Equal(got, []string{"10.1.2.4/32", "10.1.2.7/32"}) {
 		t.Fatalf("bob: %v", got)
@@ -476,6 +484,159 @@ func TestGrantMultipleEntries(t *testing.T) {
 		t.Fatalf("bob after 50: %d grants", len(got))
 	}
 	see(t, bob.get("/ui/grants"), "Added 50 addresses: 10.3.0.1/32, ", " and 40 more.")
+}
+
+// grantOf returns uid's grant for prefix.
+func grantOf(t *testing.T, e *env, uid int64, prefix string) core.Grant {
+	t.Helper()
+	gs, err := e.store.Grants().List(bg, uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range gs {
+		if g.Prefix.String() == prefix {
+			return g
+		}
+	}
+	t.Fatalf("user %d has no grant %s: %+v", uid, prefix, gs)
+	return core.Grant{}
+}
+
+// TestGrantEdit: the note and the wildcard switch of a listed address can be
+// changed in place; the address, owner and enabled state cannot. Users edit
+// their own single addresses, admins any grant.
+func TestGrantEdit(t *testing.T) {
+	e := newEnv(t)
+	bob := e.login("bob")
+	carol := e.loginAs("carol", core.RoleWildcardAllowed)
+	admin := e.login("alice")
+	bid, cid := e.userID("bob"), e.userID("carol")
+	code(t, bob.act("/ui/grants", url.Values{"prefix": {"10.1.0.1"}, "note": {"old"}}), 303)
+	code(t, carol.act("/ui/grants", url.Values{"prefix": {"10.2.0.1"}, "note": {"ingress"}}), 303)
+	bg1 := grantOf(t, e, bid, "10.1.0.1/32")
+	cg := grantOf(t, e, cid, "10.2.0.1/32")
+	bpath, cpath := "/ui/grants/"+itoa(bg1.ID)+"/edit", "/ui/grants/"+itoa(cg.ID)+"/edit"
+
+	// Rows the viewer may change link to the edit page; others do not.
+	page := bob.get("/ui/grants")
+	see(t, page, `href="`+bpath+`">Edit</a>`)
+	lacks(t, page, `href="`+cpath+`"`)
+	see(t, admin.get("/ui/grants"), `href="`+bpath+`">Edit</a>`, `href="`+cpath+`">Edit</a>`)
+	see(t, bob.get("/ui/grants?owner=mine"), `href="`+bpath+`?owner=mine">Edit</a>`)
+
+	// The owner edits the note. A user without the wildcard role gets a
+	// note-only form that never mentions wildcards.
+	form := bob.get(bpath)
+	code(t, form, 200)
+	see(t, form, "<code>10.1.0.1/32</code>", `name="note" value="old"`, "The address itself cannot be changed", "delete this address and add the new one", ">Save</button>")
+	lacks(t, form, "ildcard")
+	r := bob.act(bpath, url.Values{"note": {"  build server  "}, "owner": {"mine"}})
+	code(t, r, 303)
+	if loc := r.hdr.Get("Location"); loc != "/ui/grants?owner=mine" {
+		t.Errorf("redirect keeps the filter: %q", loc)
+	}
+	see(t, bob.follow(r), `<div class="notice ok" role="status"><p>Saved address 10.1.0.1/32.</p>`)
+	if g := grantOf(t, e, bid, "10.1.0.1/32"); g.Note != "build server" || g.Wildcard || !g.Enabled || g.OwnerUserID != bid {
+		t.Errorf("after note edit: %+v", g)
+	}
+	// Nothing changed: no audit event.
+	before, _ := e.audit.Query(bg, core.AuditQuery{Type: core.AuditGrantChange})
+	r = bob.act(bpath, url.Values{"note": {"build server"}})
+	see(t, bob.follow(r), "Nothing changed for address 10.1.0.1/32.")
+	if after, _ := e.audit.Query(bg, core.AuditQuery{Type: core.AuditGrantChange}); len(after) != len(before) {
+		t.Errorf("a no-op edit was audited")
+	}
+
+	// A normal user cannot set wildcard: 403, nothing changed.
+	r = bob.act(bpath, url.Values{"note": {"x"}, "wildcard": {"true"}})
+	code(t, r, 403)
+	see(t, r, "may not allow wildcard certificates")
+	if g := grantOf(t, e, bid, "10.1.0.1/32"); g.Wildcard || g.Note != "build server" {
+		t.Errorf("refused edit changed the grant: %+v", g)
+	}
+	// Nor touch someone else's grant (page and post).
+	code(t, bob.get(cpath), 403)
+	code(t, bob.act(cpath, url.Values{"note": {"mine now"}}), 403)
+	if g := grantOf(t, e, cid, "10.2.0.1/32"); g.Note != "ingress" {
+		t.Errorf("bob changed carol's grant: %+v", g)
+	}
+	code(t, bob.get("/ui/grants/9999/edit"), 404)
+	code(t, bob.act("/ui/grants/9999/edit", nil), 404)
+
+	// The wildcard user sets wildcard on their own address.
+	see(t, carol.get(cpath), `name="wildcard"`)
+	code(t, carol.act(cpath, url.Values{"note": {"ingress"}, "wildcard": {"true"}}), 303)
+	if g := grantOf(t, e, cid, "10.2.0.1/32"); !g.Wildcard || g.Note != "ingress" {
+		t.Errorf("carol's wildcard edit: %+v", g)
+	}
+	// A user who lost the wildcard role keeps the switch as it is when
+	// editing the note.
+	if err := e.store.Users().SetRole(bg, cid, core.RoleNormal); err != nil {
+		t.Fatal(err)
+	}
+	lacks(t, carol.get(cpath), "ildcard")
+	code(t, carol.act(cpath, url.Values{"note": {"ingress 2"}}), 303)
+	if g := grantOf(t, e, cid, "10.2.0.1/32"); !g.Wildcard || g.Note != "ingress 2" {
+		t.Errorf("note edit without the role dropped wildcard: %+v", g)
+	}
+
+	// The admin edits anyone's grant, wildcard included; the owner stays.
+	see(t, admin.get(bpath), "Owner: bob", `name="wildcard"`)
+	code(t, admin.act(bpath, url.Values{"note": {"build server"}, "wildcard": {"true"}}), 303)
+	if g := grantOf(t, e, bid, "10.1.0.1/32"); !g.Wildcard || g.OwnerUserID != bid {
+		t.Errorf("admin edit: %+v", g)
+	}
+	code(t, admin.act(bpath, url.Values{"note": {""}}), 303)
+	if g := grantOf(t, e, bid, "10.1.0.1/32"); g.Wildcard || g.Note != "" || g.OwnerUserID != bid {
+		t.Errorf("admin clear: %+v", g)
+	}
+	// Admins edit ranges; a non-admin may not edit their own range.
+	old := &core.Grant{OwnerUserID: bid, Prefix: netip.MustParsePrefix("10.9.0.0/24"), Enabled: true, CreatedAt: e.clock.Now()}
+	if err := e.store.Grants().Create(bg, old); err != nil {
+		t.Fatal(err)
+	}
+	rpath := "/ui/grants/" + itoa(old.ID) + "/edit"
+	lacks(t, bob.get("/ui/grants"), `href="`+rpath+`"`)
+	for _, r := range []resp{bob.get(rpath), bob.act(rpath, url.Values{"note": {"lab"}})} {
+		code(t, r, 403)
+		see(t, r, "Only administrators can edit an address range.")
+	}
+	code(t, admin.act(rpath, url.Values{"note": {"lab"}}), 303)
+	if g := grantOf(t, e, bid, "10.9.0.0/24"); g.Note != "lab" || g.OwnerUserID != bid {
+		t.Errorf("admin range edit: %+v", g)
+	}
+	// Too long a note is refused.
+	r = bob.act(bpath, url.Values{"note": {strings.Repeat("n", 201)}})
+	code(t, r, 400)
+	see(t, r, "The note is longer than 200 characters.")
+
+	// CSRF is required.
+	code(t, bob.post(bpath, url.Values{"note": {"no token"}}), 403)
+	if g := grantOf(t, e, bid, "10.1.0.1/32"); g.Note == "no token" {
+		t.Error("edit without CSRF token applied")
+	}
+
+	// Audit: one grant_change per edit, saying what changed; the activity
+	// log says "Changed address".
+	evs, _ := e.audit.Query(bg, core.AuditQuery{Type: core.AuditGrantChange, Contains: "updated grant"})
+	var details []string
+	for _, ev := range evs {
+		details = append(details, ev.Detail)
+	}
+	for _, want := range []string{
+		"updated grant 10.1.0.1/32: note changed",
+		"updated grant 10.2.0.1/32: wildcard false→true",
+		"updated grant 10.1.0.1/32: wildcard false→true",
+		"updated grant 10.1.0.1/32: wildcard true→false, note changed",
+		"updated grant 10.9.0.0/24: note changed",
+	} {
+		if !slices.Contains(details, want) {
+			t.Errorf("audit lacks %q: %q", want, details)
+		}
+	}
+	act := bob.get("/ui/audit")
+	see(t, act, "Changed address 10.1.0.1/32.", "Changed address 10.2.0.1/32.")
+	lacks(t, act, "ildcard")
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }

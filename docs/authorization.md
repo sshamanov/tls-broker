@@ -38,10 +38,12 @@ A grant is an IPv4 address or CIDR with two switches, `enabled` and
 - `wildcard=true` additionally permits wildcard identifiers and skips the
   DNS-proxy CAA check below.
 - Every user who is not blocked sees all grants with their owner. A user
-  creates grants owned by themselves and enables, disables or deletes only
-  those; an admin may change any grant. Only `wildcard_allowed` users and
-  admins may create wildcard grants. Only admins may create or enable a grant
-  for an address range: `normal` and `wildcard_allowed` users add a single
+  creates grants owned by themselves and edits (note, wildcard switch),
+  enables, disables or deletes only those; an admin may change any grant and
+  keeps its owner. The prefix of a grant never changes: delete and add
+  instead. Only `wildcard_allowed` users and
+  admins may create wildcard grants or switch `wildcard` on. Only admins may create, enable or edit a
+  grant for an address range: `normal` and `wildcard_allowed` users add a single
   IPv4 address (`10.1.2.3` or `10.1.2.3/32`), and may disable or delete, but
   not re-enable, a wider grant they own. Admins may add ranges from /8 to
   /32 (for example /24 or /16); a prefix wider than /8 (/0 to /7) is refused
