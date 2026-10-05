@@ -50,6 +50,7 @@ func Validate(cfg *core.Config) Report {
 	v.upstream()
 	v.resolver()
 	v.audit()
+	v.ctInventory()
 	v.crossChecks()
 	return Report{Errors: v.problems, Warnings: v.warnings}
 }
@@ -391,6 +392,24 @@ func (v *validator) resolver() {
 	r := v.cfg.Resolver
 	v.rng("resolver.timeout", r.Timeout, 100*time.Millisecond, time.Minute)
 	v.intRng("resolver.max_cname_hops", r.MaxCNAMEHops, 1, 16)
+}
+
+// ctInventory keeps the CT refresh inside the source's unauthenticated
+// query limit for the zones it queries (core.CTMinInterval).
+func (v *validator) ctInventory() {
+	c := v.cfg.CTInventory
+	if c.Disabled {
+		v.rng("ct_inventory.interval", c.Interval, time.Hour, 7*24*time.Hour)
+		return
+	}
+	n := len(v.cfg.CTZones())
+	floor := core.CTMinInterval(n)
+	if c.Interval < floor {
+		v.errf("ct_inventory.interval", "must be at least %s for %d queried zone(s): the CT source allows %d queries per hour without an account, and a refresh costs up to 2 per zone; got %s",
+			FormatDuration(floor), n, core.CTQueriesPerHour, FormatDuration(c.Interval))
+		return
+	}
+	v.rng("ct_inventory.interval", c.Interval, floor, 7*24*time.Hour)
 }
 
 func (v *validator) audit() {

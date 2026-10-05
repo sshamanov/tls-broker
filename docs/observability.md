@@ -109,12 +109,17 @@ the direct-mode cache).
 | `tlsbroker_direct_cache_total` | counter | `result` | `hit` or `miss` on direct fetches |
 | `tlsbroker_direct_renewals_total` | counter | `result` | background renewals, `ok` or `failed` |
 | `tlsbroker_cert_not_after_timestamp_seconds` | gauge | `identifier` | expiry of each cached direct-mode certificate |
+| `tlsbroker_ct_certificates` | gauge | `state` | identifier sets in the managed zones seen in Certificate Transparency, by the state of their newest certificate: `ok`, `due`, `overdue`, `expired`, `replaced`, `revoked` (architecture §31) |
+| `tlsbroker_ct_unexpected_ca_certificates` | gauge | | sets whose newest certificate comes from a CA the zone's CAA does not allow |
+| `tlsbroker_ct_last_success_timestamp_seconds` | gauge | `zone` | last complete CT refresh of each queried zone; 0 before the first |
+| `tlsbroker_ct_zone_up` | gauge | `zone` | 1 when the last CT refresh of the zone succeeded |
 | `tlsbroker_audit_write_failures_total` | counter | | audit events that could not be written |
 | `tlsbroker_build_info` | gauge | `version`, `go_version` | always 1 |
 | `go_*`, `process_*` | | | Go runtime and process collectors |
 
 Scheduler metrics are read from the scheduler's in-memory snapshot at scrape
-time; a scrape does no I/O. The issuance engine, the DNS-01 engine and the
+time, the `ct_*` metrics from the CT inventory's in-memory snapshot; a
+scrape does no I/O. The issuance engine, the DNS-01 engine and the
 upstream adapter take no recorder: `internal/app` counts `issuance_*` from
 the engine's `issue` audit events (class and admission time from the order
 row), `upstream_errors_*` from every failed provider call, and `dns01_*`
@@ -138,6 +143,14 @@ groups:
     expr: tlsbroker_cert_not_after_timestamp_seconds - time() < 5 * 86400
     for: 1h
     annotations: {summary: "Cached certificate for {{ $labels.identifier }} expires in under 5 days"}
+  - alert: BrokerCTCertificateProblems
+    expr: tlsbroker_ct_certificates{state=~"overdue|expired|revoked"} > 0 or tlsbroker_ct_unexpected_ca_certificates > 0
+    for: 1h
+    annotations: {summary: "Certificates in the managed zones need attention (Certificate Transparency); see the status page"}
+  - alert: BrokerCTStale
+    expr: time() - tlsbroker_ct_last_success_timestamp_seconds > 2 * 86400
+    for: 1h
+    annotations: {summary: "The CT inventory of {{ $labels.zone }} has not been refreshed for two days"}
   - alert: BrokerAuditWriteFailures
     expr: increase(tlsbroker_audit_write_failures_total[10m]) > 0
     annotations: {summary: "Audit events are being lost; check disk space under <data>/audit"}

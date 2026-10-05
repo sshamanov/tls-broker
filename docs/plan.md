@@ -48,6 +48,8 @@ internal/auth/         LDAP login, local admin, sessions, CSRF
 internal/ui/           web UI
 internal/guide/        user guide (docs/guide): index parsing, GitHub-compatible
                        heading IDs, rendering and cache for the UI reader, docs lint
+internal/ctlog/        Certificate Transparency inventory: Cert Spotter source and
+                       fake, in-memory refresh loop, state analysis (architecture §31)
 internal/httpx/        real source IP, middleware, problem responses
 internal/metrics/      Prometheus collectors
 internal/app/          wiring, lifecycle, config reload, startup reconciliation
@@ -285,6 +287,8 @@ counters, fault injection by operation), `FakeDNSEngine`, `FakeDirectory`,
 `FakeAuditor`, `FakeGate`, `FakeScheduler`, `FakeProviders`, `FakeConfig`
 (with the `NewConfig()` fixture), `FakeSecrets`, and `GenKey` / `GenRSAKey` /
 `MakeCSR` / `ParseChain`.
+`internal/ctlog` keeps the fake of its own port next to it
+(`ctlog.FakeSource`, Cert Spotter's cursor semantics).
 
 `internal/names`: `Normalize`, `IsWildcard`, `Base`, `Wildcard`,
 `ChallengeRecord`, `IdentifierFromChallengeRecord`, `RegisteredDomain`,

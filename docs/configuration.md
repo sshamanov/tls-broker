@@ -164,7 +164,24 @@ resolver:
 audit:
   max_file_bytes: 52428800     # rotate above this, >= 1 MiB
   max_files: 0                 # rotated files kept, 0 = all
+
+ct_inventory:                  # Certificate Transparency inventory (status page)
+  disabled: false              # true: no CT queries at all
+  interval: 4h                 # refresh period, takes effect without restart;
+                               # at least 24m per queried zone and 1h, at most 7d
 ```
+
+`ct_inventory.interval` has a floor because the CT source (SSLMate Cert
+Spotter, without an account) answers only 10 queries per hour that include
+subdomains, counting every page and the final empty one. The inventory
+queries every managed zone that is not inside another managed zone
+(`dev.example.com` is covered by `example.com`). A routine refresh continues
+from where the last one stopped and costs at most two queries per zone; the
+floor keeps routine refreshes within half of the hourly limit, leaving the
+rest for the full fetch after a restart and for retries: `interval >= zones x
+2 queries / 5 per hour`, i.e. 24 minutes per zone and never under an hour.
+Four queried zones need at least 1h36m; the default 4h leaves a factor of 2.5.
+See architecture §31.
 
 (The exact value written for `renew_fraction` is the float 2/3; `0.6667` above
 is shortened for reading.)

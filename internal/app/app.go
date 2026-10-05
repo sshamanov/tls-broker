@@ -5,11 +5,11 @@
 // imports it except cmd/tls-broker and the end-to-end tests.
 //
 // Startup order (New): data directory → SQLite → secrets → configuration
-// generations → metrics and audit → providers → DoH resolver → gate →
-// scheduler → Route53 + DNS-01 engine (zones verified, warn only) →
+// generations → metrics and audit → providers → DoH resolver → gate → CT
+// inventory (empty) → scheduler → Route53 + DNS-01 engine (zones verified, warn only) →
 // DNSEngine.Reconcile → issuance engine Recover → direct cache Verify →
 // listener. Run then marks the broker ready, serves, runs housekeeping and
-// follows configuration changes until its context ends, and finally drains
+// the CT inventory refresh (first one at once), follows configuration changes until its context ends, and finally drains
 // and closes everything (see Close).
 package app
 
@@ -36,6 +36,7 @@ import (
 	"tls-broker/internal/auth"
 	"tls-broker/internal/config"
 	"tls-broker/internal/core"
+	"tls-broker/internal/ctlog"
 	"tls-broker/internal/direct"
 	"tls-broker/internal/dns01"
 	"tls-broker/internal/dnsproxy"
@@ -104,6 +105,10 @@ type Options struct {
 	// HousekeepingInterval is the period of the maintenance round; zero
 	// means DefaultHousekeepingInterval, negative disables the loop.
 	HousekeepingInterval time.Duration
+	// CTSource replaces the Certificate Transparency source (SSLMate Cert
+	// Spotter) of the CT inventory, for example ctlog.NewFakeSource(0).
+	// With a replacement the inventory does not pause between requests.
+	CTSource ctlog.Source
 	// Docs is the user guide for the UI's Documentation reader; nil reads
 	// guide.DefaultDir, where the image ships docs/guide. Tests and
 	// development pass os.DirFS("docs/guide").
@@ -133,6 +138,7 @@ type App struct {
 	dns       core.DNSEngine
 	issuer    *issuance.Engine
 	direct    *direct.Service
+	ct        *ctlog.Inventory
 	acme      *acmesrv.Server
 	auth      *auth.Service
 	ui        *ui.Handler
@@ -226,6 +232,7 @@ func New(ctx context.Context, env config.Env, opts Options) (_ *App, err error) 
 			}
 			return a.sched.Snapshot()
 		},
+		CT: a.ctStats,
 	})
 	if a.auditLog, err = audit.Open(audit.Options{
 		Dir: filepath.Join(env.DataDir, "audit"), Clock: a.clock,
@@ -257,6 +264,7 @@ func New(ctx context.Context, env config.Env, opts Options) (_ *App, err error) 
 		a.resolver = doh.New(a.cfg, dohOpts...)
 	}
 	a.gate = gate.New(a.cfg, a.store.Grants(), a.resolver, a.providers)
+	a.ct = newCTInventory(a.cfg, a.resolver, a.clock, a.log, opts.CTSource)
 
 	if a.sched, err = sched.New(ctx, sched.Options{
 		Config: a.cfg, Budgets: a.store.Budgets(), States: a.store.ProviderStates(),
@@ -492,6 +500,42 @@ func (a *App) verifyZones(ctx context.Context) {
 		return
 	}
 	a.log.Info("route53 zones verified", "zones", len(a.cfg.Current().Zones))
+}
+
+// newCTInventory builds the Certificate Transparency inventory on the given
+// source, or on Cert Spotter with a polite pause between requests.
+func newCTInventory(cfg core.ConfigSource, res core.Resolver, clock core.Clock, log *slog.Logger, src ctlog.Source) *ctlog.Inventory {
+	pace := time.Duration(0)
+	if src == nil {
+		src = &ctlog.CertSpotter{UserAgent: "tls-broker/" + version.String()}
+		pace = ctlog.DefaultPace
+	}
+	return ctlog.New(ctlog.Options{Config: cfg, Source: src, Resolver: res, Clock: clock, Logger: log, Pace: pace})
+}
+
+// ctStates are the states the ct metrics always list.
+var ctStates = []ctlog.State{ctlog.StateOK, ctlog.StateDue, ctlog.StateOverdue, ctlog.StateExpired, ctlog.StateReplaced, ctlog.StateRevoked}
+
+// ctStats feeds the ct metrics at scrape time.
+func (a *App) ctStats() metrics.CTStats {
+	var st metrics.CTStats
+	if a.ct == nil {
+		return st
+	}
+	snap := a.ct.Snapshot()
+	if !snap.Enabled {
+		return st
+	}
+	rep := ctlog.Analyze(snap, a.clock.Now(), nil)
+	st.States = map[string]int{}
+	for _, s := range ctStates {
+		st.States[string(s)] = rep.Counts[s]
+	}
+	st.UnexpectedCA = rep.Unexpected
+	for _, z := range snap.Zones {
+		st.Zones = append(st.Zones, metrics.CTZone{Zone: z.Zone, LastSuccess: z.LastSuccess, OK: !z.LastAttempt.IsZero() && z.Err == ""})
+	}
+	return st
 }
 
 // zoneStatusSource adapts the DNS-01 engine to ui.ZoneStatusSource.

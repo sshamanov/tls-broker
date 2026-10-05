@@ -105,6 +105,9 @@ type Options struct {
 	// the scheduler metrics. It must be cheap and do no I/O
 	// (core.Scheduler.Snapshot).
 	Scheduler func() core.SchedulerSnapshot
+	// CT supplies the Certificate Transparency inventory at scrape time;
+	// nil omits the ct metrics. It must be cheap and do no I/O.
+	CT func() CTStats
 	// NoRuntime leaves out the Go runtime and process collectors.
 	NoRuntime bool
 }
@@ -168,6 +171,9 @@ func New(o Options) *Metrics {
 		m.dnsFailures, m.directCache, m.directRenew, m.auditFail, build, &expiryCollector{m: m})
 	if o.Scheduler != nil {
 		m.reg.MustRegister(&schedulerCollector{snap: o.Scheduler})
+	}
+	if o.CT != nil {
+		m.reg.MustRegister(&ctCollector{stats: o.CT})
 	}
 	if !o.NoRuntime {
 		m.reg.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))

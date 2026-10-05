@@ -20,6 +20,7 @@ import (
 	"tls-broker/internal/config"
 	"tls-broker/internal/core"
 	"tls-broker/internal/core/coretest"
+	"tls-broker/internal/ctlog"
 	"tls-broker/internal/dns01"
 )
 
@@ -52,6 +53,7 @@ type fixture struct {
 	r53      *dns01.FakeRoute53
 	resolver *coretest.FakeResolver
 	dir      *coretest.FakeDirectory
+	ct       *ctlog.FakeSource
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -62,7 +64,8 @@ func newFixture(t *testing.T) *fixture {
 	env.Bootstrap = core.BootstrapConfig{Admins: []string{"alice"}, LocalAdminUser: "root", LocalAdminPassword: "rootpw"}
 	clock := coretest.NewFakeClock(coretest.At(2026, 10, 3, 12))
 	f := &fixture{env: env, clock: clock, ca: coretest.NewFakeCA("primary", clock),
-		r53: dns01.NewFakeRoute53(clock), resolver: coretest.NewFakeResolver(), dir: coretest.NewFakeDirectory()}
+		r53: dns01.NewFakeRoute53(clock), resolver: coretest.NewFakeResolver(), dir: coretest.NewFakeDirectory(),
+		ct: ctlog.NewFakeSource(0)}
 	f.r53.AddZone("Z1EXAMPLE", "example.com")
 	// The CA validates against, and the resolver sees, Route53's public view.
 	f.ca.SetTXTLookup(f.r53.LookupTXT)
@@ -80,6 +83,7 @@ func (f *fixture) options(t *testing.T) Options {
 		Providers: coretest.NewFakeProviders(f.ca), Route53: f.r53, Resolver: f.r53.Resolver(f.resolver),
 		Directory: f.dir, LDAPTester: okTester{}, Listener: ln,
 		NewDirectKey: func(int) (*rsa.PrivateKey, error) { return testKey(), nil },
+		CTSource:     f.ct,
 	}
 }
 
@@ -521,4 +525,32 @@ func TestLDAPCheckedAtStartupAndOnChange(t *testing.T) {
 	r = start(t, f.env, opts)
 	defer r.stop()
 	wait(5) // startup
+}
+
+// The CT inventory runs in the background from Run on: a zone added by an
+// activation is fetched at once, and the result reaches the metrics.
+func TestCTInventoryRuns(t *testing.T) {
+	f := newFixture(t)
+	now := f.clock.Now()
+	f.ct.Add(ctlog.Issuance{TBSSHA256: "t1", Names: []string{"www.example.com"}, NotBefore: now.Add(-24 * time.Hour),
+		NotAfter: now.Add(89 * 24 * time.Hour), Issuer: "Let's Encrypt", IssuerCAA: []string{"letsencrypt.org"}})
+	r := start(t, f.env, f.options(t))
+	defer r.stop()
+	if _, chk, err := r.app.Config().Activate(context.Background(), []byte(testYAML)); err != nil || !chk.OK() {
+		t.Fatalf("activate: %v %+v", err, chk)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		_, _, body := r.get("/metrics")
+		if strings.Contains(body, `tlsbroker_ct_certificates{state="ok"} 1`) && strings.Contains(body, `tlsbroker_ct_zone_up{zone="example.com"} 1`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("ct metrics never showed the certificate; calls %v", f.ct.Calls())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if c := f.ct.Calls(); len(c) < 2 || c[0].Domain != "example.com" {
+		t.Fatalf("calls %v", c)
+	}
 }

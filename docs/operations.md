@@ -81,6 +81,13 @@ ready on `/healthz` only after all of it:
   and audited as `error` events "direct cache repaired" (admins only).
 - **Route53 zones** are verified against AWS; a failure is only a warning
   (on a first start AWS is usually not configured yet).
+- **Certificate Transparency inventory** (architecture §31) is in memory
+  only: it starts empty and the first refresh runs right after the broker
+  is ready (a few seconds, `api.certspotter.com` must be reachable). Each
+  start costs about two Cert Spotter queries per queried zone out of 10 per
+  hour; several restarts within an hour can use them up, and the status page
+  then shows the inventory as not available until the retry (15 minutes or
+  Cert Spotter's `Retry-After`).
 
 Shutdown (SIGTERM): `/healthz` turns 503, the listener stops accepting,
 in-flight requests get `server.shutdown_grace`, background issuance work
@@ -212,6 +219,21 @@ done with the CA directly if needed (the broker offers none).
 - Changing `route53.region` or the secret names in the configuration rebuilds
   the client when the generation is activated, and the zones are verified
   again (a failure is logged as a warning).
+
+### Certificate Transparency inventory stale
+
+Symptoms: the status page says the certificates in managed zones are partly
+out of date or not available; *Needs attention* names the zone and the
+error; `tlsbroker_ct_zone_up{zone} == 0`.
+
+1. "rate limited": Cert Spotter's 10 queries per hour are used up (restarts,
+   or another client behind the same address). Wait; the inventory retries
+   once after the `Retry-After` and then keeps its interval. Do not lower
+   `ct_inventory.interval` to catch up.
+2. Transport errors: check outbound HTTPS to `api.certspotter.com` from the
+   host.
+3. The previous data stays on the page while a zone fails. To stop all
+   queries set `ct_inventory.disabled: true` (takes effect at activation).
 
 ### Other checks
 

@@ -118,6 +118,9 @@ func TestValidationRules(t *testing.T) {
 		{"resolver hops", "resolver.max_cname_hops", func(c *core.Config) { c.Resolver.MaxCNAMEHops = 0 }},
 		{"audit size", "audit.max_file_bytes", func(c *core.Config) { c.Audit.MaxFileBytes = 10 }},
 		{"audit files", "audit.max_files", func(c *core.Config) { c.Audit.MaxFiles = -1 }},
+		{"ct interval below floor", "ct_inventory.interval", func(c *core.Config) { c.CTInventory.Interval = 59 * time.Minute }},
+		{"ct interval too long", "ct_inventory.interval", func(c *core.Config) { c.CTInventory.Interval = 8 * 24 * time.Hour }},
+		{"ct interval disabled zero", "ct_inventory.interval", func(c *core.Config) { c.CTInventory.Disabled = true; c.CTInventory.Interval = 0 }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -228,3 +231,35 @@ func TestValidSecretName(t *testing.T) {
 }
 
 func mustPrefix(s string) netip.Prefix { return netip.MustParsePrefix(s) }
+
+// The CT refresh floor grows with the zones queried (24 minutes per zone,
+// at least an hour); zones inside another managed zone are not queried.
+func TestCTIntervalFloor(t *testing.T) {
+	c := testConfig()
+	c.Zones = nil
+	for _, z := range []string{"a.example", "dev.a.example", "b.example", "c.example", "d.example", "e.example"} {
+		c.Zones = append(c.Zones, core.ZoneConfig{Name: z})
+	}
+	if got := c.CTZones(); len(got) != 5 || got[0] != "a.example" {
+		t.Fatalf("CTZones = %v", got)
+	}
+	if got := core.CTMinInterval(5); got != 2*time.Hour {
+		t.Fatalf("CTMinInterval(5) = %s", got)
+	}
+	if got := core.CTMinInterval(1); got != time.Hour {
+		t.Fatalf("CTMinInterval(1) = %s", got)
+	}
+	c.CTInventory.Interval = 119 * time.Minute
+	rep := Validate(c)
+	if rep.OK() || !strings.Contains(rep.Errors.Error(), "at least 2h for 5 queried zone(s)") {
+		t.Fatalf("want floor error, got %v", rep.Errors)
+	}
+	c.CTInventory.Interval = 2 * time.Hour
+	if rep := Validate(c); !rep.OK() {
+		t.Fatal(rep.Errors)
+	}
+	c.CTInventory = core.CTInventoryConfig{Disabled: true, Interval: time.Hour}
+	if rep := Validate(c); !rep.OK() {
+		t.Fatalf("disabled inventory has no floor: %v", rep.Errors)
+	}
+}

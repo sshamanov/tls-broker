@@ -42,6 +42,7 @@ import (
 	"tls-broker/internal/config"
 	"tls-broker/internal/core"
 	"tls-broker/internal/core/coretest"
+	"tls-broker/internal/ctlog"
 	"tls-broker/internal/dns01"
 )
 
@@ -179,6 +180,7 @@ func (b *broker) newApp() *app.App {
 		Directory: b.dir, LDAPTester: okLDAP{}, Listener: ln,
 		NewDirectKey:         func(int) (*rsa.PrivateKey, error) { return directKey(), nil },
 		HousekeepingInterval: -1,
+		CTSource:             ctlog.NewFakeSource(0),
 	})
 	if err != nil {
 		_ = ln.Close()

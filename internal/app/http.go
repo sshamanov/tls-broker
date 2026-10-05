@@ -144,7 +144,7 @@ func (a *App) setReady(ready bool) {
 }
 
 // startBackground starts the configuration follower, the provider registry
-// follower and the housekeeping loop.
+// follower, the CT inventory refresh loop and the housekeeping loop.
 func (a *App) startBackground() {
 	if a.registry != nil {
 		a.goBG(func(ctx context.Context) { a.registry.Follow(ctx, a.cfg) })
@@ -167,6 +167,7 @@ func (a *App) startBackground() {
 			}
 		}
 	})
+	a.goBG(a.ct.Run)
 	iv := a.opts.HousekeepingInterval
 	if iv == 0 {
 		iv = DefaultHousekeepingInterval

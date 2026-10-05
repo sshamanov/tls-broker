@@ -1252,7 +1252,8 @@ Modules inside one process:
 - Route53 engine;
 - SQLite;
 - audit logging;
-- Prometheus.
+- Prometheus;
+- Certificate Transparency inventory (read-only, §31).
 
 Implementation language is Go. The service ships as a container image and is
 deployed with Docker Compose (host networking, one data volume, settings from
@@ -1704,3 +1705,84 @@ avoid distributed/HA complexity
 ```
 
 That is the settled architecture.
+
+---
+
+# 31. Certificate Transparency Inventory
+
+Added October 2026. The broker sees only the certificates it obtained
+itself, but the managed zones also hold certificates from the operator's own
+ACME clients and anyone else who can pass validation. Certificate
+Transparency (CT) logs show all of them. The inventory reads them so the
+status page shows the dynamics of issuance and renewal across the zones, and
+problems, no matter who requested a certificate.
+
+## Source and cost
+
+- One source behind an interface (`ctlog.Source`, with a fake):
+  SSLMate Cert Spotter API v1, `GET /v1/issuances?domain=<zone>`
+  with `include_subdomains`, `match_wildcards` and `expand` for names,
+  issuer (with its CAA domains) and the certificate (for the serial),
+  unauthenticated. It merges a precertificate and its certificate into one
+  issuance (same TBS hash); the inventory also keys by that hash.
+- Cert Spotter returns only unexpired certificates, in discovery order, in
+  pages continued with `after=<last id>` until an empty page.
+- Without an account it allows 10 queries with subdomains per hour per
+  client (`X-RateLimit-Limit: 10`, measured October 2026); every page,
+  including the final empty one, counts. A refusal is HTTP 429 with
+  `Retry-After`.
+- crt.sh (the alternative) answered 502 repeatedly when tried and is known
+  to be slow; it is not used.
+
+## Cadence
+
+- Runtime only: nothing is persisted. The first refresh starts with `Run`;
+  then every `ct_inventory.interval` (default 4 h). A restart refetches
+  everything.
+- Zones are queried one after another with a 2 s pause between requests.
+  A managed zone inside another managed zone is not queried separately.
+- Each zone keeps its cursor in memory: a routine refresh asks only for
+  issuances discovered since the last one, one or two requests per zone.
+- The interval floor follows from the limit: at most 2 requests per zone per
+  routine refresh may use at most half of the 10 per hour, so
+  `interval >= zones x 24 min`, never under 1 h. The other half is left for
+  the full fetch after a restart and for retries.
+- A failed zone keeps its previous data; a failed request is retried once
+  after 5 s (not after a 429). After a 429 the round skips the remaining
+  zones. A round with failures is repeated once after 15 min (or the
+  source's `Retry-After`, if longer), otherwise the next round is the
+  regular one. A configuration change applies at once: a new interval moves
+  the next round, a new zone is fetched immediately, `disabled` drops all
+  data.
+- Certificates are kept until 30 days after expiry, so a lapsed name shows as
+  expired. After a restart only unexpired certificates are known again (the
+  source has no history of expired ones); certificates that expire while the
+  broker runs stay visible for the 30 days.
+
+## Model
+
+- Certificates are grouped by identifier set (sorted SAN list). The newest is
+  current, the older ones are its history.
+- State of the current certificate: *ok*; *renewal due* from two thirds of
+  its lifetime (30 days before expiry for 90-day certificates); *overdue*
+  from seven days before expiry (the last tenth for certificates shorter
+  than 70 days) with no newer certificate; *expired*; *revoked*; *replaced*
+  when it is past its renewal point but every name is in a newer, valid
+  certificate of another set (exact names, wildcards do not cover).
+- *Unexpected CA*: the issuing CA's CAA domains (from Cert Spotter, else a
+  small explicit mapping of CA organisations) are not allowed by the zone's
+  CAA `issue` (or, for wildcard names, `issuewild`) records. CAA is read
+  through the broker's resolver at each refresh, at the zone apex or its
+  closest parent with CAA, so it is today's CAA, not the one at issuance.
+- Problems: overdue, expired, revoked, unexpected CA. Renewal due is shown,
+  not flagged.
+- "Via the broker" means the serial matches a certificate in the broker's
+  store (ACME proxy or direct); otherwise "outside the broker". This is
+  informational, never a problem. CT does not show which ACME account was
+  used, and the inventory does not claim it.
+- Recent issuance: certificates issued in the last 14 days, each a
+  *renewal* (an older certificate of the same set exists), *changed names*
+  (some names were in an older certificate) or *new names*.
+
+The inventory never issues anything and never touches the scheduler or the
+upstream CAs; it reads public data only.

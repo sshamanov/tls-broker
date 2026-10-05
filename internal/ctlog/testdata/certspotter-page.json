@@ -1,0 +1,87 @@
+[
+ {
+  "id": "15766129210",
+  "tbs_sha256": "1794a7b74eb8117d0d911835b0a6b408a07765684bddb30af22e13be3058803e",
+  "cert_sha256": "a6756c65e002735a733e8fd231d7595d7ce622839a10672251a6b93c620c3ed8",
+  "dns_names": [
+   "pass.example.com"
+  ],
+  "pubkey_sha256": "f7f5f7f561f53ba14d46c2c40959dcedd5dfee9faf9916a24409872750f7eb32",
+  "issuer": {
+   "friendly_name": "Let's Encrypt",
+   "caa_domains": [
+    "letsencrypt.org"
+   ],
+   "pubkey_sha256": "9d637b3d27a9e570d07607b9ccadb80a70915c7af72afce12841b1b1da825fd1",
+   "name": "C=US, O=Let's Encrypt, CN=YR2"
+  },
+  "not_before": "2026-07-09T10:19:25Z",
+  "not_after": "2026-10-07T10:19:24Z",
+  "revoked": false
+ },
+ {
+  "id": "17042103228",
+  "tbs_sha256": "4389fd900b6ac10f6615c0475f61558e0f57c8229cd3ebec975a6933086aa10c",
+  "cert_sha256": "cc13db1afabd0611151918197b19a8e5f3932553fbd05fd42a487a13481f742b",
+  "dns_names": [
+   "pass.example.com"
+  ],
+  "pubkey_sha256": "18e51ace849795e5c07b77472f94448a047d6d83f74c7dd39b2d6577040dda8c",
+  "issuer": {
+   "friendly_name": "Let's Encrypt",
+   "caa_domains": [
+    "letsencrypt.org"
+   ],
+   "pubkey_sha256": "9d637b3d27a9e570d07607b9ccadb80a70915c7af72afce12841b1b1da825fd1",
+   "name": "C=US, O=Let's Encrypt, CN=YR2"
+  },
+  "not_before": "2026-09-07T15:17:55Z",
+  "not_after": "2026-12-06T15:17:54Z",
+  "revoked": true
+ },
+ {
+  "id": "17549924983",
+  "tbs_sha256": "c26d10820fac132b29de3702441765e23430aeef625bee8b0c4520302c5127f6",
+  "cert_sha256": "7c67df8b3a3324b195f9e851ec34f80b93146b02a1b959a80be1fa1b11ecf649",
+  "dns_names": [
+   "*.dev.example.com",
+   "*.example.com",
+   "example.com"
+  ],
+  "pubkey_sha256": "eec0dc12db3cca06580d83eabe1d7b5cb58b6e7fd5e7151ac3cc8f3bbb8182ad",
+  "issuer": {
+   "friendly_name": "Let's Encrypt",
+   "caa_domains": [
+    "letsencrypt.org"
+   ],
+   "pubkey_sha256": "2e8307068b6db620e4a39d068b5dee5d6ef5788cbb2c0b6d23ead84fcc17178c",
+   "name": "C=US, O=Let's Encrypt, CN=YR1"
+  },
+  "not_before": "2026-10-02T21:39:13Z",
+  "not_after": "2026-12-31T21:39:12Z",
+  "revoked": false,
+  "cert_der": "__CERT_DER__"
+ },
+ {
+  "id": "17597250121",
+  "tbs_sha256": "8302b9fd9332d538fc5344258c4442369338caec429bbc8159ea0ae8a1a8e168",
+  "cert_sha256": "8d4f8ce621d15579b6dc65b06f397f6429ad30d84a8e9e77a71532b06434e70e",
+  "dns_names": [
+   "QA.Example.com",
+   "minio.example.com",
+   "qa.example.com"
+  ],
+  "pubkey_sha256": "baf5b8c9b305f45ecd9c5dc95d5fdaecc06b2bb08fa2740dae2b3f9b2deb6e76",
+  "issuer": {
+   "friendly_name": "Let's Encrypt",
+   "caa_domains": [
+    "letsencrypt.org"
+   ],
+   "pubkey_sha256": "9d637b3d27a9e570d07607b9ccadb80a70915c7af72afce12841b1b1da825fd1",
+   "name": "C=US, O=Let's Encrypt, CN=YR2"
+  },
+  "not_before": "2026-10-05T09:29:27Z",
+  "not_after": "2027-01-03T09:29:26Z",
+  "revoked": false
+ }
+]

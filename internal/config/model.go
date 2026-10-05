@@ -22,19 +22,20 @@ import (
 // unknown field.
 
 type document struct {
-	Server    serverDoc     `yaml:"server"`
-	Zones     []zoneDoc     `yaml:"zones"`
-	Route53   route53Doc    `yaml:"route53"`
-	Providers []providerDoc `yaml:"providers"`
-	LDAP      ldapDoc       `yaml:"ldap"`
-	Sessions  sessionsDoc   `yaml:"sessions"`
-	Scheduler schedulerDoc  `yaml:"scheduler"`
-	Emergency emergencyDoc  `yaml:"emergency"`
-	Direct    directDoc     `yaml:"direct"`
-	DNSProxy  dnsProxyDoc   `yaml:"dns_proxy"`
-	Upstream  upstreamDoc   `yaml:"upstream"`
-	Resolver  resolverDoc   `yaml:"resolver"`
-	Audit     auditDoc      `yaml:"audit"`
+	Server      serverDoc      `yaml:"server"`
+	Zones       []zoneDoc      `yaml:"zones"`
+	Route53     route53Doc     `yaml:"route53"`
+	Providers   []providerDoc  `yaml:"providers"`
+	LDAP        ldapDoc        `yaml:"ldap"`
+	Sessions    sessionsDoc    `yaml:"sessions"`
+	Scheduler   schedulerDoc   `yaml:"scheduler"`
+	Emergency   emergencyDoc   `yaml:"emergency"`
+	Direct      directDoc      `yaml:"direct"`
+	DNSProxy    dnsProxyDoc    `yaml:"dns_proxy"`
+	Upstream    upstreamDoc    `yaml:"upstream"`
+	Resolver    resolverDoc    `yaml:"resolver"`
+	Audit       auditDoc       `yaml:"audit"`
+	CTInventory ctInventoryDoc `yaml:"ct_inventory"`
 }
 
 type serverDoc struct {
@@ -159,6 +160,11 @@ type resolverDoc struct {
 	MaxCNAMEHops int      `yaml:"max_cname_hops"`
 }
 
+type ctInventoryDoc struct {
+	Disabled bool     `yaml:"disabled"`
+	Interval Duration `yaml:"interval"`
+}
+
 type auditDoc struct {
 	MaxFileBytes int64 `yaml:"max_file_bytes"`
 	MaxFiles     int   `yaml:"max_files"`
@@ -217,8 +223,9 @@ func docFromConfig(c *core.Config) *document {
 			IssueTimeout: Duration(c.Upstream.IssueTimeout), PollInterval: Duration(c.Upstream.PollInterval),
 			PrepareTimeout: Duration(c.Upstream.PrepareTimeout),
 		},
-		Resolver: resolverDoc{Timeout: Duration(c.Resolver.Timeout), MaxCNAMEHops: c.Resolver.MaxCNAMEHops},
-		Audit:    auditDoc{MaxFileBytes: c.Audit.MaxFileBytes, MaxFiles: c.Audit.MaxFiles},
+		Resolver:    resolverDoc{Timeout: Duration(c.Resolver.Timeout), MaxCNAMEHops: c.Resolver.MaxCNAMEHops},
+		Audit:       auditDoc{MaxFileBytes: c.Audit.MaxFileBytes, MaxFiles: c.Audit.MaxFiles},
+		CTInventory: ctInventoryDoc{Disabled: c.CTInventory.Disabled, Interval: Duration(c.CTInventory.Interval)},
 	}
 	d.Server.TrustedProxies = []string{}
 	for _, p := range c.Server.TrustedProxies {
@@ -347,6 +354,7 @@ func configFromDoc(d *document, env Env, generation int) (*core.Config, Problems
 	}
 	cfg.Resolver = core.ResolverConfig{Timeout: d.Resolver.Timeout.std(), MaxCNAMEHops: d.Resolver.MaxCNAMEHops}
 	cfg.Audit = core.AuditConfig{MaxFileBytes: d.Audit.MaxFileBytes, MaxFiles: d.Audit.MaxFiles}
+	cfg.CTInventory = core.CTInventoryConfig{Disabled: d.CTInventory.Disabled, Interval: d.CTInventory.Interval.std()}
 	return cfg, c.problems
 }
 

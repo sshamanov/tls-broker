@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"net/netip"
+	"slices"
 	"time"
 
 	"tls-broker/internal/names"
@@ -39,6 +40,9 @@ type Config struct {
 	Upstream  UpstreamConfig
 	Resolver  ResolverConfig
 	Audit     AuditConfig
+	// CTInventory configures the Certificate Transparency inventory
+	// (architecture §31).
+	CTInventory CTInventoryConfig
 }
 
 // ServerConfig holds listener and proxy settings (architecture §19, §21).
@@ -318,6 +322,38 @@ type AuditConfig struct {
 	MaxFiles     int   // rotated files kept; 0 keeps all
 }
 
+// CTInventoryConfig configures the Certificate Transparency inventory of
+// the managed zones (architecture §31).
+type CTInventoryConfig struct {
+	// Disabled switches the inventory off: no CT queries at all.
+	Disabled bool
+	// Interval is the pause between two refreshes; default
+	// DefaultCTInterval, never below CTMinInterval for the zones queried.
+	Interval time.Duration
+}
+
+// DefaultCTInterval is the default CT refresh interval: 2.5 times
+// CTMinInterval for four queried zones.
+const DefaultCTInterval = 4 * time.Hour
+
+// CTQueriesPerHour is the CT source's unauthenticated limit of queries that
+// include subdomains (SSLMate Cert Spotter: 10 "full-domain queries" per
+// hour per client, October 2026). Every page counts, the final empty page
+// included.
+const CTQueriesPerHour = 10
+
+// CTMinInterval is the shortest CT refresh interval allowed for the given
+// number of queried zones. A routine refresh continues from the source's
+// cursor and costs at most two queries per zone (a page of new issuances
+// and the final empty page); routine refreshes may use at most half of
+// CTQueriesPerHour, so the other half stays free for the full fetch after a
+// restart and for retries. That is zones*2 queries per interval <=
+// CTQueriesPerHour/2 per hour, i.e. 24 minutes per zone, and never less
+// than an hour.
+func CTMinInterval(zones int) time.Duration {
+	return max(time.Duration(zones)*2*time.Hour/(CTQueriesPerHour/2), time.Hour)
+}
+
 // DefaultConfig returns a configuration with every default filled in and no
 // zones, no providers and no LDAP. internal/config starts from it; tests use
 // it as a base.
@@ -373,8 +409,9 @@ func DefaultConfig() *Config {
 			PollInterval:      2 * time.Second,
 			PrepareTimeout:    10 * time.Minute,
 		},
-		Resolver: ResolverConfig{Timeout: 5 * time.Second, MaxCNAMEHops: 8},
-		Audit:    AuditConfig{MaxFileBytes: 50 << 20, MaxFiles: 0},
+		Resolver:    ResolverConfig{Timeout: 5 * time.Second, MaxCNAMEHops: 8},
+		Audit:       AuditConfig{MaxFileBytes: 50 << 20, MaxFiles: 0},
+		CTInventory: CTInventoryConfig{Interval: DefaultCTInterval},
 	}
 }
 
@@ -402,6 +439,28 @@ func (c *Config) ManagedZones() names.Zones {
 	}
 	zs, _ := names.NewZones(list...)
 	return zs
+}
+
+// CTZones returns the managed zones the CT inventory queries: every zone
+// that is not inside another managed zone (a query for example.com with its
+// subdomains also covers a managed dev.example.com), in sorted order.
+func (c *Config) CTZones() []string {
+	all := c.ManagedZones().List()
+	var out []string
+	for _, z := range all {
+		inner := false
+		for _, o := range all {
+			if o != z && names.InZone(z, o) {
+				inner = true
+				break
+			}
+		}
+		if !inner {
+			out = append(out, z)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // ZoneFor returns the managed zone holding the normalized name (longest

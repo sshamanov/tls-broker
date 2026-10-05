@@ -168,3 +168,27 @@ func TestNop(t *testing.T) {
 	r.Request(core.ModeACME, OutcomeOK)
 	r.AuditWriteFailure()
 }
+
+func TestCTCollector(t *testing.T) {
+	ok := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	stats := CTStats{States: map[string]int{"ok": 30, "expired": 1, "overdue": 0}, UnexpectedCA: 2,
+		Zones: []CTZone{{Zone: "example.com", LastSuccess: ok, OK: true}, {Zone: "example.org"}}}
+	m := New(Options{CT: func() CTStats { return stats }, NoRuntime: true})
+	out := scrape(t, m)
+	for _, want := range []string{
+		`tlsbroker_ct_certificates{state="ok"} 30`,
+		`tlsbroker_ct_certificates{state="overdue"} 0`,
+		`tlsbroker_ct_unexpected_ca_certificates 2`,
+		`tlsbroker_ct_last_success_timestamp_seconds{zone="example.com"} 1.7912016e+09`,
+		`tlsbroker_ct_last_success_timestamp_seconds{zone="example.org"} 0`,
+		`tlsbroker_ct_zone_up{zone="example.com"} 1`,
+		`tlsbroker_ct_zone_up{zone="example.org"} 0`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %s in\n%s", want, out)
+		}
+	}
+	if strings.Contains(scrape(t, New(Options{NoRuntime: true})), "tlsbroker_ct_") {
+		t.Error("ct metrics without a source")
+	}
+}
