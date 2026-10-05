@@ -49,7 +49,7 @@ the route's role check.
 |---|---|---|---|---|
 | Log in, see banner | yes | yes | yes | yes |
 | Status | banner only | CA states, queue, rate-limit headroom, recent issuance, expiring next | same | plus needs attention, provider details, full budgets, CA accounts, zones and CAA |
-| Client access | own, read only | see all with owner; create single-address grants, enable, disable, delete own | plus `wildcard` | plus network ranges, change anyone's |
+| Client access | own, read only | see all with owner; create single-address grants, enable, disable, delete own | plus `wildcard` | plus address ranges, change anyone's |
 | Certificates | no | all, with owner | same | plus last error and rotate hook |
 | Activity log | issuance activity | issuance activity | issuance activity | all events, with detail |
 | Documentation | yes | yes | yes | yes |
@@ -118,13 +118,21 @@ Admins additionally see:
   parallel with an 8 s limit, so a slow resolver delays the page, never breaks
   it.
 
-**Client access** (`/ui/grants`). Networks allowed to request certificates (IP grants). One page for everyone: every grant with its owner,
-filtered by owner (everyone, mine, or one user). Create one with a note; it is
-owned by you. Users who are not admins enter a single IPv4 address (stored as
-/32; the field reads "IPv4 address"); a network range answers 403 with
-"Only administrators can add a network range." Admins may also enter an IPv4
-CIDR (stored masked; the field reads "IPv4 address or network"). `/0` and IPv6
-are refused for everyone. The wildcard checkbox appears only for
+**Client access** (`/ui/grants`). Addresses allowed to request certificates
+(IP grants). The page says "address" for a grant and "address range" for one
+wider than /32, never "network"; "grant" stays the code and audit term. One
+page for everyone: every grant with its owner (column "Address"), filtered by
+owner (everyone, mine, or one user). The only place to add is the "Add
+address" panel below the table (no header button); the grant is owned by you.
+Users who are not admins enter a single IPv4 address (stored as /32; field
+"IPv4 address", placeholder "10.1.2.3 or 10.1.2.3/32", no mention of ranges);
+a range answers 403 with "Only administrators can add an address range. Add
+a single address (10.1.2.3 or 10.1.2.3/32)." Admins may also enter an IPv4
+CIDR from /8 to /32 (stored masked; field "IPv4 address or range",
+placeholder "10.1.2.3 or 10.1.2.0/24", hint that ranges such as /24 or /16
+are allowed). A prefix wider than /8 answers 400 "A range wider than /8 is
+refused." for everyone; IPv6 is refused too. Flashes and the activity log
+read "Added address 10.1.2.3/32.", "Disabled address …" and so on. The wildcard checkbox appears only for
 `wildcard_allowed` and `admin`; the server enforces it too. Enable, disable and
 delete appear on your own grants, and on all grants for an admin; posting an
 action on someone else's grant answers 403. A non-admin's own disabled grant
@@ -140,7 +148,7 @@ or current) and the direct cache (identifier, owner, provider, generation,
 expiry, renew-at, last fetch time and address, last attempt). The owner is
 the owner of the grant that authorized the order that produced the
 certificate (for a direct entry: its active generation's certificate),
-resolved live: the username and the grant's network; "deleted grant" with
+resolved live: the username and the grant's address; "deleted grant" with
 the requesting address when the grant is gone; "no owner, DNS match from"
 the requesting address when the names resolved to the requester; "unknown"
 for certificates issued before owners were recorded (see

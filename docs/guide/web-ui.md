@@ -49,7 +49,7 @@ To give your machine access:
 
 1. Find the machine's IPv4 address as the broker sees it (the address it
    uses to reach the broker, not a public NAT address).
-2. Enter it under **Add a network**, with a note that says what the machine
+2. Enter it under **Add address** (`10.1.2.3` or `10.1.2.3/32`), with a note that says what the machine
    is.
 3. Tick **Allow wildcard certificates** only if the machine needs `*.`
    certificates. The box appears only for users with the wildcard role and
@@ -73,7 +73,7 @@ first; [Troubleshooting](troubleshooting.md) explains the reasons.
 |---|---|
 | user | see status, certificates, client access and activity; add single-address entries and manage their own |
 | user with wildcards | the same, and allow wildcards on their entries |
-| administrator | everything, plus network ranges and anyone's entries, and the pages below |
+| administrator | everything, plus address ranges (/8 to /32) and anyone's entries, and the pages below |
 | blocked | read only: own client access entries, the activity log and this documentation |
 
 Administrators additionally see:

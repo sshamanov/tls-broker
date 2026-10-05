@@ -47,6 +47,11 @@ client got the new files; the service has not reloaded them. Add a reload
 hook ([ACME proxy](acme-proxy.md#install-the-certificate-and-reload-the-service),
 [direct download](direct.md#keep-it-current)).
 
+**Client access says "Only administrators can add an address range".**
+You entered a range such as `10.1.2.0/24`. Add each machine's address
+instead (`10.1.2.3` or `10.1.2.3/32`), or ask an administrator for the range.
+Nobody can add a range wider than /8.
+
 **My blocked colleague's machines still get certificates.** Client access
 entries keep working when their owner is blocked. An administrator can
 disable or delete them on the Client access page.

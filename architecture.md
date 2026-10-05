@@ -363,8 +363,13 @@ A user's role controls what grants they are allowed to create/manage:
 
 - normal: ordinary grants for a single IPv4 address (/32);
 - wildcard_allowed: ordinary or wildcard grants for a single IPv4 address;
-- admin: all control-plane operations, including grants for a network range
-  (any IPv4 CIDR except /0).
+- admin: all control-plane operations, including grants for an address range
+  (an IPv4 CIDR from /8 to /32; anything wider than /8 is refused for
+  everyone).
+
+The web UI calls grants "client access" entries: a grant is an "address", a
+grant wider than /32 an "address range". "Grant" stays the engineering term
+(types, routes, audit type `grant_change`).
 
 Only admins create or enable grants that cover more than one address. A user
 who is not an admin may still disable or delete such a grant they own, but

@@ -292,16 +292,18 @@ func TestGrantRules(t *testing.T) {
 	if len(evs) < 5 {
 		t.Errorf("grant audit events: %d", len(evs))
 	}
-	see(t, bob.get("/ui/audit"), "Added network 10.9.9.9/32 (wildcards allowed).", "Deleted network 10.1.2.3/32.", "Disabled network 10.9.9.9/32.", "carol")
+	see(t, bob.get("/ui/audit"), "Added address 10.9.9.9/32 (wildcards allowed).", "Deleted address 10.1.2.3/32.", "Disabled address 10.9.9.9/32.", "carol")
 }
 
-// TestNetworkGrantsAdminOnly: users who are not admins add single addresses
-// only; a network range is an admin's call. Their existing wider grants stay
+// TestRangeGrantsAdminOnly: users who are not admins add single addresses
+// only; an address range is an admin's call. Their existing wider grants stay
 // in force and they may still disable or delete them, but not re-enable them.
-func TestNetworkGrantsAdminOnly(t *testing.T) {
+func TestRangeGrantsAdminOnly(t *testing.T) {
 	e := newEnv(t)
 	admin := e.login("alice")
-	see(t, admin.get("/ui/grants"), "IPv4 address or network", `placeholder="10.1.2.3 or 10.1.2.0/24"`)
+	ap := admin.get("/ui/grants")
+	see(t, ap, "Add address</h2>", "IPv4 address or range <input", `placeholder="10.1.2.3 or 10.1.2.0/24"`, "range such as /24 or /16", ">Add address</button>")
+	lacks(t, ap, "network", "Network", `href="#add"`)
 	for i, role := range []core.Role{core.RoleNormal, core.RoleWildcardAllowed} {
 		user := []string{"bob", "carol"}[i]
 		c := e.loginAs(user, role)
@@ -309,15 +311,15 @@ func TestNetworkGrantsAdminOnly(t *testing.T) {
 		net := "10.5." + itoa(int64(i)) + "."
 
 		page := c.get("/ui/grants")
-		see(t, page, "IPv4 address <input", `placeholder="10.1.2.3"`, "Network ranges can be added by administrators.")
-		lacks(t, page, "IPv4 address or network", "10.1.2.0/24")
+		see(t, page, "Add address</h2>", "IPv4 address <input", `placeholder="10.1.2.3 or 10.1.2.3/32"`, "<th>Address</th>", ">Add address</button>")
+		lacks(t, page, "IPv4 address or range", "10.1.2.0/24", "range", "network", "Network", `href="#add"`)
 
 		code(t, c.act("/ui/grants", url.Values{"prefix": {net + "1"}}), 303)
 		code(t, c.act("/ui/grants", url.Values{"prefix": {net + "2/32"}}), 303)
 		for _, wide := range []string{net + "0/24", net + "2/31", "10.0.0.0/8"} {
 			r := c.act("/ui/grants", url.Values{"prefix": {wide}, "note": {"lab"}})
 			code(t, r, 403)
-			see(t, r, "Only administrators can add a network range. Add a single address, or ask an administrator.", `value="`+wide+`"`)
+			see(t, r, "Only administrators can add an address range. Add a single address (10.1.2.3 or 10.1.2.3/32).", `value="`+wide+`"`)
 		}
 		gs, _ := e.store.Grants().List(bg, uid)
 		if len(gs) != 2 || gs[0].Prefix.Bits() != 32 || gs[1].Prefix.Bits() != 32 {
@@ -338,9 +340,9 @@ func TestNetworkGrantsAdminOnly(t *testing.T) {
 		lacks(t, page, `action="`+path+`/enable"`)
 		r := c.act(path+"/enable", nil)
 		code(t, r, 403)
-		see(t, r, "Only administrators can enable a network range.")
+		see(t, r, "Only administrators can enable an address range.")
 		if g, _ := e.store.Grants().Get(bg, old.ID); g.Enabled {
-			t.Fatalf("%s re-enabled a network range", role)
+			t.Fatalf("%s re-enabled an address range", role)
 		}
 		see(t, admin.get("/ui/grants"), `action="`+path+`/enable"`)
 		code(t, admin.act(path+"/enable", nil), 303)
@@ -352,11 +354,32 @@ func TestNetworkGrantsAdminOnly(t *testing.T) {
 			t.Fatalf("%s could not delete their range: %v", role, err)
 		}
 	}
-	code(t, admin.act("/ui/grants", url.Values{"prefix": {"10.6.0.0/24"}}), 303)
-	if ag, _ := e.store.Grants().List(bg, e.userID("alice")); len(ag) != 1 || ag[0].Prefix.String() != "10.6.0.0/24" {
-		t.Fatalf("admin range: %+v", ag)
+	// Admins add ranges from /8 to /32; anything wider is refused for
+	// everyone with 400.
+	want := []string{"10.0.0.0/8", "10.6.0.0/16", "10.7.0.0/23", "10.6.0.0/24"}
+	for _, p := range []string{"10.0.0.0/8", "10.6.1.2/16", "10.7.1.0/23", "10.6.0.0/24"} {
+		code(t, admin.act("/ui/grants", url.Values{"prefix": {p}}), 303)
 	}
-	code(t, admin.act("/ui/grants", url.Values{"prefix": {"0.0.0.0/0"}}), 400)
+	ag, _ := e.store.Grants().List(bg, e.userID("alice"))
+	var got []string
+	for _, g := range ag {
+		got = append(got, g.Prefix.String())
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("admin ranges: %v, want %v", got, want)
+	}
+	for _, c := range []*client{admin, e.login("bob")} {
+		for _, p := range []string{"8.0.0.0/7", "0.0.0.0/0", "10.0.0.0/1"} {
+			r := c.act("/ui/grants", url.Values{"prefix": {p}})
+			code(t, r, 400)
+			see(t, r, "A range wider than /8 is refused.")
+		}
+	}
+	if ag, _ := e.store.Grants().List(bg, e.userID("alice")); len(ag) != len(want) {
+		t.Fatalf("a refused range was stored: %+v", ag)
+	}
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
@@ -662,9 +685,9 @@ func TestCertificates(t *testing.T) {
 	r := bob.get("/ui/certificates")
 	see(t, r, "www.example.com", "api.example.com", "svc.example.com", "10.2.2.2", "renewal failing")
 	lacks(t, r, "Rotate key", "boom")
-	// Owners: the grant's owner and network, a deleted grant with the
+	// Owners: the grant's owner and address, a deleted grant with the
 	// requesting address, or no owner for a DNS match.
-	see(t, r, `carol<span class="cell-sub">via <code>10.0.0.5/32</code>`, `network removed</span><span class="cell-sub">requested from <code>10.0.0.5</code>`, `no owner</span><span class="cell-sub">DNS match from <code>10.0.0.5</code>`)
+	see(t, r, `carol<span class="cell-sub">via <code>10.0.0.5/32</code>`, `address removed</span><span class="cell-sub">requested from <code>10.0.0.5</code>`, `no owner</span><span class="cell-sub">DNS match from <code>10.0.0.5</code>`)
 	if n := strings.Count(r.body, "via <code>10.0.0.5/32</code>"); n != 3 { // c3, c5 and the direct entry
 		t.Errorf("carol owns %d rows, want 3", n)
 	}

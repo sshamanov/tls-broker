@@ -261,7 +261,7 @@ func testDNSProxy(t *testing.T) {
 }
 
 // The UI: an LDAP user logs in, creates a grant (CSRF-protected form), may
-// not create a network-range or wildcard grant with the normal role, and sees
+// not create an address-range or wildcard grant with the normal role, and sees
 // the change in the audit log (admin-only there; the issuance it allows is
 // public); the grant then authorizes that host.
 func testUI(t *testing.T) {
@@ -280,8 +280,8 @@ func testUI(t *testing.T) {
 	}
 	bob.csrf = tok
 	if code, body := bob.do(http.MethodPost, "/ui/grants", url.Values{"prefix": {"10.0.3.0/24"}, "note": {"lab"}}); code != http.StatusForbidden ||
-		!strings.Contains(body, "Only administrators can add a network range.") {
-		t.Fatalf("network-range grant with the normal role: %d %.300s", code, body)
+		!strings.Contains(body, "Only administrators can add an address range.") {
+		t.Fatalf("address-range grant with the normal role: %d %.300s", code, body)
 	}
 	if code, body := bob.do(http.MethodPost, "/ui/grants", url.Values{"prefix": {"10.0.3.7"}, "note": {"lab"}}); code != http.StatusSeeOther {
 		t.Fatalf("create grant: %d %.300s", code, body)
@@ -315,7 +315,7 @@ func testUI(t *testing.T) {
 		t.Fatalf("admin activity page: %d", code)
 	}
 	code, body := bob.do(http.MethodGet, "/ui/audit", nil)
-	if code != http.StatusOK || !strings.Contains(body, "Added network 10.0.3.7/32.") || !strings.Contains(body, "lab.example.com") ||
+	if code != http.StatusOK || !strings.Contains(body, "Added address 10.0.3.7/32.") || !strings.Contains(body, "lab.example.com") ||
 		strings.Contains(body, "created grant 10.0.3.7/32") || strings.Contains(body, "<td>login</td>") {
 		t.Fatalf("user activity page: %d", code)
 	}

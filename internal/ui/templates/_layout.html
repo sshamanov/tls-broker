@@ -65,7 +65,7 @@
 
 {{define "notices"}}{{range .Banners}}<div class="notice error banner" role="status"><p>{{.}}</p></div>{{end}}
 {{if .Flash}}<div class="notice {{.Flash.Kind}}" role="status"><p>{{.Flash.Text}}</p></div>{{end}}
-{{if and .User .Blocked}}<div class="notice error" role="status"><p>Your account is blocked. You cannot request certificates or change anything; you can still see your networks, the activity log and the documentation. Ask an administrator to unblock you.</p></div>{{end}}{{end}}
+{{if and .User .Blocked}}<div class="notice error" role="status"><p>Your account is blocked. You cannot request certificates or change anything; you can still see your addresses on Client access, the activity log and the documentation. Ask an administrator to unblock you.</p></div>{{end}}{{end}}
 
 {{define "outcome"}}{{$o := outcome .}}<span class="pill {{if eq $o "ok"}}ok{{else if eq $o "denied"}}caution{{else if eq $o "failed"}}bad{{else}}quiet{{end}}">{{if $o}}{{$o}}{{else}}noted{{end}}</span>{{end}}
 

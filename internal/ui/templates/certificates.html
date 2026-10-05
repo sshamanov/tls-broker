@@ -1,4 +1,4 @@
-{{define "lede"}}<p class="lede">Every certificate the broker obtained, who it belongs to, and where it is in its lifetime. The owner is the owner of the network that requested it.</p>{{end}}
+{{define "lede"}}<p class="lede">Every certificate the broker obtained, who it belongs to, and where it is in its lifetime. The owner is the owner of the client access address that requested it.</p>{{end}}
 
 {{define "content"}}
 <form method="get" action="/ui/certificates" class="filters" role="search" aria-label="Filter certificates">
@@ -45,4 +45,4 @@
 {{end}}
 {{end}}
 
-{{define "owner"}}{{if eq .Kind "grant"}}{{.User}}<span class="cell-sub">via <code>{{.Prefix}}</code></span>{{else if eq .Kind "deleted"}}<span class="muted">network removed</span><span class="cell-sub">requested from <code>{{.IP}}</code></span>{{else if eq .Kind "dns"}}<span class="muted">no owner</span><span class="cell-sub">DNS match from <code>{{.IP}}</code></span>{{else}}<span class="muted">unknown</span><span class="cell-sub">issued before owners were recorded</span>{{end}}{{end}}
+{{define "owner"}}{{if eq .Kind "grant"}}{{.User}}<span class="cell-sub">via <code>{{.Prefix}}</code></span>{{else if eq .Kind "deleted"}}<span class="muted">address removed</span><span class="cell-sub">requested from <code>{{.IP}}</code></span>{{else if eq .Kind "dns"}}<span class="muted">no owner</span><span class="cell-sub">DNS match from <code>{{.IP}}</code></span>{{else}}<span class="muted">unknown</span><span class="cell-sub">issued before owners were recorded</span>{{end}}{{end}}

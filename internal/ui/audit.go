@@ -157,7 +157,7 @@ func outcome(ev core.AuditEvent) string {
 // activitySummary says what happened in one sentence, from the event's type,
 // outcome and reason only (admins see Detail next to it) (never Detail, except for grant changes, whose
 // detail the UI writes itself: "created grant 10.0.0.0/24 wildcard=false",
-// worded as client access: "Added network 10.0.0.0/24.").
+// worded as client access: "Added address 10.0.0.0/24.").
 func activitySummary(ev core.AuditEvent) string {
 	why := func(prefix string) string {
 		if ev.Reason == "" {
@@ -217,7 +217,7 @@ func activitySummary(ev core.AuditEvent) string {
 		if word == "" {
 			return "Client access changed."
 		}
-		s := word + " network " + prefix
+		s := word + " address " + prefix
 		if wild == "wildcard=true" {
 			s += " (wildcards allowed)"
 		}

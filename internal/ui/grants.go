@@ -20,7 +20,7 @@ type grantsData struct {
 	Owners      []string // usernames that own a grant, for the filter
 	Owner       string   // filter: "" (all), "mine" or a username
 	CanWildcard bool
-	CanNetwork  bool // may add grants wider than one address (admins)
+	CanRange    bool // may add grants wider than one address (admins)
 	Form        grantForm
 	Error       string
 }
@@ -28,7 +28,7 @@ type grantsData struct {
 // grantRow is a grant with its owner's name and whether the viewer may
 // change it (their own grant, or any grant for an admin). CanEnable is false
 // for a non-admin's disabled grant wider than one address: they may disable
-// or delete it, but only an admin may switch a network range back on.
+// or delete it, but only an admin may switch an address range back on.
 type grantRow struct {
 	core.Grant
 	Owner     string
@@ -37,13 +37,18 @@ type grantRow struct {
 	CanEnable bool
 }
 
-// msgNetworkAdminOnly answers a non-admin who adds a grant wider than a
-// single address.
-const msgNetworkAdminOnly = "Only administrators can add a network range. Add a single address, or ask an administrator."
+// msgRangeAdminOnly answers a non-admin who adds a grant wider than a
+// single address. The UI calls grants "addresses" and a grant wider than /32
+// an "address range".
+const msgRangeAdminOnly = "Only administrators can add an address range. Add a single address (10.1.2.3 or 10.1.2.3/32)."
 
-// msgEnableNetworkAdminOnly answers a non-admin who enables their own
+// msgEnableRangeAdminOnly answers a non-admin who enables their own
 // disabled grant wider than a single address.
-const msgEnableNetworkAdminOnly = "Only administrators can enable a network range. You can still delete it, or add a single address instead."
+const msgEnableRangeAdminOnly = "Only administrators can enable an address range. You can still delete it, or add a single address instead."
+
+// minGrantBits is the widest prefix anyone may grant: /8. Anything wider is
+// never a sensible LAN range and is refused for admins too.
+const minGrantBits = 8
 
 // singleAddress reports whether p covers exactly one IPv4 address.
 func singleAddress(p netip.Prefix) bool { return p.Bits() == 32 }
@@ -76,7 +81,7 @@ func (h *Handler) renderGrants(w http.ResponseWriter, r *http.Request, cur *auth
 		return
 	}
 	admin := cur.User.Can(core.RoleAdmin)
-	d := &grantsData{CanWildcard: cur.User.Can(core.RoleWildcardAllowed), CanNetwork: admin, Form: form, Error: errMsg}
+	d := &grantsData{CanWildcard: cur.User.Can(core.RoleWildcardAllowed), CanRange: admin, Form: form, Error: errMsg}
 	if !cur.User.Blocked {
 		d.Owner = r.URL.Query().Get("owner")
 	}
@@ -122,27 +127,29 @@ func (m userNames) name(id int64) string {
 	return fmt.Sprintf("user #%d", id)
 }
 
-// parseGrantPrefix accepts an IPv4 address (a /32) or an IPv4 CIDR.
+// parseGrantPrefix accepts an IPv4 address (a /32) or an IPv4 CIDR from /8
+// to /32. Whether the caller may add more than one address is checked
+// separately.
 func parseGrantPrefix(s string) (netip.Prefix, error) {
 	s = strings.TrimSpace(s)
 	var p netip.Prefix
 	if strings.Contains(s, "/") {
 		var err error
 		if p, err = netip.ParsePrefix(s); err != nil {
-			return p, fmt.Errorf("%q is not a valid IPv4 address or CIDR", s)
+			return p, fmt.Errorf("%q is not a valid IPv4 address.", s)
 		}
 	} else {
 		a, err := netip.ParseAddr(s)
 		if err != nil {
-			return p, fmt.Errorf("%q is not a valid IPv4 address or CIDR", s)
+			return p, fmt.Errorf("%q is not a valid IPv4 address.", s)
 		}
 		p = netip.PrefixFrom(a, a.BitLen())
 	}
 	if !p.Addr().Is4() {
-		return p, fmt.Errorf("%q is not IPv4; grants support IPv4 only", s)
+		return p, fmt.Errorf("%q is not IPv4; client access supports IPv4 addresses only.", s)
 	}
-	if p.Bits() == 0 {
-		return p, fmt.Errorf("a /0 grant would cover every address and is refused")
+	if p.Bits() < minGrantBits {
+		return p, fmt.Errorf("A range wider than /%d is refused.", minGrantBits)
 	}
 	return p.Masked(), nil
 }
@@ -167,7 +174,7 @@ func (h *Handler) grantCreate(w http.ResponseWriter, r *http.Request, cur *auth.
 		return
 	}
 	if !singleAddress(prefix) && !cur.User.Can(core.RoleAdmin) {
-		bad(http.StatusForbidden, msgNetworkAdminOnly)
+		bad(http.StatusForbidden, msgRangeAdminOnly)
 		return
 	}
 	if form.Wildcard && !cur.User.Can(core.RoleWildcardAllowed) {
@@ -180,7 +187,7 @@ func (h *Handler) grantCreate(w http.ResponseWriter, r *http.Request, cur *auth.
 		return
 	}
 	h.record(r, cur, core.AuditGrantChange, fmt.Sprintf("created grant %s wildcard=%t", g.Prefix, g.Wildcard), g.ID)
-	h.redirect(w, r, base+"/grants", "ok", fmt.Sprintf("Added network %s. Machines there can request certificates now.", g.Prefix))
+	h.redirect(w, r, base+"/grants", "ok", fmt.Sprintf("Added address %s. Machines there can request certificates now.", g.Prefix))
 }
 
 // applyGrantAction performs enable, disable or delete on grant id. The caller
@@ -194,15 +201,15 @@ func (h *Handler) applyGrantAction(r *http.Request, cur *auth.Current, g *core.G
 		}
 		h.record(r, cur, core.AuditGrantChange, fmt.Sprintf("%sd grant %s", action, g.Prefix), g.ID)
 		if g.Enabled {
-			return fmt.Sprintf("Enabled network %s.", g.Prefix), nil
+			return fmt.Sprintf("Enabled address %s.", g.Prefix), nil
 		}
-		return fmt.Sprintf("Disabled network %s. Machines there can no longer request certificates through it.", g.Prefix), nil
+		return fmt.Sprintf("Disabled address %s. Machines there can no longer request certificates through it.", g.Prefix), nil
 	case "delete":
 		if err := h.Grants.Delete(r.Context(), g.ID); err != nil {
 			return "", err
 		}
 		h.record(r, cur, core.AuditGrantChange, fmt.Sprintf("deleted grant %s wildcard=%t", g.Prefix, g.Wildcard), g.ID)
-		return fmt.Sprintf("Deleted network %s.", g.Prefix), nil
+		return fmt.Sprintf("Deleted address %s.", g.Prefix), nil
 	}
 	return "", errUnknownAction
 }
@@ -242,7 +249,7 @@ func (h *Handler) grantAction(w http.ResponseWriter, r *http.Request, cur *auth.
 	}
 	action := r.PathValue("action")
 	if action == "enable" && !singleAddress(g.Prefix) && !cur.User.Can(core.RoleAdmin) {
-		h.renderGrants(w, r, cur, http.StatusForbidden, grantForm{}, msgEnableNetworkAdminOnly)
+		h.renderGrants(w, r, cur, http.StatusForbidden, grantForm{}, msgEnableRangeAdminOnly)
 		return
 	}
 	msg, err := h.applyGrantAction(r, cur, g, action)
@@ -250,7 +257,7 @@ func (h *Handler) grantAction(w http.ResponseWriter, r *http.Request, cur *auth.
 	case err == errUnknownAction:
 		h.notFound(w, r, cur)
 	case isNotFound(err):
-		h.redirect(w, r, back, "error", "That network was already removed.")
+		h.redirect(w, r, back, "error", "That address was already removed.")
 	case err != nil:
 		h.serverError(w, r, cur, "change grant", err)
 	default:

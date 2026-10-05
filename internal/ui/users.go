@@ -75,7 +75,7 @@ func (h *Handler) userAction(w http.ResponseWriter, r *http.Request, cur *auth.C
 			return
 		}
 		detail = fmt.Sprintf("%s: blocked=%t", u.Username, blocked)
-		msg = "Blocked " + u.Username + ". The block applies at once; their networks keep working until disabled."
+		msg = "Blocked " + u.Username + ". The block applies at once; their addresses on Client access keep working until disabled."
 		if !blocked {
 			msg = "Unblocked " + u.Username + "."
 		}

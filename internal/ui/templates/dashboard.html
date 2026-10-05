@@ -2,7 +2,7 @@
 
 {{define "content"}}
 {{if .Blocked}}
-<div class="panel"><p>You can still see <a href="/ui/grants">your networks</a> and the <a href="/ui/audit">activity log</a>.</p></div>
+<div class="panel"><p>You can still see your addresses on <a href="/ui/grants">Client access</a> and the <a href="/ui/audit">activity log</a>.</p></div>
 {{else}}
 {{if .Data.Warnings}}
 <section class="panel attention" aria-labelledby="h-attention"><h2 id="h-attention">Needs attention</h2>

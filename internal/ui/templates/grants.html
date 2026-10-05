@@ -1,5 +1,4 @@
-{{define "lede"}}<p class="lede">Networks allowed to request certificates. A machine at a listed address may request any name in the managed zones; without an entry, a name must resolve to the requesting machine. <a href="/ui/docs/getting-started#getting-access">How access works</a></p>{{end}}
-{{define "actions"}}{{if not .Blocked}}<a class="btn primary" href="#add">Add network</a>{{end}}{{end}}
+{{define "lede"}}<p class="lede">Addresses allowed to request certificates. A machine at a listed address may request any name in the managed zones; without an entry, a name must resolve to the requesting machine. <a href="/ui/docs/getting-started#getting-access">How access works</a></p>{{end}}
 
 {{define "content"}}
 {{if .Data.Error}}<div class="notice error" role="alert"><p>{{.Data.Error}}</p></div>{{end}}
@@ -14,7 +13,7 @@
 </form>
 {{end}}
 <table>
-<tr><th>Network</th><th>Owner</th><th>Wildcards</th><th>State</th><th>Note</th><th>Added</th><th><span class="sr">Actions</span></th></tr>
+<tr><th>Address</th><th>Owner</th><th>Wildcards</th><th>State</th><th>Note</th><th>Added</th><th><span class="sr">Actions</span></th></tr>
 
 {{range .Data.Rows}}
 <tr><td><code>{{.Prefix}}</code></td><td class="nowrap">{{.Owner}}{{if .Mine}} <span class="pill info plain">you</span>{{end}}</td><td>{{if .Wildcard}}allowed{{else}}<span class="muted">no</span>{{end}}</td>
@@ -22,22 +21,22 @@
 <td class="wrap">{{.Note}}</td><td>{{ts .CreatedAt}}</td>
 <td class="actions">{{if .CanEdit}}
 {{if or .Enabled .CanEnable}}<form method="post" action="/ui/grants/{{.ID}}/{{if .Enabled}}disable{{else}}enable{{end}}">{{template "csrf" $}}<input type="hidden" name="owner" value="{{$.Data.Owner}}"><button type="submit" class="small">{{if .Enabled}}Disable{{else}}Enable{{end}}</button></form>{{end}}
-<form method="post" action="/ui/grants/{{.ID}}/delete" data-confirm="Delete network {{.Prefix}} of {{.Owner}}? Machines there lose access unless their names resolve to them.">{{template "csrf" $}}<input type="hidden" name="owner" value="{{$.Data.Owner}}"><button type="submit" class="small danger">Delete</button></form>
+<form method="post" action="/ui/grants/{{.ID}}/delete" data-confirm="Delete address {{.Prefix}} of {{.Owner}}? Machines there lose access unless their names resolve to them.">{{template "csrf" $}}<input type="hidden" name="owner" value="{{$.Data.Owner}}"><button type="submit" class="small danger">Delete</button></form>
 {{end}}</td></tr>
-{{else}}<tr><td colspan="7" class="empty">{{if and .Data.Owner (ne .Data.Owner "all")}}No networks match the filter. <a href="/ui/grants">Show everyone's</a>.{{else if .Blocked}}You have no networks.{{else}}No networks yet. Add the address of a machine that runs certbot or acme.sh, and it can request certificates for any name in the managed zones.{{end}}</td></tr>{{end}}
+{{else}}<tr><td colspan="7" class="empty">{{if and .Data.Owner (ne .Data.Owner "all")}}No addresses match the filter. <a href="/ui/grants">Show everyone's</a>.{{else if .Blocked}}You have no addresses.{{else}}No addresses yet. Add the address of a machine that runs certbot or acme.sh, and it can request certificates for any name in the managed zones.{{end}}</td></tr>{{end}}
 
 </table>
 
 {{if not .Blocked}}
-<section class="panel add" id="add" aria-labelledby="h-add"><h2 id="h-add">Add a network</h2>
+<section class="panel add" id="add" aria-labelledby="h-add"><h2 id="h-add">Add address</h2>
 <form method="post" action="/ui/grants" class="form">{{template "csrf" .}}
-{{if .Data.CanNetwork}}<label>IPv4 address or network <input name="prefix" value="{{.Data.Form.Prefix}}" placeholder="10.1.2.3 or 10.1.2.0/24" required spellcheck="false" autocomplete="off"><span class="hint">A single address is stored as /32.</span></label>
-{{else}}<label>IPv4 address <input name="prefix" value="{{.Data.Form.Prefix}}" placeholder="10.1.2.3" required spellcheck="false" autocomplete="off"><span class="hint">One machine, stored as /32. Network ranges can be added by administrators.</span></label>{{end}}
+{{if .Data.CanRange}}<label>IPv4 address or range <input name="prefix" value="{{.Data.Form.Prefix}}" placeholder="10.1.2.3 or 10.1.2.0/24" required spellcheck="false" autocomplete="off"><span class="hint">As an administrator you may also add a range such as /24 or /16 (from /8 to /32).</span></label>
+{{else}}<label>IPv4 address <input name="prefix" value="{{.Data.Form.Prefix}}" placeholder="10.1.2.3 or 10.1.2.3/32" required spellcheck="false" autocomplete="off"><span class="hint">The machine's address as the broker sees it.</span></label>{{end}}
 <label>Note <input name="note" value="{{.Data.Form.Note}}" maxlength="200" placeholder="build server"><span class="hint">Optional; helps others know what the machine is.</span></label>
 {{if .Data.CanWildcard}}<label class="check"><input type="checkbox" name="wildcard" value="true"{{if .Data.Form.Wildcard}} checked{{end}}> Allow wildcard certificates (<code>*.example.com</code>)</label>
 {{else}}<p class="muted small">Wildcard certificates need the wildcard role; ask an administrator.</p>{{end}}
-<div class="buttons"><button type="submit" class="primary">Add network</button></div>
-<p class="muted small">The network is yours: you and administrators can disable or delete it.</p>
+<div class="buttons"><button type="submit" class="primary">Add address</button></div>
+<p class="muted small">The address is yours: you and administrators can disable or delete it.</p>
 </form>
 </section>
 {{end}}
