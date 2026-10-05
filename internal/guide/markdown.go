@@ -1,6 +1,7 @@
 // Package guide reads the user guide (docs/guide in the repository,
-// /usr/share/tls-broker/docs in the image) and renders it for the web UI's
-// documentation reader.
+// /usr/share/tls-broker/docs in the image), renders it for the web UI's
+// documentation reader and exports it in Confluence storage format (see
+// ExportConfluence).
 //
 // The guide is plain Markdown that must read the same on GitHub, for agents
 // reading the files and in the UI: CommonMark with GFM tables, no raw HTML,

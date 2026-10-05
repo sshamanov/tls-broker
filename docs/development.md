@@ -286,8 +286,8 @@ optionally under group headings) by `docs/guide/README.md`. The reference
 pages in `docs/` stay the deep, complete description; a guide links to them
 by relative path.
 
-The guide has to read the same on GitHub, for agents and in a later
-Confluence export, so `internal/guide`'s docs lint (part of `make check`)
+The guide has to read the same on GitHub, for agents and in Confluence
+(`tls-broker docs publish`), so `internal/guide`'s docs lint (part of `make check`)
 holds it to portable Markdown:
 
 - CommonMark with GFM tables and fenced code only: no raw HTML (comments
@@ -317,6 +317,24 @@ take any `fs.FS`, so tests and a locally built binary use
 image without `Options.Docs` shows "not available in this build" under
 Documentation. Markdown changes need no rebuild of the Go code, only of the
 image.
+
+Confluence copy: `tls-broker docs publish` (operator side in
+`docs/operations.md`) renders the same Markdown with
+`guide.ExportConfluence` into Confluence storage format (code macro, plain
+tables, page links, an anchor macro per heading named by its GitHub slug)
+and publishes it through `internal/confluence` (REST client, plan/apply,
+body normalization); `internal/confluence/confluencetest` is the fake
+Confluence the tests run against. A read-only check against a real
+Confluence from a checkout, with the three `TLS_BROKER_CONFLUENCE_*`
+variables exported in your shell (never in a file in the repository):
+
+```sh
+make build
+docker run --rm --network host --user "$(id -u):$(id -g)" -v "$PWD:/src" -w /src \
+  -e TLS_BROKER_CONFLUENCE_URL -e TLS_BROKER_CONFLUENCE_TOKEN -e TLS_BROKER_CONFLUENCE_PAGE_ID \
+  golang:1.27 /src/bin/tls-broker docs publish --dry-run --docs docs/guide \
+  --broker-url https://broker.example.com --out .claude/tmp/xhtml
+```
 
 ## Dependencies
 

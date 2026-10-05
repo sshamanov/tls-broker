@@ -13,11 +13,13 @@
 //	tls-broker config apply <file.yaml>
 //	tls-broker user set-role [--local] <name> <normal|wildcard_allowed|admin>
 //	tls-broker user block|unblock [--local] <name>
+//	tls-broker docs publish [--dry-run] [--out dir] [--docs dir] [--broker-url url]
 package main
 
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -42,6 +44,8 @@ const usage = `usage:
   tls-broker user set-role [--local] <name> <normal|wildcard_allowed|admin>
   tls-broker user block [--local] <name>
   tls-broker user unblock [--local] <name>
+  tls-broker docs publish [--dry-run] [--out dir] [--docs dir] [--broker-url url]
+                                            copy the user guide to Confluence (TLS_BROKER_CONFLUENCE_*)
 
 Settings come from the TLS_BROKER_* environment variables (docs/configuration.md).
 `
@@ -117,6 +121,8 @@ func dispatch(ctx context.Context, env config.Env, log *slog.Logger, args []stri
 		return fmt.Errorf("%w: unknown config command %q", errUsage, args[1])
 	case "user":
 		return user(ctx, env, args[1:], out)
+	case "docs":
+		return docs(ctx, env, args[1:], out)
 	}
 	return fmt.Errorf("%w: unknown command %q", errUsage, args[0])
 }
@@ -141,6 +147,26 @@ func user(ctx context.Context, env config.Env, args []string, out io.Writer) err
 		return app.SetBlocked(ctx, env, rest[0], local, cmd == "block", out)
 	}
 	return fmt.Errorf("%w: unknown user command %q", errUsage, cmd)
+}
+
+func docs(ctx context.Context, env config.Env, args []string, out io.Writer) error {
+	if len(args) == 0 || args[0] != "publish" {
+		return fmt.Errorf("%w: docs publish [--dry-run] [--out dir] [--docs dir] [--broker-url url]", errUsage)
+	}
+	fs := flag.NewFlagSet("docs publish", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	o := app.DocsOptions{Lookup: os.LookupEnv}
+	fs.BoolVar(&o.DryRun, "dry-run", false, "only read Confluence and print what would change")
+	fs.StringVar(&o.OutDir, "out", "", "also write each page's storage-format XHTML to this directory")
+	fs.StringVar(&o.Dir, "docs", "", "guide directory (default: the image's copy)")
+	fs.StringVar(&o.BrokerURL, "broker-url", "", "broker URL for the examples (default: server.external_url)")
+	if err := fs.Parse(args[1:]); err != nil {
+		return fmt.Errorf("%w: docs publish: %v", errUsage, err)
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("%w: docs publish takes no arguments, got %q", errUsage, fs.Args())
+	}
+	return app.DocsPublish(ctx, env, o, out)
 }
 
 func serve(ctx context.Context, env config.Env, log *slog.Logger) error {

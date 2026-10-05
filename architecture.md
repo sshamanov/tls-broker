@@ -1276,6 +1276,13 @@ Suggested paths:
 
 Prometheus metrics endpoint should be restricted by nginx/network policy.
 
+The user guide (`docs/guide`) ships in the image and the UI shows it. An
+operator can copy it to Confluence Server/Data Center with the manual
+maintenance command `tls-broker docs publish` (root page and token from the
+container environment; pages matched by title, created or updated, never
+deleted). Confluence holds a copy; the repository is the source. The broker
+process itself never talks to Confluence.
+
 ---
 
 # 22. Secrets and Files

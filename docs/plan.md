@@ -19,6 +19,8 @@ same commit.
 - UI: server-rendered `html/template`, embedded assets, no JS build step.
 - Markdown (user guide): `yuin/goldmark` with its GFM extension, raw HTML
   disabled.
+- Confluence (manual guide publishing only): `net/http` against the
+  Server/Data Center REST API `/rest/api/content`; no client library.
 - Everything builds and tests in docker (`scripts/dev`, `Makefile`).
 
 ## Package layout
@@ -47,7 +49,10 @@ internal/dnsproxy/     /dns/present and /dns/cleanup
 internal/auth/         LDAP login, local admin, sessions, CSRF
 internal/ui/           web UI
 internal/guide/        user guide (docs/guide): index parsing, GitHub-compatible
-                       heading IDs, rendering and cache for the UI reader, docs lint
+                       heading IDs, rendering and cache for the UI reader, docs lint,
+                       Confluence storage-format export
+internal/confluence/   Confluence Server/DC REST client and guide publisher
+                       (plan/apply for "tls-broker docs publish"); fake in confluencetest
 internal/ctlog/        Certificate Transparency inventory: Cert Spotter source and
                        fake, in-memory refresh loop, state analysis (architecture §31)
 internal/httpx/        real source IP, middleware, problem responses
@@ -62,7 +67,7 @@ docs/guide/            user guide (also shown in the UI)
 ```
 
 Dependency rule: packages depend on `core` and `names`, not on each other
-(`guide` depends on neither), except `issuance` (uses the ports), the three front ends and `ui` (use
+(`guide` and `confluence` depend on neither), except `issuance` (uses the ports), the three front ends and `ui` (use
 `issuance`/`gate` through interfaces declared in `core`; `ui` also renders
 `guide` pages and `ctlog` snapshots, reading the inventory through its own
 `ui.CTInventory` interface), and `app` (wires concrete types). No package

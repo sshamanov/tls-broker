@@ -28,6 +28,16 @@ listed. Empty is the same as unset.
 | `TLS_BROKER_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. |
 | `TLS_BROKER_DOH_ENDPOINTS` | empty | **Development only.** Comma-separated DoH URLs (`http` or `https`) that replace the fixed Cloudflare and Google resolvers, tried in order. The DNS gate, CAA checks and DNS-01 propagation checks then see whatever these servers answer (for example `cmd/mockdoh`, see `docs/development.md`). When set, the broker logs a warning at start-up and every UI page shows a "DNS gate is mocked" banner. Never set it in production. |
 
+Only `tls-broker docs publish` (copying the user guide to Confluence, see
+`docs/operations.md`) reads these; the running broker ignores them. All
+three are optional for the broker and required by that command:
+
+| Variable | Meaning |
+|---|---|
+| `TLS_BROKER_CONFLUENCE_URL` | Confluence Server/Data Center base URL (`http(s)://host[/context]`). |
+| `TLS_BROKER_CONFLUENCE_TOKEN` | Personal access token, sent as `Authorization: Bearer`. Never logged or printed. |
+| `TLS_BROKER_CONFLUENCE_PAGE_ID` | Numeric ID of the root page that receives the guide's index. |
+
 ## The YAML
 
 `<data>/config/NNNNNN.yaml`. Rules that apply everywhere:

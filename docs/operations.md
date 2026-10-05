@@ -235,6 +235,67 @@ error; `tlsbroker_ct_zone_up{zone} == 0`.
 3. The previous data stays on the page while a zone fails. To stop all
    queries set `ct_inventory.disabled: true` (takes effect at activation).
 
+### Publishing the user guide to Confluence
+
+The user guide (`docs/guide`, shipped in the image) can be copied to
+Confluence Server/Data Center by hand. Confluence holds a copy; the
+repository stays the source, and every published page says so in an info
+box at the top.
+
+Once, add to the service's `environment` in the compose file (production:
+`/srv/docker/tls-broker/compose.yaml`) and recreate the container with
+`docker compose up -d`:
+
+| Variable | Value |
+|---|---|
+| `TLS_BROKER_CONFLUENCE_URL` | base URL, for example `https://confluence.example.com` |
+| `TLS_BROKER_CONFLUENCE_TOKEN` | personal access token of a user who may edit the root page and create pages below it (sent as `Authorization: Bearer`) |
+| `TLS_BROKER_CONFLUENCE_PAGE_ID` | numeric ID of the root page (production: `123456`, "TLS Broker" in space `admin`) |
+
+Then, from the compose directory:
+
+```sh
+docker compose exec tls-broker tls-broker docs publish --dry-run   # read only: prints the plan
+docker compose exec tls-broker tls-broker docs publish
+```
+
+What it does:
+
+- The root page gets the guide's index (`README.md`); its title stays as it
+  is. Every page the index lists becomes a child page titled
+  `TLS Broker: <its # title>` (Confluence titles are unique per space; the
+  prefix keeps "Troubleshooting" and the like from colliding with other
+  pages of the space).
+- Child pages are found by title under the root; nothing is stored locally.
+  Missing pages are created, changed pages updated (new version, comment
+  `tls-broker <version>`), unchanged pages left alone. A body counts as
+  unchanged when it matches the published one after normalization; the
+  version in the info box alone is no change.
+- The child pages are put in index order (Confluence's move API); a
+  Confluence without it gets a warning and the order is left to you.
+- The examples carry `server.external_url` of the active configuration
+  generation instead of `https://broker.example.com`, as in the web UI;
+  `--broker-url <url>` overrides it.
+- Links between guide pages become Confluence page links (anchors to the
+  headings work); links to other files of the repository become text naming
+  the file.
+
+What it never does: delete or rename pages, touch pages that are not the
+root or its children (child pages that are not in the guide are listed and
+left alone), or create a page whose title another page of the space already
+has (the run stops before writing anything). The broker itself never reads
+these variables; the token is never printed.
+
+Errors name the cause: missing variables, a rejected token (401), a user who
+may read but not edit (403), a root page that does not exist or is hidden
+(404). A version conflict (someone edited the page meanwhile) is retried once
+after reading the page again; edits made in Confluence are overwritten by the
+next publish.
+
+Options: `--out <dir>` also writes each page's storage-format XHTML for
+inspection; `--docs <dir>` reads the guide from another directory (outside
+the image, for example `docs/guide` in a checkout).
+
 ### Other checks
 
 - `docker compose ps` shows `healthy` once ready; `docker compose logs` is

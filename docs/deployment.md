@@ -65,6 +65,7 @@ the container). Full table in `docs/configuration.md`.
 | `TLS_BROKER_LOCAL_ADMIN_USER` / `_PASSWORD` | break-glass administrator (plain or bcrypt; `$` as `$$` in compose files) |
 | `TLS_BROKER_LOG_LEVEL` | `info` |
 | `TLS_BROKER_DOH_ENDPOINTS` | **empty in production** (development-only mocked DNS gate) |
+| `TLS_BROKER_CONFLUENCE_URL`, `_TOKEN`, `_PAGE_ID` | optional: only for copying the user guide to Confluence by hand (`tls-broker docs publish`, see `docs/operations.md`); the broker ignores them |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (or other AWS chain settings) | optional: Route53 credentials through the standard AWS chain when the configuration names no Route53 secrets; the region always comes from `route53.region` |
 
 ## Data volume

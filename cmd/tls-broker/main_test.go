@@ -22,7 +22,8 @@ func TestCommands(t *testing.T) {
 	t.Setenv("TLS_BROKER_DATA_DIR", dir)
 	t.Setenv("TLS_BROKER_LOG_LEVEL", "error")
 	var out, errOut bytes.Buffer
-	for _, args := range [][]string{{"nonsense"}, {"config", "validate"}, {"user", "set-role", "x"}, {"user", "fly", "x"}, {"serve", "extra"}} {
+	for _, args := range [][]string{{"nonsense"}, {"config", "validate"}, {"user", "set-role", "x"}, {"user", "fly", "x"}, {"serve", "extra"},
+		{"docs"}, {"docs", "pull"}, {"docs", "publish", "--nope"}, {"docs", "publish", "extra"}} {
 		errOut.Reset()
 		if code := run(args, &out, &errOut); code != 2 || !strings.Contains(errOut.String(), "usage") {
 			t.Errorf("%v: %d %q", args, code, errOut.String())
@@ -33,6 +34,15 @@ func TestCommands(t *testing.T) {
 	}
 	if code := run([]string{"user", "block", "nobody"}, &out, &errOut); code != 1 {
 		t.Fatalf("block unknown: %d", code)
+	}
+
+	// docs publish without the Confluence settings names them all.
+	for _, k := range []string{"TLS_BROKER_CONFLUENCE_URL", "TLS_BROKER_CONFLUENCE_TOKEN", "TLS_BROKER_CONFLUENCE_PAGE_ID"} {
+		t.Setenv(k, "")
+	}
+	errOut.Reset()
+	if code := run([]string{"docs", "publish", "--dry-run"}, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "TLS_BROKER_CONFLUENCE_URL, TLS_BROKER_CONFLUENCE_TOKEN, TLS_BROKER_CONFLUENCE_PAGE_ID") {
+		t.Fatalf("docs publish: %d %q", code, errOut.String())
 	}
 
 	t.Setenv("TLS_BROKER_LOG_LEVEL", "loud")

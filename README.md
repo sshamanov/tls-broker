@@ -41,6 +41,33 @@ From source: `make image` builds `tls-broker:local`; `make build`
 builds `bin/tls-broker`. Inside the container `tls-broker help` lists the
 maintenance commands (backup, config validate/apply, user roles and blocks).
 
+## Publishing the user guide to Confluence
+
+The user guide can be copied to Confluence (Server/Data Center) by hand; the
+repository stays the source. On the production host, add to the
+`tls-broker` service's `environment` in `/srv/docker/tls-broker/compose.yaml`:
+
+```yaml
+      TLS_BROKER_CONFLUENCE_URL: https://confluence.example.com
+      TLS_BROKER_CONFLUENCE_TOKEN: <personal access token>
+      TLS_BROKER_CONFLUENCE_PAGE_ID: "123456"
+```
+
+then, in `/srv/docker/tls-broker`:
+
+```sh
+docker compose up -d                                              # pick up the variables
+docker compose exec tls-broker tls-broker docs publish --dry-run  # read only: what would change
+docker compose exec tls-broker tls-broker docs publish
+```
+
+It writes the guide's index to the root page and each guide page to a child
+page titled `TLS Broker: <title>`, in index order; it creates missing pages,
+updates changed ones (comment `tls-broker <version>`) and leaves unchanged
+ones alone. It never deletes or renames pages and never touches pages
+outside the root and its children; child pages not in the guide are only
+listed. Details: [`docs/operations.md`](docs/operations.md#publishing-the-user-guide-to-confluence).
+
 ## Documentation
 
 [`docs/README.md`](docs/README.md) is the full index.
