@@ -1,5 +1,6 @@
 # Claude Code scratch and project memory (never commit)
 .claude/tmp/
+.claude/worktrees/
 .claude/memory.md
 .claude/memory/
 .claude/settings.local.json
