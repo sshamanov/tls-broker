@@ -27,6 +27,17 @@ curl -sf https://broker.example.com/cert/wildcard/example.com | tar -x -C /etc/s
 returns the certificate for `*.example.com`. A path containing `*` is
 answered with 404.
 
+A device that takes its certificate only through an upload or a command
+of its own gets it through a small helper host that fetches and pushes it.
+The helper host is the requester, so it needs the access (an IP grant), not
+the device:
+
+```sh
+curl -sSf https://broker.example.com/cert/printer.example.com | tar -x -C /srv/printer
+cat /srv/printer/privkey.pem /srv/printer/fullchain.pem > /srv/printer/bundle.pem
+# upload bundle.pem with the device's own tool or web interface
+```
+
 ### Polling cheaply
 
 Every 200 response carries an `ETag` that changes only when a new

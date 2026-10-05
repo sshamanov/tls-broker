@@ -59,6 +59,13 @@ account the CAA pins, so a client needing its own account for `*.N` needs a
 pinned `issuewild` line for that account in the zone's CAA, or a
 `wildcard=true` grant.
 
+The account URL to pin looks like
+`https://acme-v02.api.letsencrypt.org/acme/acct/123456789`. Certbot keeps it
+in the `uri` field of
+`/etc/letsencrypt/accounts/acme-v02.api.letsencrypt.org/directory/*/regr.json`,
+acme.sh as `ACCOUNT_URL` in
+`~/.acme.sh/ca/acme-v02.api.letsencrypt.org/directory/ca.conf`.
+
 Hooks for `*.N` certificates normally pass the base name `N` (acme.sh and
 Certbot both give the base name, and the fqdn form can only express `N`); the
 gate then applies the rules for `N`. Send identifier `*.N` explicitly only to

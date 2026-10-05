@@ -83,6 +83,36 @@ acme.sh --issue --server https://broker.example.com/acme/directory \
 - `--set-default-ca --server https://broker.example.com/acme/directory` makes
   the broker the default for the host.
 
+### Reloading the service and switching existing certificates
+
+Several names in one certificate: repeat `-d`. To reload a service after
+every issue and renewal, Certbot takes a deploy hook and acme.sh installs
+the files with a reload command:
+
+```sh
+certbot certonly --server https://broker.example.com/acme/directory \
+  --webroot -w /tmp -d www.example.com \
+  --deploy-hook 'systemctl reload nginx'
+
+acme.sh --install-cert -d www.example.com \
+  --key-file /etc/nginx/tls/www.key \
+  --fullchain-file /etc/nginx/tls/www.crt \
+  --reloadcmd 'systemctl reload nginx'
+```
+
+To move an existing certificate to the broker, issue it again with the
+broker's directory; both clients store the new server and method for later
+renewals, and existing `--install-cert` settings and deploy hooks stay:
+
+```sh
+certbot certonly --cert-name www.example.com \
+  --server https://broker.example.com/acme/directory \
+  --webroot -w /tmp -d www.example.com --force-renewal
+
+acme.sh --issue --server https://broker.example.com/acme/directory \
+  -d www.example.com -w /tmp --force
+```
+
 ### Wildcards
 
 `*.example.com` is issued only when the requesting address has an IP grant
@@ -125,6 +155,27 @@ An order that is not finalized within `scheduler.order_ttl` (default 15 min)
 expires: polling it shows `invalid`, and finalizing it gives `orderNotReady`.
 Run the client again; it creates a new order. Asking again for the same names
 while an order is still open returns that same order.
+
+## Endpoints
+
+All below `https://broker.example.com/acme`; clients find them through the
+directory. Every `POST` is JWS-signed (POST-as-GET for reads).
+
+| Method and path | Purpose |
+|---|---|
+| `GET /acme/directory` | the directory: URLs of the resources below |
+| `HEAD`, `GET /acme/new-nonce` | a fresh `Replay-Nonce` |
+| `POST /acme/new-account` | create or look up the account for a key; accounts carry no permissions |
+| `POST /acme/acct/{id}`, `POST /acme/acct/{id}/orders` | read, update or deactivate the account; its (always empty) order list |
+| `POST /acme/key-change` | roll the account key over |
+| `POST /acme/new-order` | create an order; held while waiting for an admission slot, then `ready` |
+| `POST /acme/authz/{order}/{n}` | an authorization; always `valid` (the broker proves control itself) |
+| `POST /acme/chall/{order}/{n}` | its synthetic `dns-01` challenge, already `valid` |
+| `POST /acme/order/{id}` | poll the order (`Retry-After` while `processing`) |
+| `POST /acme/order/{id}/finalize` | send the CSR; answers `valid` or `processing` |
+| `POST /acme/cert/{id}` | download the chain: leaf and intermediates, no root |
+| `GET /acme/renewal-info/{certID}` | renewal information (ARI, RFC 9773) from the issuing CA |
+| `POST /acme/revoke-cert` | not offered: `403 unauthorized` (see "Deliberately unsupported") |
 
 ## Errors and what to do
 
