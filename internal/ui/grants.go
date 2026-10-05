@@ -2,12 +2,14 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/netip"
 	"net/url"
 	"slices"
 	"strings"
+	"unicode"
 
 	"tls-broker/internal/auth"
 	"tls-broker/internal/core"
@@ -23,6 +25,7 @@ type grantsData struct {
 	CanRange    bool // may add grants wider than one address (admins)
 	Form        grantForm
 	Error       string
+	Refused     []grantRefusal // entries of the Add address field, when several were sent
 }
 
 // grantRow is a grant with its owner's name and whether the viewer may
@@ -64,7 +67,7 @@ func (h *Handler) grantsPage(w http.ResponseWriter, r *http.Request, cur *auth.C
 
 // renderGrants lists every grant with its owner, filtered by the "owner"
 // query parameter. A blocked user sees only their own grants, read-only.
-func (h *Handler) renderGrants(w http.ResponseWriter, r *http.Request, cur *auth.Current, status int, form grantForm, errMsg string) {
+func (h *Handler) renderGrants(w http.ResponseWriter, r *http.Request, cur *auth.Current, status int, form grantForm, errMsg string, refused ...grantRefusal) {
 	ctx := r.Context()
 	var owner int64
 	if cur.User.Blocked {
@@ -81,7 +84,7 @@ func (h *Handler) renderGrants(w http.ResponseWriter, r *http.Request, cur *auth
 		return
 	}
 	admin := cur.User.Can(core.RoleAdmin)
-	d := &grantsData{CanWildcard: cur.User.Can(core.RoleWildcardAllowed), CanRange: admin, Form: form, Error: errMsg}
+	d := &grantsData{CanWildcard: cur.User.Can(core.RoleWildcardAllowed), CanRange: admin, Form: form, Error: errMsg, Refused: refused}
 	if !cur.User.Blocked {
 		d.Owner = r.URL.Query().Get("owner")
 	}
@@ -127,26 +130,31 @@ func (m userNames) name(id int64) string {
 	return fmt.Sprintf("user #%d", id)
 }
 
+// maxGrantEntries caps how many addresses one submit of the Add address
+// form may carry.
+const maxGrantEntries = 50
+
 // parseGrantPrefix accepts an IPv4 address (a /32) or an IPv4 CIDR from /8
 // to /32. Whether the caller may add more than one address is checked
-// separately.
+// separately. The error is a sentence for the user that does not repeat
+// the entry.
 func parseGrantPrefix(s string) (netip.Prefix, error) {
 	s = strings.TrimSpace(s)
 	var p netip.Prefix
 	if strings.Contains(s, "/") {
 		var err error
 		if p, err = netip.ParsePrefix(s); err != nil {
-			return p, fmt.Errorf("%q is not a valid IPv4 address.", s)
+			return p, errors.New("Not a valid IPv4 address.")
 		}
 	} else {
 		a, err := netip.ParseAddr(s)
 		if err != nil {
-			return p, fmt.Errorf("%q is not a valid IPv4 address.", s)
+			return p, errors.New("Not a valid IPv4 address.")
 		}
 		p = netip.PrefixFrom(a, a.BitLen())
 	}
 	if !p.Addr().Is4() {
-		return p, fmt.Errorf("%q is not IPv4; client access supports IPv4 addresses only.", s)
+		return p, errors.New("Not IPv4; client access takes IPv4 addresses only.")
 	}
 	if p.Bits() < minGrantBits {
 		return p, fmt.Errorf("A range wider than /%d is refused.", minGrantBits)
@@ -154,6 +162,32 @@ func parseGrantPrefix(s string) (netip.Prefix, error) {
 	return p.Masked(), nil
 }
 
+// splitGrantEntries splits the Add address field on commas and whitespace.
+func splitGrantEntries(s string) []string {
+	return strings.FieldsFunc(s, func(r rune) bool { return r == ',' || unicode.IsSpace(r) })
+}
+
+// grantRefusal is one entry of the Add address field that was refused.
+type grantRefusal struct{ Entry, Reason string }
+
+// listPrefixes joins prefixes for a flash, naming at most ten.
+func listPrefixes(ps []netip.Prefix) string {
+	var parts []string
+	for i, p := range ps {
+		if i == 10 {
+			return strings.Join(parts, ", ") + fmt.Sprintf(" and %d more", len(ps)-10)
+		}
+		parts = append(parts, p.String())
+	}
+	return strings.Join(parts, ", ")
+}
+
+// grantCreate adds the addresses in the form's prefix field, separated by
+// commas or whitespace. Every entry is checked with the caller's rules
+// before anything is stored: one refused entry stores nothing and the form
+// lists what was refused and why. Duplicates within the input collapse; an
+// entry the caller already owns is skipped and named in the flash. The note
+// and the wildcard choice apply to every new grant, each audited on its own.
 func (h *Handler) grantCreate(w http.ResponseWriter, r *http.Request, cur *auth.Current) {
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	form := grantForm{
@@ -161,33 +195,93 @@ func (h *Handler) grantCreate(w http.ResponseWriter, r *http.Request, cur *auth.
 		Note:     strings.TrimSpace(r.PostFormValue("note")),
 		Wildcard: r.PostFormValue("wildcard") == "true",
 	}
-	bad := func(status int, msg string) {
-		h.renderGrants(w, r, cur, status, form, msg)
+	bad := func(status int, msg string, refused []grantRefusal) {
+		h.renderGrants(w, r, cur, status, form, msg, refused...)
 	}
-	prefix, err := parseGrantPrefix(form.Prefix)
-	if err != nil {
-		bad(http.StatusBadRequest, err.Error())
+	entries := splitGrantEntries(form.Prefix)
+	switch {
+	case len(entries) == 0:
+		bad(http.StatusBadRequest, "Enter an IPv4 address.", nil)
+		return
+	case len(entries) > maxGrantEntries:
+		bad(http.StatusBadRequest, fmt.Sprintf("Enter at most %d addresses at a time; this has %d.", maxGrantEntries, len(entries)), nil)
 		return
 	}
 	if len(form.Note) > maxNote {
-		bad(http.StatusBadRequest, fmt.Sprintf("The note is longer than %d characters.", maxNote))
-		return
-	}
-	if !singleAddress(prefix) && !cur.User.Can(core.RoleAdmin) {
-		bad(http.StatusForbidden, msgRangeAdminOnly)
+		bad(http.StatusBadRequest, fmt.Sprintf("The note is longer than %d characters.", maxNote), nil)
 		return
 	}
 	if form.Wildcard && !cur.User.Can(core.RoleWildcardAllowed) {
-		bad(http.StatusForbidden, "Your role may not allow wildcard certificates. Ask an administrator for the wildcard role.")
+		bad(http.StatusForbidden, "Your role may not allow wildcard certificates. Ask an administrator for the wildcard role.", nil)
 		return
 	}
-	g := &core.Grant{OwnerUserID: cur.User.ID, Prefix: prefix, Enabled: true, Wildcard: form.Wildcard, Note: form.Note, CreatedAt: h.Clock.Now()}
-	if err := h.Grants.Create(r.Context(), g); err != nil {
-		h.serverError(w, r, cur, "create grant", err)
+	admin := cur.User.Can(core.RoleAdmin)
+	var (
+		prefixes []netip.Prefix
+		refused  []grantRefusal
+		status   = http.StatusForbidden
+		seen     = map[netip.Prefix]bool{}
+	)
+	for _, e := range entries {
+		p, err := parseGrantPrefix(e)
+		switch {
+		case err != nil:
+			refused = append(refused, grantRefusal{e, err.Error()})
+			status = http.StatusBadRequest
+		case !singleAddress(p) && !admin:
+			refused = append(refused, grantRefusal{e, msgRangeAdminOnly})
+		case !seen[p]:
+			seen[p] = true
+			prefixes = append(prefixes, p)
+		}
+	}
+	if len(refused) > 0 {
+		if len(entries) == 1 {
+			bad(status, refused[0].Reason, nil)
+		} else {
+			bad(status, fmt.Sprintf("Nothing was added: %d of %d entries were refused.", len(refused), len(entries)), refused)
+		}
 		return
 	}
-	h.record(r, cur, core.AuditGrantChange, fmt.Sprintf("created grant %s wildcard=%t", g.Prefix, g.Wildcard), g.ID)
-	h.redirect(w, r, base+"/grants", "ok", fmt.Sprintf("Added address %s. Machines there can request certificates now.", g.Prefix))
+	own, err := h.Grants.List(r.Context(), cur.User.ID)
+	if err != nil {
+		h.serverError(w, r, cur, "list grants", err)
+		return
+	}
+	for _, g := range own {
+		delete(seen, g.Prefix)
+	}
+	var added, skipped []netip.Prefix
+	for _, p := range prefixes {
+		if !seen[p] {
+			skipped = append(skipped, p)
+			continue
+		}
+		g := &core.Grant{OwnerUserID: cur.User.ID, Prefix: p, Enabled: true, Wildcard: form.Wildcard, Note: form.Note, CreatedAt: h.Clock.Now()}
+		if err := h.Grants.Create(r.Context(), g); err != nil {
+			h.serverError(w, r, cur, "create grant", err)
+			return
+		}
+		h.record(r, cur, core.AuditGrantChange, fmt.Sprintf("created grant %s wildcard=%t", g.Prefix, g.Wildcard), g.ID)
+		added = append(added, p)
+	}
+	var msg string
+	switch len(added) {
+	case 0:
+	case 1:
+		msg = fmt.Sprintf("Added address %s. Machines there can request certificates now.", added[0])
+	default:
+		msg = fmt.Sprintf("Added %d addresses: %s. Machines there can request certificates now.", len(added), listPrefixes(added))
+	}
+	if len(skipped) > 0 {
+		if msg == "" {
+			msg = "Nothing was added. "
+		} else {
+			msg += " "
+		}
+		msg += "Already yours, skipped: " + listPrefixes(skipped) + "."
+	}
+	h.redirect(w, r, base+"/grants", "ok", msg)
 }
 
 // applyGrantAction performs enable, disable or delete on grant id. The caller

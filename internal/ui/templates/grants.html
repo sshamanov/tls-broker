@@ -1,7 +1,7 @@
 {{define "lede"}}<p class="lede">Addresses allowed to request certificates. A machine at a listed address may request any name in the managed zones; without an entry, a name must resolve to the requesting machine. <a href="/ui/docs/getting-started#getting-access">How access works</a></p>{{end}}
 
 {{define "content"}}
-{{if .Data.Error}}<div class="notice error" role="alert"><p>{{.Data.Error}}</p></div>{{end}}
+{{if .Data.Error}}<div class="notice error" role="alert"><div><p>{{.Data.Error}}</p>{{if .Data.Refused}}<ul class="refused">{{range .Data.Refused}}<li><code>{{.Entry}}</code>: {{.Reason}}</li>{{end}}</ul>{{end}}</div></div>{{end}}
 {{if not .Blocked}}
 <form method="get" action="/ui/grants" class="filters" aria-label="Filter by owner">
 <label>Owner <select name="owner">{{$o := .Data.Owner}}
@@ -30,13 +30,13 @@
 {{if not .Blocked}}
 <section class="panel add" id="add" aria-labelledby="h-add"><h2 id="h-add">Add address</h2>
 <form method="post" action="/ui/grants" class="form">{{template "csrf" .}}
-{{if .Data.CanRange}}<label>IPv4 address or range <input name="prefix" value="{{.Data.Form.Prefix}}" placeholder="10.1.2.3 or 10.1.2.0/24" required spellcheck="false" autocomplete="off"><span class="hint">As an administrator you may also add a range such as /24 or /16 (from /8 to /32).</span></label>
-{{else}}<label>IPv4 address <input name="prefix" value="{{.Data.Form.Prefix}}" placeholder="10.1.2.3 or 10.1.2.3/32" required spellcheck="false" autocomplete="off"><span class="hint">The machine's address as the broker sees it.</span></label>{{end}}
+{{if .Data.CanRange}}<label>IPv4 address or range <input name="prefix" value="{{.Data.Form.Prefix}}" placeholder="10.1.2.3, 10.1.2.4 or 10.1.2.0/24" required spellcheck="false" autocomplete="off"><span class="hint">Separate several with commas or spaces. As an administrator you may also add a range such as /24 or /16 (from /8 to /32).</span></label>
+{{else}}<label>IPv4 address <input name="prefix" value="{{.Data.Form.Prefix}}" placeholder="10.1.2.3, 10.1.2.4 or 10.1.2.3/32" required spellcheck="false" autocomplete="off"><span class="hint">The machine's address as the broker sees it. Separate several with commas or spaces.</span></label>{{end}}
 <label>Note <input name="note" value="{{.Data.Form.Note}}" maxlength="200" placeholder="build server"><span class="hint">Optional; helps others know what the machine is.</span></label>
-{{if .Data.CanWildcard}}<label class="check"><input type="checkbox" name="wildcard" value="true"{{if .Data.Form.Wildcard}} checked{{end}}> Allow wildcard certificates (<code>*.example.com</code>)</label>
+{{if .Data.CanWildcard}}<label class="check"><input type="checkbox" name="wildcard" value="true"{{if .Data.Form.Wildcard}} checked{{end}}> <span>Allow wildcard certificates (<code>*.example.com</code>)</span></label>
 {{else}}<p class="muted small">Wildcard certificates need the wildcard role; ask an administrator.</p>{{end}}
 <div class="buttons"><button type="submit" class="primary">Add address</button></div>
-<p class="muted small">The address is yours: you and administrators can disable or delete it.</p>
+<p class="muted small">{{if .Data.CanWildcard}}The note and the wildcard choice apply{{else}}The note applies{{end}} to every address added. Each address is yours: you and administrators can disable or delete it.</p>
 </form>
 </section>
 {{end}}

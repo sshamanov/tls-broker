@@ -302,7 +302,7 @@ func TestRangeGrantsAdminOnly(t *testing.T) {
 	e := newEnv(t)
 	admin := e.login("alice")
 	ap := admin.get("/ui/grants")
-	see(t, ap, "Add address</h2>", "IPv4 address or range <input", `placeholder="10.1.2.3 or 10.1.2.0/24"`, "range such as /24 or /16", ">Add address</button>")
+	see(t, ap, "Add address</h2>", "IPv4 address or range <input", `placeholder="10.1.2.3, 10.1.2.4 or 10.1.2.0/24"`, "range such as /24 or /16", ">Add address</button>")
 	lacks(t, ap, "network", "Network", `href="#add"`)
 	for i, role := range []core.Role{core.RoleNormal, core.RoleWildcardAllowed} {
 		user := []string{"bob", "carol"}[i]
@@ -311,7 +311,7 @@ func TestRangeGrantsAdminOnly(t *testing.T) {
 		net := "10.5." + itoa(int64(i)) + "."
 
 		page := c.get("/ui/grants")
-		see(t, page, "Add address</h2>", "IPv4 address <input", `placeholder="10.1.2.3 or 10.1.2.3/32"`, "<th>Address</th>", ">Add address</button>")
+		see(t, page, "Add address</h2>", "IPv4 address <input", `placeholder="10.1.2.3, 10.1.2.4 or 10.1.2.3/32"`, "Separate several with commas or spaces.", "<th>Address</th>", ">Add address</button>")
 		lacks(t, page, "IPv4 address or range", "10.1.2.0/24", "range", "network", "Network", `href="#add"`)
 
 		code(t, c.act("/ui/grants", url.Values{"prefix": {net + "1"}}), 303)
@@ -380,6 +380,97 @@ func TestRangeGrantsAdminOnly(t *testing.T) {
 	if ag, _ := e.store.Grants().List(bg, e.userID("alice")); len(ag) != len(want) {
 		t.Fatalf("a refused range was stored: %+v", ag)
 	}
+}
+
+// TestGrantMultipleEntries: the Add address field takes several entries
+// separated by commas and whitespace, all checked with the caller's rules
+// before anything is stored.
+func TestGrantMultipleEntries(t *testing.T) {
+	e := newEnv(t)
+	bob := e.login("bob")
+	admin := e.login("alice")
+	bid := e.userID("bob")
+	prefixes := func(uid int64) []string {
+		gs, _ := e.store.Grants().List(bg, uid)
+		var out []string
+		for _, g := range gs {
+			out = append(out, g.Prefix.String())
+		}
+		slices.Sort(out)
+		return out
+	}
+
+	// One bad entry stores nothing; the form names every refused entry and
+	// keeps the typed text.
+	in := "10.1.2.3, 10.1.2.0/24 nonsense 10.1.2.4"
+	r := bob.act("/ui/grants", url.Values{"prefix": {in}})
+	code(t, r, 400)
+	see(t, r, "Nothing was added: 2 of 4 entries were refused.",
+		"<code>10.1.2.0/24</code>: Only administrators can add an address range.",
+		"<code>nonsense</code>: Not a valid IPv4 address.", `value="`+in+`"`)
+	lacks(t, r, "<code>10.1.2.3</code>")
+	r = bob.act("/ui/grants", url.Values{"prefix": {"10.1.2.3 10.1.2.0/24"}})
+	code(t, r, 403)
+	see(t, r, "Nothing was added: 1 of 2 entries were refused.")
+	if got := prefixes(bid); len(got) != 0 {
+		t.Fatalf("refused input stored grants: %v", got)
+	}
+
+	// Mixed separators, duplicates collapse (10.1.2.3 and 10.1.2.3/32 are
+	// one), the note and wildcard apply to each, one audit event per grant.
+	carol := e.loginAs("carol", core.RoleWildcardAllowed)
+	r = carol.act("/ui/grants", url.Values{"prefix": {"10.1.2.3, 10.1.2.4\n10.1.2.5/32,,10.1.2.3/32\t10.1.2.3"}, "note": {"rack 4"}, "wildcard": {"true"}})
+	code(t, r, 303)
+	see(t, carol.get("/ui/grants"), "Added 3 addresses: 10.1.2.3/32, 10.1.2.4/32, 10.1.2.5/32.")
+	cid := e.userID("carol")
+	if got := prefixes(cid); !slices.Equal(got, []string{"10.1.2.3/32", "10.1.2.4/32", "10.1.2.5/32"}) {
+		t.Fatalf("carol: %v", got)
+	}
+	gs, _ := e.store.Grants().List(bg, cid)
+	for _, g := range gs {
+		if g.Note != "rack 4" || !g.Wildcard || !g.Enabled {
+			t.Errorf("grant %+v", g)
+		}
+	}
+	evs, _ := e.audit.Query(bg, core.AuditQuery{Type: core.AuditGrantChange})
+	if len(evs) != 3 {
+		t.Errorf("audit events: %d, want 3", len(evs))
+	}
+
+	// An address the user already owns is skipped and named; someone else's
+	// same address does not count.
+	code(t, carol.act("/ui/grants", url.Values{"prefix": {"10.1.2.4 10.1.2.6"}}), 303)
+	see(t, carol.get("/ui/grants"), "Added address 10.1.2.6/32. Machines there can request certificates now. Already yours, skipped: 10.1.2.4/32.")
+	code(t, carol.act("/ui/grants", url.Values{"prefix": {"10.1.2.4"}}), 303)
+	see(t, carol.get("/ui/grants"), "Nothing was added. Already yours, skipped: 10.1.2.4/32.")
+	code(t, bob.act("/ui/grants", url.Values{"prefix": {"10.1.2.4, 10.1.2.7/32"}}), 303)
+	if got := prefixes(bid); !slices.Equal(got, []string{"10.1.2.4/32", "10.1.2.7/32"}) {
+		t.Fatalf("bob: %v", got)
+	}
+
+	// Admins: each entry from /8 to /32; one too wide refuses all.
+	r = admin.act("/ui/grants", url.Values{"prefix": {"10.20.0.0/16 10.21.0.0/7"}})
+	code(t, r, 400)
+	see(t, r, "<code>10.21.0.0/7</code>: A range wider than /8 is refused.")
+	code(t, admin.act("/ui/grants", url.Values{"prefix": {"10.20.0.0/16, 10.30.1.0/24 10.40.0.9"}}), 303)
+	if got := prefixes(e.userID("alice")); !slices.Equal(got, []string{"10.20.0.0/16", "10.30.1.0/24", "10.40.0.9/32"}) {
+		t.Fatalf("alice: %v", got)
+	}
+
+	// The cap: at most 50 entries per submit; empty input is refused.
+	var many []string
+	for i := range 51 {
+		many = append(many, "10.3.0."+itoa(int64(i+1)))
+	}
+	r = bob.act("/ui/grants", url.Values{"prefix": {strings.Join(many, " ")}})
+	code(t, r, 400)
+	see(t, r, "Enter at most 50 addresses at a time; this has 51.")
+	code(t, bob.act("/ui/grants", url.Values{"prefix": {" , "}}), 400)
+	code(t, bob.act("/ui/grants", url.Values{"prefix": {strings.Join(many[:50], ",")}}), 303)
+	if got := prefixes(bid); len(got) != 52 {
+		t.Fatalf("bob after 50: %d grants", len(got))
+	}
+	see(t, bob.get("/ui/grants"), "Added 50 addresses: 10.3.0.1/32, ", " and 40 more.")
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }

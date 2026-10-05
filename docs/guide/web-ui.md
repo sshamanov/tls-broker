@@ -49,8 +49,12 @@ To give your machine access:
 
 1. Find the machine's IPv4 address as the broker sees it (the address it
    uses to reach the broker, not a public NAT address).
-2. Enter it under **Add address** (`10.1.2.3` or `10.1.2.3/32`), with a note that says what the machine
-   is.
+2. Enter it under **Add address** (`10.1.2.3` or `10.1.2.3/32`), with a
+   note that says what the machine is. To add several machines at once,
+   separate their addresses with commas or spaces (`10.1.2.3, 10.1.2.4`, at
+   most 50); the note and the wildcard choice apply to each. If any address
+   is refused, nothing is added and the page says which and why. Addresses
+   you already have are skipped.
 3. Tick **Allow wildcard certificates** only if the machine needs `*.`
    certificates. The box appears only for users with the wildcard role and
    administrators.

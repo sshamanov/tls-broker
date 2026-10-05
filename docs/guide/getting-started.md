@@ -34,8 +34,9 @@ either of these holds:
 2. **Your machine has client access.** An entry on the
    [Client access page](web-ui.md#client-access) covers the address. Log in to
    the web interface, open **Client access** and add your machine's IPv4
-   address. Users add single addresses; administrators can also add address
-   ranges such as `10.1.2.0/24`.
+   address (several at once, separated by commas or spaces). Users add
+   single addresses; administrators can also add address ranges such as
+   `10.1.2.0/24`.
 
 Client access is not tied to names: an address with access may request any
 name in the broker's managed zones. Add only machines you trust.

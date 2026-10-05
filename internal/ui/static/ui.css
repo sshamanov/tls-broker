@@ -223,6 +223,8 @@ td.names{min-width:10rem}
 .notice.error{border-left-color:var(--seal)}
 .notice.warn{border-left-color:var(--brass)}
 .notice p{margin:0}
+.notice .refused{margin:.4rem 0 0;padding-left:1.1rem}
+.notice .refused li{overflow-wrap:anywhere}
 .attention-list{list-style:none;padding:0;margin:0}
 .attention-list li{padding:.5rem 0 .5rem 1.1rem;border-top:1px solid var(--rule);position:relative}
 .attention-list li:first-child{border-top:0;padding-top:0}

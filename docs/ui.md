@@ -125,14 +125,27 @@ page for everyone: every grant with its owner (column "Address"), filtered by
 owner (everyone, mine, or one user). The only place to add is the "Add
 address" panel below the table (no header button); the grant is owned by you.
 Users who are not admins enter a single IPv4 address (stored as /32; field
-"IPv4 address", placeholder "10.1.2.3 or 10.1.2.3/32", no mention of ranges);
+"IPv4 address", placeholder "10.1.2.3, 10.1.2.4 or 10.1.2.3/32", no mention of
+ranges);
 a range answers 403 with "Only administrators can add an address range. Add
 a single address (10.1.2.3 or 10.1.2.3/32)." Admins may also enter an IPv4
 CIDR from /8 to /32 (stored masked; field "IPv4 address or range",
-placeholder "10.1.2.3 or 10.1.2.0/24", hint that ranges such as /24 or /16
-are allowed). A prefix wider than /8 answers 400 "A range wider than /8 is
+placeholder "10.1.2.3, 10.1.2.4 or 10.1.2.0/24", hint that ranges such as
+/24 or /16 are allowed). A prefix wider than /8 answers 400 "A range wider than /8 is
 refused." for everyone; IPv6 is refused too. Flashes and the activity log
-read "Added address 10.1.2.3/32.", "Disabled address …" and so on. The wildcard checkbox appears only for
+read "Added address 10.1.2.3/32.", "Disabled address …" and so on.
+The field takes several entries separated by commas and/or whitespace, at
+most 50 per submit (more answers 400). Every entry is checked with the rules
+above before anything is stored: if any is refused, nothing is added and the
+form keeps the text and lists each refused entry with its reason ("Nothing
+was added: 2 of 4 entries were refused."; 400 if any entry is malformed or
+too wide, else 403). Duplicates in the input collapse after masking
+(`10.1.2.3` and `10.1.2.3/32` are one). An entry the user already owns with
+the same prefix is skipped, not an error, and the flash names it ("Already
+yours, skipped: …"); another user's grant for the same prefix does not
+count. The note and the wildcard choice apply to every new grant, and each
+is audited as its own `grant_change`. The flash lists what was added
+("Added 3 addresses: …", the first ten named). The wildcard checkbox appears only for
 `wildcard_allowed` and `admin`; the server enforces it too. Enable, disable and
 delete appear on your own grants, and on all grants for an admin; posting an
 action on someone else's grant answers 403. A non-admin's own disabled grant
