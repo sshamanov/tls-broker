@@ -15,45 +15,57 @@ import (
 )
 
 // DefaultDir is where the image ships the guide (deploy/Dockerfile copies
-// docs/guide there). There is no setting to change it.
+// docs/guide.md there as File). There is no setting to change it.
 const DefaultDir = "/usr/share/tls-broker/docs"
 
 // Placeholder is the broker address the guide's examples use. The reader
 // replaces it with the running configuration's server.external_url.
 const Placeholder = "https://broker.example.com"
 
-// Base is the reader's URL path; a page is served at Base + "/" + name.
+// Base is the reader's URL path.
 const Base = "/ui/docs"
 
-var (
-	// ErrUnavailable: the guide is not present (no readable index page).
-	ErrUnavailable = errors.New("guide: documentation not available")
-	// ErrNotFound: the page is not listed in the index, or its file is
-	// missing.
-	ErrNotFound = errors.New("guide: no such page")
-)
+// ErrUnavailable: the guide is not present (no readable File with a title).
+var ErrUnavailable = errors.New("guide: documentation not available")
 
-// Page is a rendered guide page.
+// MovedPages maps the names of the pages the guide used to be split into
+// (served at Base + "/" + name) to the ID of the level-2 heading that holds
+// their text now. The reader redirects the old URLs there; the docs lint
+// checks every ID exists.
+var MovedPages = map[string]string{
+	"getting-started": "getting-started",
+	"web-ui":          "using-the-web-interface",
+	"acme-proxy":      "acme-proxy-certbot-and-acmesh",
+	"dns-proxy":       "dns-proxy-your-own-acme-account",
+	"direct":          "direct-download-curl-and-tar",
+	"troubleshooting": "troubleshooting",
+	"api":             "api-reference",
+}
+
+// Page is the rendered guide.
 type Page struct {
-	Name  string    // "" for the index page
-	Title string    // text of the level-1 heading, which is not in HTML
-	HTML  string    // the body, broker address substituted; safe to embed
-	TOC   []Heading // level-2 and level-3 headings, in order
+	Title string // text of the level-1 heading, which is not in HTML
+	// HTML is the body without the title and the contents section, broker
+	// address substituted; safe to embed.
+	HTML string
+	// TOC is the level-2 and level-3 headings in order, without the
+	// contents heading: the reader shows it as the navigation.
+	TOC []Heading
 }
 
 // Library reads and renders the guide from a file system (os.DirFS of
-// DefaultDir in the image, of docs/guide in tests). Rendered pages are
-// cached per file, keyed by modification time and size, and rendered again
-// when the file or the index changes; nothing is rendered before it is
-// first requested. It is safe for concurrent use.
+// DefaultDir in the image, of docs in tests). The rendering is cached, keyed
+// by the file's modification time and size, and done again when the file
+// changes; nothing is rendered before it is first requested. It is safe for
+// concurrent use.
 type Library struct {
 	fsys fs.FS
 	log  *slog.Logger
 	md   goldmark.Markdown
 
 	mu    sync.Mutex
-	index *cachedIndex
-	pages map[string]*cachedPage
+	stamp stamp
+	page  *Page
 
 	missingOnce sync.Once
 }
@@ -63,78 +75,50 @@ type stamp struct {
 	size int64
 }
 
-type cachedIndex struct {
-	stamp stamp
-	index Index
-	page  Page // the index page itself
-}
-
-type cachedPage struct {
-	stamp stamp
-	index stamp // the index it was rendered against (link targets)
-	page  Page
-}
-
 // New returns a library over fsys; a nil fsys is a build without docs.
 func New(fsys fs.FS, logger *slog.Logger) *Library {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Library{fsys: fsys, log: logger, md: newMarkdown(), pages: map[string]*cachedPage{}}
+	return &Library{fsys: fsys, log: logger, md: newMarkdown()}
 }
 
-// Index returns the parsed index, or ErrUnavailable.
-func (l *Library) Index() (Index, error) {
+// Document returns the guide with Placeholder replaced by externalURL (no
+// trailing slash; "" leaves the placeholder), or ErrUnavailable.
+func (l *Library) Document(externalURL string) (*Page, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	ci, err := l.loadIndex()
-	if err != nil {
-		return Index{}, err
+	if l.fsys == nil {
+		l.unavailable(errors.New("no documentation directory"))
+		return nil, ErrUnavailable
 	}
-	return ci.index, nil
-}
-
-// Page returns the page name ("" for the index page) with Placeholder
-// replaced by externalURL (no trailing slash; "" leaves the placeholder).
-// Only pages the index lists are served: anything else is ErrNotFound.
-func (l *Library) Page(name, externalURL string) (*Page, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	ci, err := l.loadIndex()
+	st, err := l.stat()
 	if err != nil {
-		return nil, err
+		l.unavailable(err)
+		return nil, ErrUnavailable
 	}
-	p := ci.page
-	if name != "" {
-		if !ValidName(name) || !ci.index.Has(name) {
-			return nil, ErrNotFound
-		}
-		file := name + ".md"
-		st, err := l.stat(file)
+	if l.page == nil || l.stamp != st {
+		src, err := fs.ReadFile(l.fsys, File)
 		if err != nil {
-			l.log.Warn("guide: page listed in the index is missing", "page", file, "error", err)
-			return nil, ErrNotFound
+			l.unavailable(err)
+			return nil, ErrUnavailable
 		}
-		c := l.pages[name]
-		if c == nil || c.stamp != st || c.index != ci.stamp {
-			src, err := fs.ReadFile(l.fsys, file)
-			if err != nil {
-				l.log.Warn("guide: cannot read page", "page", file, "error", err)
-				return nil, ErrNotFound
-			}
-			c = &cachedPage{stamp: st, index: ci.stamp, page: l.render(name, src, ci.index)}
-			l.pages[name] = c
+		p := l.render(src)
+		if p.Title == "" {
+			l.unavailable(errors.New("the guide has no level-1 heading"))
+			return nil, ErrUnavailable
 		}
-		p = c.page
+		l.page, l.stamp = &p, st
 	}
+	p := *l.page
 	if ext := strings.TrimRight(externalURL, "/"); ext != "" {
 		p.HTML = strings.ReplaceAll(p.HTML, Placeholder, html.EscapeString(ext))
 	}
 	return &p, nil
 }
 
-func (l *Library) stat(file string) (stamp, error) {
-	fi, err := fs.Stat(l.fsys, file)
+func (l *Library) stat() (stamp, error) {
+	fi, err := fs.Stat(l.fsys, File)
 	if err != nil {
 		return stamp{}, err
 	}
@@ -144,49 +128,20 @@ func (l *Library) stat(file string) (stamp, error) {
 	return stamp{fi.ModTime(), fi.Size()}, nil
 }
 
-// loadIndex returns the cached index, reading it again when it changed.
-// Callers hold l.mu.
-func (l *Library) loadIndex() (*cachedIndex, error) {
-	if l.fsys == nil {
-		l.unavailable(errors.New("no documentation directory"))
-		return nil, ErrUnavailable
-	}
-	st, err := l.stat(IndexFile)
-	if err != nil {
-		l.unavailable(err)
-		return nil, ErrUnavailable
-	}
-	if l.index != nil && l.index.stamp == st {
-		return l.index, nil
-	}
-	src, err := fs.ReadFile(l.fsys, IndexFile)
-	if err != nil {
-		l.unavailable(err)
-		return nil, ErrUnavailable
-	}
-	idx, err := ParseIndex(src)
-	if err != nil {
-		l.unavailable(err)
-		return nil, ErrUnavailable
-	}
-	l.index = &cachedIndex{stamp: st, index: idx, page: l.render("", src, idx)}
-	return l.index, nil
-}
-
 func (l *Library) unavailable(err error) {
 	l.missingOnce.Do(func() {
-		l.log.Warn("guide: documentation is not available in this build", "dir", DefaultDir, "error", err)
+		l.log.Warn("guide: documentation is not available in this build", "dir", DefaultDir, "file", File, "error", err)
 	})
 }
 
-// render turns a guide page into HTML for the reader: heading IDs as on
-// GitHub, the title heading taken out, links to listed guide pages pointed at
-// the reader, links to anything else in the repository shown as text with
-// the repository path (the reader does not serve them), images as their
-// text. Raw HTML in the source is never passed through.
-func (l *Library) render(name string, src []byte, idx Index) Page {
+// render turns the guide into HTML for the reader: heading IDs as on
+// GitHub, the title heading and the contents section taken out (the reader
+// shows the headings as its navigation), links into the repository shown as
+// text with the repository path (the reader does not serve them), images as
+// their text. Raw HTML in the source is never passed through.
+func (l *Library) render(src []byte) Page {
 	doc, hs := parse(l.md, src)
-	p := Page{Name: name}
+	var p Page
 	var title ast.Node
 	var links []*ast.Link
 	var images []*ast.Image
@@ -210,19 +165,20 @@ func (l *Library) render(name string, src []byte, idx Index) Page {
 	if title != nil {
 		title.Parent().RemoveChild(title.Parent(), title)
 	}
+	contentsID := ""
+	if h, blocks := contentsSection(doc, src); h != nil {
+		contentsID = headingID(h)
+		for _, b := range append(blocks, h) {
+			doc.RemoveChild(doc, b)
+		}
+	}
 	for _, h := range hs {
-		if h.Level == 2 || h.Level == 3 {
+		if (h.Level == 2 || h.Level == 3) && h.ID != contentsID {
 			p.TOC = append(p.TOC, h)
 		}
 	}
 	for _, n := range links {
-		lk := classify(string(n.Destination))
-		switch {
-		case lk.kind == linkGuide && lk.name == "":
-			n.Destination = []byte(withFragment(Base, lk.fragment))
-		case lk.kind == linkGuide && idx.Has(lk.name):
-			n.Destination = []byte(withFragment(Base+"/"+lk.name, lk.fragment))
-		case lk.kind == linkGuide, lk.kind == linkRepo:
+		if lk := classify(string(n.Destination)); lk.kind == linkRepo {
 			replaceInline(n, &repoRef{Path: lk.repoPath})
 		}
 	}
@@ -231,24 +187,14 @@ func (l *Library) render(name string, src []byte, idx Index) Page {
 	}
 	var buf bytes.Buffer
 	if err := l.md.Renderer().Render(&buf, src, doc); err != nil {
-		l.log.Error("guide: render failed", "page", name, "error", err)
+		l.log.Error("guide: render failed", "error", err)
 	}
 	// Tables scroll inside a wrapper so their header and body stay one
 	// table. Raw HTML never reaches the output, so every "<table>" here is
 	// the renderer's own.
 	p.HTML = strings.ReplaceAll(strings.ReplaceAll(buf.String(),
 		"<table>", `<div class="doc-table"><table>`), "</table>", "</table></div>")
-	if p.Title == "" {
-		p.Title = name
-	}
 	return p
-}
-
-func withFragment(path, fragment string) string {
-	if fragment == "" {
-		return path
-	}
-	return path + "#" + fragment
 }
 
 // replaceInline puts with in place of n and moves n's children into it.

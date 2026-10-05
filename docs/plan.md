@@ -48,11 +48,11 @@ internal/direct/       direct certificate cache and API
 internal/dnsproxy/     /dns/present and /dns/cleanup
 internal/auth/         LDAP login, local admin, sessions, CSRF
 internal/ui/           web UI
-internal/guide/        user guide (docs/guide): index parsing, GitHub-compatible
-                       heading IDs, rendering and cache for the UI reader, docs lint,
-                       Confluence storage-format export
-internal/confluence/   Confluence Server/DC REST client and guide publisher
-                       (plan/apply for "tls-broker docs publish"); fake in confluencetest
+internal/guide/        user guide (docs/guide.md): GitHub-compatible heading IDs,
+                       rendering and cache for the UI reader, docs lint (contents
+                       list = headings), Confluence storage-format export
+internal/confluence/   Confluence Server/DC REST client and guide publisher (plan/apply
+                       for "tls-broker docs publish": root page, --prune); fake in confluencetest
 internal/ctlog/        Certificate Transparency inventory: Cert Spotter source and
                        fake, in-memory refresh loop, state analysis (architecture §31)
 internal/httpx/        real source IP, middleware, problem responses
@@ -63,7 +63,7 @@ test/e2e/              in-process end-to-end tests on fakes; Pebble-backed tests
 test/compat/           scripts running real certbot / acme.sh against the broker
 deploy/                Dockerfile, compose.yaml, .env.example, nginx example
 docs/                  operator, API and development documentation
-docs/guide/            user guide (also shown in the UI)
+docs/guide.md          user guide, one document (also shown in the UI and on Confluence)
 ```
 
 Dependency rule: packages depend on `core` and `names`, not on each other

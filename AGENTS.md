@@ -17,7 +17,7 @@ resource; protecting them is a design requirement.
 |---|---|
 | System shape, trust model, invariants | `architecture.md` |
 | Package layout, contracts between packages, build order | `docs/plan.md` |
-| User-facing usage guide, shown in the app's Documentation reader and copied to Confluence by `tls-broker docs publish` | `docs/guide/` (index `docs/guide/README.md`) |
+| User-facing usage guide, shown in the app's Documentation reader and copied to Confluence by `tls-broker docs publish` | `docs/guide.md` (one document, contents list at the top) |
 | Operator and API reference documentation | `docs/*.md` (index `docs/README.md`) |
 | How to build, run and test | `docs/development.md`, `Makefile` |
 

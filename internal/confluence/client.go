@@ -37,18 +37,13 @@ type API interface {
 	// Page reads a page with its space, version and storage body.
 	Page(ctx context.Context, id string) (*Page, error)
 	// Children lists a page's direct child pages, in Confluence's order,
-	// with versions and storage bodies.
+	// with versions (no bodies).
 	Children(ctx context.Context, id string) ([]Page, error)
-	// FindTitle returns the pages titled title in the space (IDs and
-	// titles only); titles are unique per space.
-	FindTitle(ctx context.Context, space, title string) ([]Page, error)
-	// Create adds a page under parentID.
-	Create(ctx context.Context, space, parentID, title, body string) (*Page, error)
 	// Update replaces a page's title and body; version is the new version
 	// number (current + 1), message the version comment.
 	Update(ctx context.Context, id, title, body string, version int, message string) (*Page, error)
-	// MoveAfter puts page id directly after targetID among its siblings.
-	MoveAfter(ctx context.Context, id, targetID string) error
+	// Delete removes a page (Confluence moves it to the space's trash).
+	Delete(ctx context.Context, id string) error
 }
 
 // Error is a non-success answer from Confluence.
@@ -247,7 +242,7 @@ func (c *Client) Page(ctx context.Context, id string) (*Page, error) {
 	return &out, nil
 }
 
-// childPageLimit is the page size for listing children with bodies.
+// childPageLimit is the page size for listing children.
 const childPageLimit = 25
 
 // Children implements API.
@@ -260,7 +255,7 @@ func (c *Client) Children(ctx context.Context, id string) ([]Page, error) {
 		var r struct {
 			Results []apiPage `json:"results"`
 		}
-		q := url.Values{"expand": {"version,body.storage"}, "start": {strconv.Itoa(start)}, "limit": {strconv.Itoa(childPageLimit)}}
+		q := url.Values{"expand": {"version"}, "start": {strconv.Itoa(start)}, "limit": {strconv.Itoa(childPageLimit)}}
 		if err := c.do(ctx, http.MethodGet, contentPath(id)+"/child/page", q, nil, &r); err != nil {
 			return nil, err
 		}
@@ -274,22 +269,6 @@ func (c *Client) Children(ctx context.Context, id string) ([]Page, error) {
 	}
 }
 
-// FindTitle implements API.
-func (c *Client) FindTitle(ctx context.Context, space, title string) ([]Page, error) {
-	var r struct {
-		Results []apiPage `json:"results"`
-	}
-	q := url.Values{"type": {"page"}, "spaceKey": {space}, "title": {title}}
-	if err := c.do(ctx, http.MethodGet, "/rest/api/content", q, nil, &r); err != nil {
-		return nil, err
-	}
-	var out []Page
-	for _, p := range r.Results {
-		out = append(out, p.page())
-	}
-	return out, nil
-}
-
 type storageBody struct {
 	Storage struct {
 		Value          string `json:"value"`
@@ -301,34 +280,6 @@ func storage(body string) storageBody {
 	var b storageBody
 	b.Storage.Value, b.Storage.Representation = body, "storage"
 	return b
-}
-
-type ref struct {
-	ID string `json:"id"`
-}
-
-type spaceRef struct {
-	Key string `json:"key"`
-}
-
-// Create implements API.
-func (c *Client) Create(ctx context.Context, space, parentID, title, body string) (*Page, error) {
-	if err := checkID(parentID); err != nil {
-		return nil, err
-	}
-	in := struct {
-		Type      string      `json:"type"`
-		Title     string      `json:"title"`
-		Space     spaceRef    `json:"space"`
-		Ancestors []ref       `json:"ancestors"`
-		Body      storageBody `json:"body"`
-	}{"page", title, spaceRef{space}, []ref{{parentID}}, storage(body)}
-	var p apiPage
-	if err := c.do(ctx, http.MethodPost, "/rest/api/content", nil, in, &p); err != nil {
-		return nil, err
-	}
-	out := p.page()
-	return &out, nil
 }
 
 // Update implements API.
@@ -355,13 +306,10 @@ func (c *Client) Update(ctx context.Context, id, title, body string, version int
 	return &out, nil
 }
 
-// MoveAfter implements API (PUT /rest/api/content/{id}/move/after/{target}).
-func (c *Client) MoveAfter(ctx context.Context, id, targetID string) error {
+// Delete implements API (DELETE /rest/api/content/{id}).
+func (c *Client) Delete(ctx context.Context, id string) error {
 	if err := checkID(id); err != nil {
 		return err
 	}
-	if err := checkID(targetID); err != nil {
-		return err
-	}
-	return c.do(ctx, http.MethodPut, contentPath(id)+"/move/after/"+targetID, nil, nil, nil)
+	return c.do(ctx, http.MethodDelete, contentPath(id), nil, nil, nil)
 }

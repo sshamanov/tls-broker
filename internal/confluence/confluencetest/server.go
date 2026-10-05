@@ -39,26 +39,22 @@ type Server struct {
 	mu        sync.Mutex
 	pages     map[string]*Page
 	order     []string // page IDs in sibling order (one global list suffices)
-	next      int
 	readOnly  bool
 	conflicts int
-	noMove    bool
 	writes    int
 	reqs      []string
 }
 
 // New starts a server holding one root page.
 func New(token, rootID, space, rootTitle string) *Server {
-	s := &Server{Token: token, pages: map[string]*Page{}, next: 1000}
+	s := &Server{Token: token, pages: map[string]*Page{}}
 	s.pages[rootID] = &Page{ID: rootID, Space: space, Title: rootTitle, Version: 1}
 	s.order = append(s.order, rootID)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /rest/api/content/{id}", s.get)
 	mux.HandleFunc("GET /rest/api/content/{id}/child/page", s.children)
-	mux.HandleFunc("GET /rest/api/content", s.search)
-	mux.HandleFunc("POST /rest/api/content", s.create)
 	mux.HandleFunc("PUT /rest/api/content/{id}", s.update)
-	mux.HandleFunc("PUT /rest/api/content/{id}/move/{pos}/{target}", s.move)
+	mux.HandleFunc("DELETE /rest/api/content/{id}", s.delete)
 	s.Server = httptest.NewServer(s.auth(mux))
 	return s
 }
@@ -98,7 +94,7 @@ func (s *Server) Children(id string) []Page {
 	return out
 }
 
-// Writes counts successful creates, updates and moves.
+// Writes counts successful updates and deletes.
 func (s *Server) Writes() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -117,9 +113,6 @@ func (s *Server) SetReadOnly(v bool) { s.mu.Lock(); s.readOnly = v; s.mu.Unlock(
 
 // Conflicts makes the next n updates meet a concurrent edit.
 func (s *Server) Conflicts(n int) { s.mu.Lock(); s.conflicts = n; s.mu.Unlock() }
-
-// NoMove makes the move endpoint answer 404 (an older Confluence).
-func (s *Server) NoMove() { s.mu.Lock(); s.noMove = true; s.mu.Unlock() }
 
 func (s *Server) auth(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -202,29 +195,10 @@ func (s *Server) children(w http.ResponseWriter, r *http.Request) {
 	reply(w, map[string]any{"results": res, "start": start, "limit": limit, "size": len(res)})
 }
 
-func (s *Server) search(w http.ResponseWriter, r *http.Request) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	q := r.URL.Query()
-	res := []map[string]any{}
-	for _, id := range s.order {
-		if p := s.pages[id]; p.Space == q.Get("spaceKey") && p.Title == q.Get("title") {
-			res = append(res, p.json(""))
-		}
-	}
-	reply(w, map[string]any{"results": res, "size": len(res)})
-}
-
 type body struct {
-	ID    string `json:"id"`
-	Type  string `json:"type"`
-	Title string `json:"title"`
-	Space struct {
-		Key string `json:"key"`
-	} `json:"space"`
-	Ancestors []struct {
-		ID string `json:"id"`
-	} `json:"ancestors"`
+	ID      string `json:"id"`
+	Type    string `json:"type"`
+	Title   string `json:"title"`
 	Version struct {
 		Number  int    `json:"number"`
 		Message string `json:"message"`
@@ -270,30 +244,6 @@ func (s *Server) titleTaken(space, title, except string) bool {
 	return false
 }
 
-func (s *Server) create(w http.ResponseWriter, r *http.Request) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	b, ok := s.decode(w, r)
-	if !ok {
-		return
-	}
-	if len(b.Ancestors) != 1 || s.pages[b.Ancestors[0].ID] == nil {
-		fail(w, http.StatusBadRequest, "one existing ancestor is required")
-		return
-	}
-	if s.titleTaken(b.Space.Key, b.Title, "") {
-		fail(w, http.StatusBadRequest, "A page with this title already exists: A page already exists with the title "+b.Title+" in the space with key "+b.Space.Key)
-		return
-	}
-	s.next++
-	p := &Page{ID: fmt.Sprint(s.next), Space: b.Space.Key, ParentID: b.Ancestors[0].ID, Title: b.Title, Version: 1, Body: s.store(b.Body.Storage.Value)}
-	s.pages[p.ID] = p
-	// New pages go last.
-	s.order = append(s.order, p.ID)
-	s.writes++
-	reply(w, p.json("version,space"))
-}
-
 func (s *Server) update(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -325,26 +275,20 @@ func (s *Server) update(w http.ResponseWriter, r *http.Request) {
 	reply(w, p.json("version,space"))
 }
 
-func (s *Server) move(w http.ResponseWriter, r *http.Request) {
+func (s *Server) delete(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.noMove {
-		http.NotFound(w, r)
+	id := r.PathValue("id")
+	if _, ok := s.pages[id]; !ok {
+		fail(w, http.StatusNotFound, "not found")
 		return
 	}
 	if s.readOnly {
-		fail(w, http.StatusForbidden, "Not permitted")
+		fail(w, http.StatusForbidden, "Not permitted to delete this content")
 		return
 	}
-	id, target := r.PathValue("id"), r.PathValue("target")
-	p, t := s.pages[id], s.pages[target]
-	if p == nil || t == nil || r.PathValue("pos") != "after" || p.ParentID != t.ParentID {
-		fail(w, http.StatusBadRequest, "bad move")
-		return
-	}
+	delete(s.pages, id)
 	s.order = slices.DeleteFunc(s.order, func(x string) bool { return x == id })
-	i := slices.Index(s.order, target)
-	s.order = slices.Insert(s.order, i+1, id)
 	s.writes++
-	reply(w, map[string]any{"pageId": id})
+	w.WriteHeader(http.StatusNoContent)
 }

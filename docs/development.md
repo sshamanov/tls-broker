@@ -184,7 +184,7 @@ through the ACME proxy; and as DNS-proxy clients ordering from Pebble
 directly, acme.sh with its stock `--dns dns_acmeproxy` hook
 (`ACMEPROXY_ENDPOINT` = the broker's `/dns`) and current certbot (plus `curl`,
 `test/compat/certbot-curl.Dockerfile`) with the two manual hooks extracted
-verbatim from the user guide, `docs/guide/dns-proxy.md` (a Go test keeps
+verbatim from the user guide, `docs/guide.md` (a Go test keeps
 `docs/dns-proxy.md` identical). The guide's other command lines are not
 extracted; they use the same options the suite runs (`--webroot -w /tmp`,
 `-w /tmp`, `--dns dns_acmeproxy`). Each issues, the chain is compared with
@@ -265,7 +265,7 @@ zero value is production:
 | `Listener` | `net.Listen("tcp", "127.0.0.1:0")` | `App.Addr()` reports it |
 | `NewDirectKey` | a pre-generated RSA key | RSA generation is slow under `-race` |
 | `HousekeepingInterval` | negative to disable | `App.Housekeep(ctx)` runs one round on demand |
-| `Docs` | `os.DirFS("docs/guide")` | the user guide for the UI reader; nil reads `/usr/share/tls-broker/docs` (`guide.DefaultDir`), which only the image has |
+| `Docs` | `os.DirFS("docs")` | the directory holding the user guide (`guide.md`) for the UI reader; nil reads `/usr/share/tls-broker/docs` (`guide.DefaultDir`), which only the image has |
 | `Logger` | `slog.New(slog.NewTextHandler(io.Discard, nil))` | |
 
 For the fake CA to validate DNS-01 against what the broker published, call
@@ -280,11 +280,13 @@ complete example (restart on the same data directory, TLS front, clients).
 
 ## Documentation
 
-`docs/README.md` indexes everything. `docs/guide/` is the user guide: short,
-task-oriented pages for people who need certificates, listed (and ordered,
-optionally under group headings) by `docs/guide/README.md`. The reference
-pages in `docs/` stay the deep, complete description; a guide links to them
-by relative path.
+`docs/README.md` indexes everything. `docs/guide.md` is the user guide for
+people who need certificates: one document everywhere (repository, the UI
+reader, Confluence), with a "Contents" list at the top and then one `##`
+section per topic (getting started, web interface, ACME proxy, DNS proxy,
+direct download, troubleshooting, API reference) with `###` subsections.
+The reference pages in `docs/` stay the deep, complete description; the
+guide links to them by relative path (`acme-proxy.md`).
 
 The guide has to read the same on GitHub, for agents and in Confluence
 (`tls-broker docs publish`), so `internal/guide`'s docs lint (part of `make check`)
@@ -292,38 +294,47 @@ holds it to portable Markdown:
 
 - CommonMark with GFM tables and fenced code only: no raw HTML (comments
   included), no front matter, no images; the first line is the `# Title`,
-  the only level-1 heading.
-- Links between pages are relative `.md` links, optionally with an
-  `#anchor`; every link and anchor must resolve. Anchors are computed with
-  GitHub's slug rules (the same code the reader uses), also for links into
-  `docs/*.md`.
-- Every page is listed in the index and every index entry exists.
+  the only level-1 heading. There is no `docs/guide/` directory.
+- The `## Contents` section follows the title and introduction and is one
+  nested list: a link per `##` heading, with a nested list of links to its
+  `###` headings. It must list exactly the document's `##` and `###`
+  headings, in order, with their text and anchors; a test fails when they
+  drift. Every heading text is unique, so anchors are readable (no `-1`
+  suffixes).
+- Links inside the guide are `#anchors`; links to other repository files
+  are relative to `docs/`, optionally with an `#anchor`. Every link and
+  anchor must resolve. Anchors are computed with GitHub's slug rules (the
+  same code the reader uses), also for links into `docs/*.md`.
+- Every old page name in `guide.MovedPages` (the reader redirects
+  `/ui/docs/<page>` there) points at an existing `##` heading.
 - Example hosts are `https://broker.example.com` (the broker) and
   `example.com` names.
 - Every public route (read from the mux registrations of `internal/app` and
   `internal/dnsproxy` and the path constants of `internal/acmesrv` and
-  `internal/direct`) appears in `docs/guide/api.md`. A new route fails the
-  test until it is documented there.
-- The Certbot DNS-proxy hooks in `docs/guide/dns-proxy.md` and
-  `docs/dns-proxy.md` are identical (`make compat` runs the guide's).
+  `internal/direct`) appears in the guide's "API reference" section. A new
+  route fails the test until it is documented there.
+- The Certbot DNS-proxy hooks in `docs/guide.md` and `docs/dns-proxy.md`
+  are identical (`make compat` runs the guide's).
 
-Shipping: `deploy/Dockerfile` copies `docs/guide` to
-`/usr/share/tls-broker/docs` (`.dockerignore` excludes `docs` except that
-directory) and the broker reads it from there; there is no environment
-variable or override directory. `app.Options.Docs` and `ui.Deps.Docs`
-take any `fs.FS`, so tests and a locally built binary use
-`os.DirFS("docs/guide")`; `internal/ui` tests read the repository's guide,
-`internal/guide` tests render every page of it. A binary run outside the
+Shipping: `deploy/Dockerfile` copies `docs/guide.md` to
+`/usr/share/tls-broker/docs/guide.md` (`.dockerignore` excludes `docs`
+except that file) and the broker reads it from there; there is no
+environment variable or override directory. `app.Options.Docs` and
+`ui.Deps.Docs` take any `fs.FS` holding `guide.md`, so tests and a locally
+built binary use `os.DirFS("docs")`; `internal/ui` tests read the
+repository's guide, `internal/guide` tests render and export it. A binary run outside the
 image without `Options.Docs` shows "not available in this build" under
 Documentation. Markdown changes need no rebuild of the Go code, only of the
 image.
 
 Confluence copy: `tls-broker docs publish` (operator side in
 `docs/operations.md`) renders the same Markdown with
-`guide.ExportConfluence` into Confluence storage format (code macro, plain
-tables, page links, an anchor macro per heading named by its GitHub slug)
-and publishes it through `internal/confluence` (REST client, plan/apply,
-body normalization); `internal/confluence/confluencetest` is the fake
+`guide.ExportConfluence` into one Confluence storage-format body (code
+macro, plain tables, an anchor macro per heading named by its GitHub slug,
+`#anchor` links and the contents list as same-page anchor links) and
+publishes it to the root page through `internal/confluence` (REST client,
+plan/apply, `--prune` of the obsolete `TLS Broker: ` child pages, body
+normalization); `internal/confluence/confluencetest` is the fake
 Confluence the tests run against. A read-only check against a real
 Confluence from a checkout, with the three `TLS_BROKER_CONFLUENCE_*`
 variables exported in your shell (never in a file in the repository):
@@ -332,7 +343,7 @@ variables exported in your shell (never in a file in the repository):
 make build
 docker run --rm --network host --user "$(id -u):$(id -g)" -v "$PWD:/src" -w /src \
   -e TLS_BROKER_CONFLUENCE_URL -e TLS_BROKER_CONFLUENCE_TOKEN -e TLS_BROKER_CONFLUENCE_PAGE_ID \
-  golang:1.27 /src/bin/tls-broker docs publish --dry-run --docs docs/guide \
+  golang:1.27 /src/bin/tls-broker docs publish --dry-run --prune --docs docs \
   --broker-url https://broker.example.com --out .claude/tmp/xhtml
 ```
 

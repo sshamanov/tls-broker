@@ -99,7 +99,7 @@ type envOpts struct {
 	rotator KeyRotator
 	banners []string
 	noYAML  bool
-	// docs replaces the user guide (default: the repository's docs/guide);
+	// docs replaces the user guide (default: the repository's docs/guide.md);
 	// noDocs builds the UI without one.
 	docs   fs.FS
 	noDocs bool
@@ -139,7 +139,7 @@ func newEnv(t *testing.T, o ...envOpts) *env {
 	}
 	docs := opt.docs
 	if docs == nil && !opt.noDocs {
-		docs = os.DirFS("../../docs/guide")
+		docs = os.DirFS("../../docs")
 	}
 	h, err := New(Deps{
 		Auth: e.auth, Config: e.cfg, Admin: e.cfg, Secrets: e.secrets, LDAP: e.ldap, CAA: e.caa,

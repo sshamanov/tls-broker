@@ -1,14 +1,14 @@
-// Package guide reads the user guide (docs/guide in the repository,
-// /usr/share/tls-broker/docs in the image), renders it for the web UI's
-// documentation reader and exports it in Confluence storage format (see
+// Package guide reads the user guide (docs/guide.md in the repository,
+// /usr/share/tls-broker/docs/guide.md in the image), renders it for the web
+// UI's documentation reader and exports it in Confluence storage format (see
 // ExportConfluence).
 //
-// The guide is plain Markdown that must read the same on GitHub, for agents
-// reading the files and in the UI: CommonMark with GFM tables, no raw HTML,
-// no front matter, relative .md links between pages. The index page
-// (README.md) lists the pages, optionally grouped under headings; only pages
-// it lists are served. Heading IDs follow GitHub's rules (see slug), so
-// #anchors work the same everywhere.
+// The guide is one Markdown document that must read the same on GitHub, for
+// agents reading the file, in the UI and in Confluence: CommonMark with GFM
+// tables, no raw HTML, no front matter. It starts with its title and a
+// "Contents" section listing its level-2 and level-3 headings; links inside
+// it are #anchors. Heading IDs follow GitHub's rules (see slug), so #anchors
+// work the same everywhere.
 package guide
 
 import (
@@ -25,9 +25,12 @@ import (
 	"github.com/yuin/goldmark/util"
 )
 
-// IndexFile is the guide's index page: its title, its navigation (the
-// relative .md links in its lists) and the page served at the reader's root.
-const IndexFile = "README.md"
+// File is the guide's file name in its directory (docs in the repository,
+// DefaultDir in the image).
+const File = "guide.md"
+
+// ContentsTitle is the level-2 heading of the guide's table of contents.
+const ContentsTitle = "Contents"
 
 // newMarkdown is the one Markdown dialect of the guide: CommonMark plus GFM
 // (tables, strikethrough, autolinks, task lists). Raw HTML stays disabled

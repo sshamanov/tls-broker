@@ -1,4 +1,4 @@
-{{define "lede"}}<p class="lede">{{if .Blocked}}Your account is blocked, so there is nothing to show here.{{else if .Admin}}Whether certificates can be issued right now, what needs renewing soon, and what needs your attention.{{else}}Whether certificates can be issued right now, and what needs renewing soon.{{end}}{{if not .Blocked}} <a href="/ui/docs/getting-started">How to get a certificate</a>{{end}}</p>{{end}}
+{{define "lede"}}<p class="lede">{{if .Blocked}}Your account is blocked, so there is nothing to show here.{{else if .Admin}}Whether certificates can be issued right now, what needs renewing soon, and what needs your attention.{{else}}Whether certificates can be issued right now, and what needs renewing soon.{{end}}{{if not .Blocked}} <a href="/ui/docs#getting-started">How to get a certificate</a>{{end}}</p>{{end}}
 
 {{define "content"}}
 {{if .Blocked}}

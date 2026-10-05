@@ -97,3 +97,43 @@ document.addEventListener("DOMContentLoaded", function () {
     })(blocks[i]);
   }
 });
+
+// Documentation: mark the section being read in the contents column and
+// keep that entry visible when the column scrolls by itself.
+document.addEventListener("DOMContentLoaded", function () {
+  var nav = document.querySelector(".docs-nav");
+  if (!nav) return;
+  var links = nav.querySelectorAll("a[href^='#']");
+  var items = [];
+  for (var i = 0; i < links.length; i++) {
+    var h = document.getElementById(decodeURIComponent(links[i].getAttribute("href").slice(1)));
+    if (h) items.push({ link: links[i], heading: h });
+  }
+  if (!items.length) return;
+  var current = null;
+  var update = function () {
+    var active = items[0];
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].heading.getBoundingClientRect().top > 96) break;
+      active = items[i];
+    }
+    if (active === current) return;
+    if (current) current.link.removeAttribute("aria-current");
+    active.link.setAttribute("aria-current", "location");
+    current = active;
+    if (nav.scrollHeight > nav.clientHeight) {
+      var top = active.link.offsetTop, h = active.link.offsetHeight;
+      if (top < nav.scrollTop || top + h > nav.scrollTop + nav.clientHeight) {
+        nav.scrollTop = top - nav.clientHeight / 3;
+      }
+    }
+  };
+  var queued = false;
+  window.addEventListener("scroll", function () {
+    if (queued) return;
+    queued = true;
+    window.requestAnimationFrame(function () { queued = false; update(); });
+  }, { passive: true });
+  window.addEventListener("hashchange", update);
+  update();
+});

@@ -318,23 +318,20 @@ table+p{margin-top:.8rem}
 
 /* ---- Documentation reader --------------------------------------------- */
 
-/* Guide navigation, the page as a sheet of at most ~75 characters a line,
-   and "On this page" on wide screens. Code blocks scroll inside themselves;
-   the page never scrolls sideways. */
-.docs{display:grid;grid-template-columns:12rem minmax(0,44rem);gap:2rem;align-items:start}
-.docs.has-toc{grid-template-columns:12rem minmax(0,44rem) 11rem}
-.docs-nav,.doc-toc{position:sticky;top:1.25rem;min-width:0}
-.docs-nav{display:flex;flex-direction:column;gap:1rem;font-size:.92rem}
-.docs-nav ul,.doc-toc ul{list-style:none;margin:0;padding:0}
-.docs-nav a{display:block;padding:.3rem .6rem;color:var(--ink);text-decoration:none;border-left:2px solid var(--rule);line-height:1.35}
+/* The guide is one document: its contents (level-2 and level-3 headings)
+   as a sticky column that scrolls by itself, the text as a sheet of at most
+   ~75 characters a line. ui.js marks the section being read. Code blocks
+   scroll inside themselves; the page never scrolls sideways. */
+.docs{display:grid;grid-template-columns:15rem minmax(0,48rem);gap:2rem;align-items:start}
+.docs-nav{position:sticky;top:1.25rem;min-width:0;max-height:calc(100vh - 2.5rem);overflow-y:auto;overscroll-behavior:contain;font-size:.9rem;padding-bottom:.5rem}
+.docs-nav ul{list-style:none;margin:0;padding:0}
+.docs-nav a{display:block;padding:.22rem .6rem;color:var(--ink-2);text-decoration:none;border-left:2px solid var(--rule);line-height:1.35}
+.docs-nav .toc-l2 a{color:var(--ink);font-weight:500}
+.docs-nav .toc-l2:not(:first-child) a{margin-top:.55rem}
+.docs-nav .toc-l3 a{padding-left:1.25rem;font-size:.85rem}
 .docs-nav a:hover{color:var(--intaglio);border-left-color:var(--rule-2)}
-.docs-nav a[aria-current="page"]{color:var(--intaglio);background:var(--intaglio-tint);border-left-color:var(--intaglio);font-weight:500}
+.docs-nav a[aria-current]{color:var(--intaglio);background:var(--intaglio-tint);border-left-color:var(--intaglio)}
 .docs-group-title{font-size:.84rem;font-weight:600;color:var(--ink-2);margin:0 0 .4rem .6rem}
-.doc-toc .docs-group-title{margin-left:0}
-.doc-toc{font-size:.86rem}
-.doc-toc a{display:block;padding:.22rem 0 .22rem .7rem;border-left:1px solid var(--rule);color:var(--ink-2);text-decoration:none;line-height:1.35}
-.doc-toc a:hover{color:var(--intaglio);border-left-color:var(--intaglio)}
-.doc-toc .toc-l3 a{padding-left:1.5rem;font-size:.83rem}
 
 .doc{min-width:0;max-width:75ch;background:var(--sheet);border:1px solid var(--rule);padding:1.6rem 2rem 1.9rem;font-size:1rem;line-height:1.65}
 .doc>:first-child{margin-top:0}
@@ -378,19 +375,16 @@ table+p{margin-top:.8rem}
 }
 .copy-btn.done{color:var(--ok);border-color:var(--ok)}
 
-@media (max-width:80rem){
-  .docs.has-toc{grid-template-columns:12rem minmax(0,44rem)}
-  .doc-toc{display:none}
-}
 @media (max-width:60rem){
-  .docs,.docs.has-toc{grid-template-columns:minmax(0,1fr);gap:1rem}
-  .docs-nav{position:static;gap:.55rem;background:var(--sheet);border:1px solid var(--rule);padding:.7rem .75rem}
-  .docs-group{display:flex;flex-wrap:wrap;align-items:baseline;gap:.3rem .5rem}
-  .docs-group-title{margin:0;flex:0 0 100%}
+  /* Narrow: the contents become a box of section links above the text. */
+  .docs{grid-template-columns:minmax(0,1fr);gap:1rem}
+  .docs-nav{position:static;max-height:none;overflow:visible;background:var(--sheet);border:1px solid var(--rule);padding:.7rem .75rem}
+  .docs-group-title{margin:0 0 .45rem}
   .docs-nav ul{display:flex;flex-wrap:wrap;gap:.35rem}
-  .docs-nav a{border:1px solid var(--rule-2);border-radius:999px;padding:.12rem .65rem;font-size:.86rem}
-  .docs-nav a[aria-current="page"]{border-color:var(--intaglio)}
-  .docs-home{align-self:flex-start}
+  .docs-nav .toc-l3{display:none}
+  .docs-nav .toc-l2:not(:first-child) a{margin-top:0}
+  .docs-nav a,.docs-nav .toc-l2 a{border:1px solid var(--rule-2);border-radius:999px;padding:.12rem .65rem;font-size:.86rem;font-weight:400}
+  .docs-nav a[aria-current]{background:none;border-color:var(--rule-2);color:var(--ink)}
   .doc{max-width:none}
 }
 @media (max-width:48rem){

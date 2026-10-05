@@ -61,20 +61,20 @@ docker compose exec tls-broker tls-broker docs publish --dry-run  # read only: w
 docker compose exec tls-broker tls-broker docs publish
 ```
 
-It writes the guide's index to the root page and each guide page to a child
-page titled `TLS Broker: <title>`, in index order; it creates missing pages,
-updates changed ones (comment `tls-broker <version>`) and leaves unchanged
-ones alone. It never deletes or renames pages and never touches pages
-outside the root and its children; child pages not in the guide are only
-listed. Details: [`docs/operations.md`](docs/operations.md#publishing-the-user-guide-to-confluence).
+It writes the whole guide, one document with its contents list at the top,
+to the root page (comment `tls-broker <version>`) when it changed, and
+creates no pages. Once, for the move from the earlier multi-page layout,
+run it with `--prune` (first with `--dry-run --prune` to see the list): that
+deletes the old child pages titled `TLS Broker: ...` under the root, and
+nothing else; without `--prune` they are only listed. Details: [`docs/operations.md`](docs/operations.md#publishing-the-user-guide-to-confluence).
 
 ## Documentation
 
 [`docs/README.md`](docs/README.md) is the full index.
 
-- [`docs/guide/`](docs/guide/README.md) — the user guide: getting access, the
-  three modes with certbot, acme.sh and curl, troubleshooting, API summary.
-  The web UI shows the same pages under Documentation.
+- [`docs/guide.md`](docs/guide.md) — the user guide, one document: getting
+  access, the three modes with certbot, acme.sh and curl, troubleshooting,
+  API summary. The web UI shows it under Documentation.
 - [`architecture.md`](architecture.md) — what the system does and why.
 - [`docs/deployment.md`](docs/deployment.md) — compose, environment, reverse proxy, upgrades.
 - [`docs/operations.md`](docs/operations.md) — backup, restore, recovery, runbooks.

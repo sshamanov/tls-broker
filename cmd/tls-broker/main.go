@@ -13,7 +13,7 @@
 //	tls-broker config apply <file.yaml>
 //	tls-broker user set-role [--local] <name> <normal|wildcard_allowed|admin>
 //	tls-broker user block|unblock [--local] <name>
-//	tls-broker docs publish [--dry-run] [--out dir] [--docs dir] [--broker-url url]
+//	tls-broker docs publish [--dry-run] [--prune] [--out dir] [--docs dir] [--broker-url url]
 package main
 
 import (
@@ -44,7 +44,7 @@ const usage = `usage:
   tls-broker user set-role [--local] <name> <normal|wildcard_allowed|admin>
   tls-broker user block [--local] <name>
   tls-broker user unblock [--local] <name>
-  tls-broker docs publish [--dry-run] [--out dir] [--docs dir] [--broker-url url]
+  tls-broker docs publish [--dry-run] [--prune] [--out dir] [--docs dir] [--broker-url url]
                                             copy the user guide to Confluence (TLS_BROKER_CONFLUENCE_*)
 
 Settings come from the TLS_BROKER_* environment variables (docs/configuration.md).
@@ -151,14 +151,15 @@ func user(ctx context.Context, env config.Env, args []string, out io.Writer) err
 
 func docs(ctx context.Context, env config.Env, args []string, out io.Writer) error {
 	if len(args) == 0 || args[0] != "publish" {
-		return fmt.Errorf("%w: docs publish [--dry-run] [--out dir] [--docs dir] [--broker-url url]", errUsage)
+		return fmt.Errorf("%w: docs publish [--dry-run] [--prune] [--out dir] [--docs dir] [--broker-url url]", errUsage)
 	}
 	fs := flag.NewFlagSet("docs publish", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	o := app.DocsOptions{Lookup: os.LookupEnv}
 	fs.BoolVar(&o.DryRun, "dry-run", false, "only read Confluence and print what would change")
-	fs.StringVar(&o.OutDir, "out", "", "also write each page's storage-format XHTML to this directory")
-	fs.StringVar(&o.Dir, "docs", "", "guide directory (default: the image's copy)")
+	fs.BoolVar(&o.Prune, "prune", false, "delete the root's obsolete child pages titled \""+app.ObsoleteTitlePrefix+"...\"")
+	fs.StringVar(&o.OutDir, "out", "", "also write the storage-format XHTML to this directory (guide.xhtml)")
+	fs.StringVar(&o.Dir, "docs", "", "directory holding guide.md (default: the image's copy)")
 	fs.StringVar(&o.BrokerURL, "broker-url", "", "broker URL for the examples (default: server.external_url)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return fmt.Errorf("%w: docs publish: %v", errUsage, err)

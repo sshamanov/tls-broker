@@ -1,6 +1,7 @@
 package guide
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -17,51 +18,41 @@ import (
 )
 
 // The docs lint: the guide in the repository must stay portable Markdown
-// (GitHub, agents, the in-app reader, a later Confluence export) and
-// complete. Paths are relative to this package's directory.
+// (GitHub, agents, the in-app reader, Confluence), one document whose
+// contents list matches its headings. Paths are relative to this package's
+// directory.
 const repoRoot = "../.."
 
 // reservedIDs are element IDs of the UI layout a heading must not take.
-var reservedIDs = []string{"main", "side", "side-body", "nav-admin"}
+var reservedIDs = []string{"main", "side", "side-body", "nav-admin", "docs-nav-title"}
 
 // allowedHosts are the only hosts examples may use besides example.com and
 // its subdomains.
 var allowedHosts = []string{"acme-v02.api.letsencrypt.org"}
 
-type lintPage struct {
-	file  string // file name in docs/guide
-	src   []byte
-	doc   mdast.Node
-	ids   []string
-	links []link
+type lintGuide struct {
+	src []byte
+	doc mdast.Node
+	hs  []Heading
 }
 
-func loadGuide(t *testing.T) map[string]*lintPage {
+func loadGuide(t *testing.T) *lintGuide {
 	t.Helper()
-	dir := filepath.Join(repoRoot, guideDir)
-	entries, err := os.ReadDir(dir)
+	src, err := os.ReadFile(filepath.Join(repoRoot, guideDir, File))
 	if err != nil {
 		t.Fatal(err)
 	}
-	pages := map[string]*lintPage{}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			t.Errorf("%s/%s: only Markdown pages belong in the guide", guideDir, e.Name())
-			continue
-		}
-		src, err := os.ReadFile(filepath.Join(dir, e.Name()))
-		if err != nil {
-			t.Fatal(err)
-		}
-		p := &lintPage{file: e.Name(), src: src}
-		var hs []Heading
-		p.doc, hs = parse(newMarkdown(), src)
-		for _, h := range hs {
-			p.ids = append(p.ids, h.ID)
-		}
-		pages[e.Name()] = p
+	g := &lintGuide{src: src}
+	g.doc, g.hs = parse(newMarkdown(), src)
+	return g
+}
+
+func (g *lintGuide) ids() []string {
+	var ids []string
+	for _, h := range g.hs {
+		ids = append(ids, h.ID)
 	}
-	return pages
+	return ids
 }
 
 // anchorsOf returns the heading IDs of a repository Markdown file.
@@ -80,140 +71,200 @@ func anchorsOf(t *testing.T, repoPath string) []string {
 }
 
 func TestGuideIsPortableMarkdown(t *testing.T) {
-	pages := loadGuide(t)
-	if _, ok := pages[IndexFile]; !ok {
-		t.Fatalf("%s/%s is missing", guideDir, IndexFile)
+	g := loadGuide(t)
+	if _, err := os.Stat(filepath.Join(repoRoot, guideDir, "guide")); err == nil {
+		t.Errorf("%s/guide exists: the guide is the single file %s/%s", guideDir, guideDir, File)
 	}
 	hostRe := regexp.MustCompile(`https?://([A-Za-z0-9.-]+)`)
-	for name, p := range pages {
-		first, _, _ := strings.Cut(string(p.src), "\n")
-		if !strings.HasPrefix(first, "# ") {
-			t.Errorf("%s: the first line must be the `# Title` (no front matter, no blank line), got %q", name, first)
-		}
-		h1 := 0
-		_ = mdast.Walk(p.doc, func(n mdast.Node, entering bool) (mdast.WalkStatus, error) {
-			if !entering {
-				return mdast.WalkContinue, nil
-			}
-			switch n := n.(type) {
-			case *mdast.HTMLBlock, *mdast.RawHTML:
-				t.Errorf("%s: raw HTML (comments included) is not portable: %q", name, firstLine(n, p.src))
-			case *mdast.Image:
-				t.Errorf("%s: images are not supported by the reader: %q", name, n.Destination)
-			case *mdast.Heading:
-				if n.Level == 1 {
-					h1++
-				}
-			case *mdast.Link:
-				if l := classify(string(n.Destination)); l.kind == linkExternal && !strings.HasPrefix(string(n.Destination), "https://") {
-					t.Errorf("%s: external link %q: use https URLs only", name, n.Destination)
-				}
-			}
+	first, _, _ := strings.Cut(string(g.src), "\n")
+	if !strings.HasPrefix(first, "# ") {
+		t.Errorf("the first line must be the `# Title` (no front matter, no blank line), got %q", first)
+	}
+	h1 := 0
+	_ = mdast.Walk(g.doc, func(n mdast.Node, entering bool) (mdast.WalkStatus, error) {
+		if !entering {
 			return mdast.WalkContinue, nil
-		})
-		if h1 != 1 {
-			t.Errorf("%s: %d level-1 headings, want exactly one (the title)", name, h1)
 		}
-		for _, id := range p.ids {
-			if slices.Contains(reservedIDs, id) {
-				t.Errorf("%s: heading ID %q collides with the UI layout; rename the heading", name, id)
+		switch n := n.(type) {
+		case *mdast.HTMLBlock, *mdast.RawHTML:
+			t.Errorf("raw HTML (comments included) is not portable: %q", firstLine(n, g.src))
+		case *mdast.Image:
+			t.Errorf("images are not supported by the reader: %q", n.Destination)
+		case *mdast.Heading:
+			if n.Level == 1 {
+				h1++
+			}
+		case *mdast.Link:
+			if l := classify(string(n.Destination)); l.kind == linkExternal && !strings.HasPrefix(string(n.Destination), "https://") {
+				t.Errorf("external link %q: use https URLs only", n.Destination)
 			}
 		}
-		for _, m := range hostRe.FindAllStringSubmatch(string(p.src), -1) {
-			host := strings.TrimSuffix(strings.ToLower(m[1]), ".")
-			if host != "example.com" && !strings.HasSuffix(host, ".example.com") && !slices.Contains(allowedHosts, host) {
-				t.Errorf("%s: host %q: examples use broker.example.com and example.com names", name, host)
-			}
+		return mdast.WalkContinue, nil
+	})
+	if h1 != 1 {
+		t.Errorf("%d level-1 headings, want exactly one (the title)", h1)
+	}
+	seen := map[string]bool{}
+	for _, h := range g.hs {
+		if slices.Contains(reservedIDs, h.ID) {
+			t.Errorf("heading ID %q collides with the UI layout; rename the heading", h.ID)
 		}
-		if strings.Contains(string(p.src), "://broker.") && !strings.Contains(string(p.src), "https://broker.example.com") {
-			t.Errorf("%s: the broker's address must be written https://broker.example.com (the reader substitutes it)", name)
+		if seen[h.Text] {
+			t.Errorf("heading %q appears twice; give each section a distinct heading so its anchor is readable", h.Text)
 		}
+		seen[h.Text] = true
+	}
+	for _, m := range hostRe.FindAllStringSubmatch(string(g.src), -1) {
+		host := strings.TrimSuffix(strings.ToLower(m[1]), ".")
+		if host != "example.com" && !strings.HasSuffix(host, ".example.com") && !slices.Contains(allowedHosts, host) {
+			t.Errorf("host %q: examples use broker.example.com and example.com names", host)
+		}
+	}
+	if strings.Contains(string(g.src), "://broker.") && !strings.Contains(string(g.src), "https://broker.example.com") {
+		t.Error("the broker's address must be written https://broker.example.com (the reader substitutes it)")
 	}
 }
 
 func TestGuideLinksResolve(t *testing.T) {
-	pages := loadGuide(t)
-	for name, p := range pages {
-		_ = mdast.Walk(p.doc, func(n mdast.Node, entering bool) (mdast.WalkStatus, error) {
-			if l, ok := n.(*mdast.Link); ok && entering {
-				p.links = append(p.links, classify(string(l.Destination)))
-			}
+	g := loadGuide(t)
+	ids := g.ids()
+	_ = mdast.Walk(g.doc, func(n mdast.Node, entering bool) (mdast.WalkStatus, error) {
+		ln, ok := n.(*mdast.Link)
+		if !ok || !entering {
 			return mdast.WalkContinue, nil
-		})
-		for _, l := range p.links {
-			switch l.kind {
-			case linkAnchor:
-				if !slices.Contains(p.ids, l.fragment) {
-					t.Errorf("%s: anchor #%s does not exist on the page", name, l.fragment)
-				}
-			case linkGuide:
-				file := IndexFile
-				if l.name != "" {
-					file = l.name + ".md"
-				}
-				target, ok := pages[file]
-				if !ok {
-					t.Errorf("%s: link to %s: no such guide page", name, file)
-					continue
-				}
-				if l.fragment != "" && !slices.Contains(target.ids, l.fragment) {
-					t.Errorf("%s: link to %s#%s: no such heading", name, file, l.fragment)
-				}
-			case linkRepo:
-				if strings.HasPrefix(l.repoPath, "..") {
-					t.Errorf("%s: link to %s leaves the repository", name, l.repoPath)
-					continue
-				}
+		}
+		l := classify(string(ln.Destination))
+		switch l.kind {
+		case linkAnchor:
+			if !slices.Contains(ids, l.fragment) {
+				t.Errorf("anchor #%s: no such heading", l.fragment)
+			}
+		case linkRepo:
+			switch {
+			case l.repoPath == path.Join(guideDir, File):
+				t.Errorf("link %q to the guide itself: write #anchor", ln.Destination)
+			case strings.HasPrefix(l.repoPath, ".."):
+				t.Errorf("link to %s leaves the repository", l.repoPath)
+			default:
 				if _, err := os.Stat(filepath.Join(repoRoot, l.repoPath)); err != nil {
-					t.Errorf("%s: link to %s: %v", name, l.repoPath, err)
-					continue
-				}
-				if l.fragment != "" && !slices.Contains(anchorsOf(t, l.repoPath), l.fragment) {
-					t.Errorf("%s: link to %s#%s: no such heading", name, l.repoPath, l.fragment)
+					t.Errorf("link to %s: %v", l.repoPath, err)
+				} else if l.fragment != "" && !slices.Contains(anchorsOf(t, l.repoPath), l.fragment) {
+					t.Errorf("link to %s#%s: no such heading", l.repoPath, l.fragment)
 				}
 			}
 		}
+		return mdast.WalkContinue, nil
+	})
+}
+
+// TestGuideContentsMatchHeadings: the contents section (a list of links to
+// the level-2 headings, each with a nested list of links to its level-3
+// headings) lists exactly the document's level-2 and level-3 headings after
+// it, in order, with their text and anchors.
+func TestGuideContentsMatchHeadings(t *testing.T) {
+	g := loadGuide(t)
+	h, blocks := contentsSection(g.doc, g.src)
+	if h == nil {
+		t.Fatalf("no level-2 heading %q", ContentsTitle)
+	}
+	if prev := h.PreviousSibling(); prev == nil {
+		t.Fatal("the contents section must follow the title and introduction")
+	} else {
+		for n := prev; n != nil; n = n.PreviousSibling() {
+			if hd, ok := n.(*mdast.Heading); ok && hd.Level != 1 {
+				t.Errorf("heading %q comes before the contents section", plainText(hd, g.src))
+			}
+		}
+	}
+	if len(blocks) != 1 || blocks[0].Kind() != mdast.KindList {
+		t.Fatalf("the contents section must be exactly one list, got %d blocks", len(blocks))
+	}
+	var listed []string
+	var walk func(list mdast.Node, level int)
+	walk = func(list mdast.Node, level int) {
+		for item := list.FirstChild(); item != nil; item = item.NextSibling() {
+			var entry string
+			for c := item.FirstChild(); c != nil; c = c.NextSibling() {
+				switch c.Kind() {
+				case mdast.KindParagraph, mdast.KindTextBlock:
+					ln, ok := c.FirstChild().(*mdast.Link)
+					if !ok || ln.NextSibling() != nil {
+						t.Errorf("contents entry %q must be one link and nothing else", plainText(c, g.src))
+						continue
+					}
+					l := classify(string(ln.Destination))
+					if l.kind != linkAnchor {
+						t.Errorf("contents entry %q: link to a heading as #anchor", plainText(ln, g.src))
+					}
+					entry = fmt.Sprintf("%d %s #%s", level, plainText(ln, g.src), l.fragment)
+					listed = append(listed, entry)
+				case mdast.KindList:
+					if level == 3 {
+						t.Errorf("contents entry nested below level 3")
+						continue
+					}
+					walk(c, level+1)
+				}
+			}
+			if entry == "" {
+				t.Errorf("contents list item without a link")
+			}
+		}
+	}
+	walk(blocks[0], 2)
+	var want []string
+	contentsID := headingID(h)
+	for _, hd := range g.hs {
+		if (hd.Level == 2 || hd.Level == 3) && hd.ID != contentsID {
+			want = append(want, fmt.Sprintf("%d %s #%s", hd.Level, hd.Text, hd.ID))
+		}
+	}
+	if !slices.Equal(listed, want) {
+		t.Errorf("the contents list does not match the headings\nlisted:\n  %s\nheadings:\n  %s",
+			strings.Join(listed, "\n  "), strings.Join(want, "\n  "))
 	}
 }
 
-func TestGuideIndexIsComplete(t *testing.T) {
-	pages := loadGuide(t)
-	x, err := ParseIndex(pages[IndexFile].src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	listed := x.Names()
-	if len(listed) == 0 {
-		t.Fatal("the index lists no pages")
-	}
-	for _, n := range listed {
-		if _, ok := pages[n+".md"]; !ok {
-			t.Errorf("the index lists %s.md, which does not exist", n)
+// TestMovedPagesExist: every former page name redirects to a level-2
+// heading of the guide.
+func TestMovedPagesExist(t *testing.T) {
+	g := loadGuide(t)
+	for page, id := range MovedPages {
+		found := false
+		for _, h := range g.hs {
+			found = found || (h.Level == 2 && h.ID == id)
 		}
-	}
-	for file := range pages {
-		if file == IndexFile {
-			continue
-		}
-		name := strings.TrimSuffix(file, ".md")
-		if !ValidName(name) {
-			t.Errorf("%s: page names are lower case letters, digits and dashes", file)
-		}
-		if !x.Has(name) {
-			t.Errorf("%s is not listed in %s, so the reader would not serve it", file, IndexFile)
+		if !found {
+			t.Errorf("moved page %s: #%s is not a level-2 heading of the guide", page, id)
 		}
 	}
 }
 
-// TestAPIPageCoversRoutes checks that every public route registered in the
-// source appears in the API page. The routes are read from the mux
+// section returns the text of the level-2 section titled title: from its
+// heading up to the next level-2 heading.
+func (g *lintGuide) section(t *testing.T, title string) string {
+	t.Helper()
+	lines := strings.Split(string(g.src), "\n")
+	start := slices.Index(lines, "## "+title)
+	if start < 0 {
+		t.Fatalf("no section %q in the guide", title)
+	}
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], "## ") {
+			end = i
+			break
+		}
+	}
+	return strings.Join(lines[start:end], "\n")
+}
+
+// TestAPIReferenceCoversRoutes checks that every public route registered in
+// the source appears in the guide's API reference section. The routes are read from the mux
 // registrations (internal/app, internal/dnsproxy) and from the path
 // constants the ACME server and the direct API switch on.
-func TestAPIPageCoversRoutes(t *testing.T) {
-	api, err := os.ReadFile(filepath.Join(repoRoot, guideDir, "api.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestAPIReferenceCoversRoutes(t *testing.T) {
+	api := loadGuide(t).section(t, "API reference")
 	health := stringConsts(t, "internal/httpx/health.go")
 	var routes []string
 	for _, f := range []string{"internal/app/http.go", "internal/dnsproxy/handler.go"} {
@@ -238,8 +289,8 @@ func TestAPIPageCoversRoutes(t *testing.T) {
 		if r == "" {
 			continue // "/" only redirects to the UI
 		}
-		if !strings.Contains(string(api), r) {
-			t.Errorf("route %s is not documented in %s/api.md", r, guideDir)
+		if !strings.Contains(api, r) {
+			t.Errorf("route %s is not documented in the API reference of %s/%s", r, guideDir, File)
 		}
 	}
 }
@@ -315,18 +366,18 @@ func parseGo(t *testing.T, file string) *ast.File {
 // guide's lines verbatim.
 func TestCertbotHooksMatchReference(t *testing.T) {
 	re := regexp.MustCompile(`(?m)^ *--manual-(?:auth|cleanup)-hook '.*' \\$`)
-	read := func(p string) []string {
-		b, err := os.ReadFile(filepath.Join(repoRoot, p))
-		if err != nil {
-			t.Fatal(err)
-		}
+	read := func(text string) []string {
 		var out []string
-		for _, m := range re.FindAllString(string(b), -1) {
+		for _, m := range re.FindAllString(text, -1) {
 			out = append(out, strings.TrimSpace(m))
 		}
 		return out
 	}
-	g, r := read(path.Join(guideDir, "dns-proxy.md")), read("docs/dns-proxy.md")
+	ref, err := os.ReadFile(filepath.Join(repoRoot, "docs/dns-proxy.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, r := read(string(loadGuide(t).src)), read(string(ref))
 	if len(g) != 2 || !slices.Equal(g, r) {
 		t.Errorf("certbot hooks differ:\nguide:     %q\nreference: %q", g, r)
 	}

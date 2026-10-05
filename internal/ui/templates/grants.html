@@ -1,4 +1,4 @@
-{{define "lede"}}<p class="lede">Addresses allowed to request certificates. A machine at a listed address may request any name in the managed zones; without an entry, a name must resolve to the requesting machine. <a href="/ui/docs/getting-started#getting-access">How access works</a></p>{{end}}
+{{define "lede"}}<p class="lede">Addresses allowed to request certificates. A machine at a listed address may request any name in the managed zones; without an entry, a name must resolve to the requesting machine. <a href="/ui/docs#getting-access">How access works</a></p>{{end}}
 
 {{define "content"}}
 {{if .Data.Error}}<div class="notice error" role="alert"><div><p>{{.Data.Error}}</p>{{if .Data.Refused}}<ul class="refused">{{range .Data.Refused}}<li><code>{{.Entry}}</code>: {{.Reason}}</li>{{end}}</ul>{{end}}</div></div>{{end}}

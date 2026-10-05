@@ -237,10 +237,10 @@ error; `tlsbroker_ct_zone_up{zone} == 0`.
 
 ### Publishing the user guide to Confluence
 
-The user guide (`docs/guide`, shipped in the image) can be copied to
+The user guide (`docs/guide.md`, shipped in the image) can be copied to
 Confluence Server/Data Center by hand. Confluence holds a copy; the
-repository stays the source, and every published page says so in an info
-box at the top.
+repository stays the source, and the published page says so in an info box
+at the top.
 
 Once, add to the service's `environment` in the compose file (production:
 `/srv/docker/tls-broker/compose.yaml`) and recreate the container with
@@ -249,7 +249,7 @@ Once, add to the service's `environment` in the compose file (production:
 | Variable | Value |
 |---|---|
 | `TLS_BROKER_CONFLUENCE_URL` | base URL, for example `https://confluence.example.com` |
-| `TLS_BROKER_CONFLUENCE_TOKEN` | personal access token of a user who may edit the root page and create pages below it (sent as `Authorization: Bearer`) |
+| `TLS_BROKER_CONFLUENCE_TOKEN` | personal access token of a user who may edit the root page (and, for `--prune`, delete its child pages); sent as `Authorization: Bearer` |
 | `TLS_BROKER_CONFLUENCE_PAGE_ID` | numeric ID of the root page (production: `123456`, "TLS Broker" in space `admin`) |
 
 Then, from the compose directory:
@@ -261,40 +261,51 @@ docker compose exec tls-broker tls-broker docs publish
 
 What it does:
 
-- The root page gets the guide's index (`README.md`); its title stays as it
-  is. Every page the index lists becomes a child page titled
-  `TLS Broker: <its # title>` (Confluence titles are unique per space; the
-  prefix keeps "Troubleshooting" and the like from colliding with other
-  pages of the space).
-- Child pages are found by title under the root; nothing is stored locally.
-  Missing pages are created, changed pages updated (new version, comment
-  `tls-broker <version>`), unchanged pages left alone. A body counts as
-  unchanged when it matches the published one after normalization; the
-  version in the info box alone is no change.
-- The child pages are put in index order (Confluence's move API); a
-  Confluence without it gets a warning and the order is left to you.
+- The root page gets the whole guide as its body, one document: the
+  contents list at the top (links to the sections on the same page), then
+  the text. Its title stays as it is. No other page is created.
+- The page is updated (new version, comment `tls-broker <version>`) only
+  when its body changed. A body counts as unchanged when it matches the
+  published one after normalization; the version in the info box alone is
+  no change.
+- Every heading carries an anchor macro named by its GitHub slug, and every
+  `#anchor` link of the guide, the contents list included, becomes a link
+  to that anchor on the page (no table-of-contents macro is used).
 - The examples carry `server.external_url` of the active configuration
   generation instead of `https://broker.example.com`, as in the web UI;
-  `--broker-url <url>` overrides it.
-- Links between guide pages become Confluence page links (anchors to the
-  headings work); links to other files of the repository become text naming
-  the file.
+  `--broker-url <url>` overrides it. Links to other files of the repository
+  become text naming the file.
 
-What it never does: delete or rename pages, touch pages that are not the
-root or its children (child pages that are not in the guide are listed and
-left alone), or create a page whose title another page of the space already
-has (the run stops before writing anything). The broker itself never reads
-these variables; the token is never printed.
+Child pages of the root: the guide used to be published as one child page
+per section, titled `TLS Broker: <title>`. Those are obsolete. The plan lists
+them; `--prune` deletes them. Run it once for the migration, first as a dry
+run:
+
+```sh
+docker compose exec tls-broker tls-broker docs publish --dry-run --prune   # lists "delete" lines
+docker compose exec tls-broker tls-broker docs publish --prune
+```
+
+`--prune` deletes only direct child pages of the root whose title starts
+with `TLS Broker: ` (with the colon and space), each reported as it goes.
+Confluence moves them to the space's trash, where a space administrator can
+restore them. An obsolete page that has child pages of its own is never
+deleted; the plan says so. Any other child page is listed as "left alone".
+
+What it never does: create pages, rename pages, touch pages that are not
+the root or its children, or delete anything without `--prune`. The broker
+itself never reads these variables; the token is never printed.
 
 Errors name the cause: missing variables, a rejected token (401), a user who
-may read but not edit (403), a root page that does not exist or is hidden
-(404). A version conflict (someone edited the page meanwhile) is retried once
-after reading the page again; edits made in Confluence are overwritten by the
-next publish.
+may read but not edit or delete (403), a root page that does not exist or is
+hidden (404). A version conflict (someone edited the page meanwhile) is
+retried once after reading the page again; edits made in Confluence are
+overwritten by the next publish. A page deleted meanwhile by someone else is
+reported as gone.
 
-Options: `--out <dir>` also writes each page's storage-format XHTML for
-inspection; `--docs <dir>` reads the guide from another directory (outside
-the image, for example `docs/guide` in a checkout).
+Options: `--out <dir>` also writes the storage-format XHTML
+(`guide.xhtml`) for inspection; `--docs <dir>` reads `guide.md` from another
+directory (outside the image, for example `docs` in a checkout).
 
 ### Other checks
 

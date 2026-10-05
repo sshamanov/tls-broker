@@ -36,7 +36,7 @@ three are optional for the broker and required by that command:
 |---|---|
 | `TLS_BROKER_CONFLUENCE_URL` | Confluence Server/Data Center base URL (`http(s)://host[/context]`). |
 | `TLS_BROKER_CONFLUENCE_TOKEN` | Personal access token, sent as `Authorization: Bearer`. Never logged or printed. |
-| `TLS_BROKER_CONFLUENCE_PAGE_ID` | Numeric ID of the root page that receives the guide's index. |
+| `TLS_BROKER_CONFLUENCE_PAGE_ID` | Numeric ID of the root page that receives the whole guide. |
 
 ## The YAML
 

@@ -1,15 +1,10 @@
 {{define "content"}}{{if .Data.Unavailable}}
 <div class="panel"><p>The documentation is not available in this build.</p>
-<p class="muted">The user guide ships in the container image. Ask an administrator, or read it in the repository under <code>docs/guide</code>.</p></div>
-{{else}}{{$cur := .Data.Current}}
-<div class="docs{{if .Data.TOC}} has-toc{{end}}">
-<nav class="docs-nav" aria-label="Documentation">
-<a href="/ui/docs" class="docs-home"{{if eq $cur ""}} aria-current="page"{{end}}>Overview</a>
-{{range .Data.Index.Groups}}<div class="docs-group">{{if .Title}}<div class="docs-group-title">{{.Title}}</div>{{end}}
-<ul>{{range .Entries}}<li><a href="/ui/docs/{{.Name}}"{{if eq .Name $cur}} aria-current="page"{{end}}>{{.Title}}</a></li>{{end}}</ul></div>
-{{end}}</nav>
+<p class="muted">The user guide ships in the container image. Ask an administrator, or read it in the repository: <code>docs/guide.md</code>.</p></div>
+{{else}}
+<div class="docs">
+<nav class="docs-nav" aria-labelledby="docs-nav-title"><div class="docs-group-title" id="docs-nav-title">Contents</div>
+<ul>{{range .Data.TOC}}<li class="toc-l{{.Level}}"><a href="#{{.ID}}">{{.Text}}</a></li>{{end}}</ul></nav>
 <article class="doc">{{.Data.HTML}}</article>
-{{if .Data.TOC}}<nav class="doc-toc" aria-labelledby="doc-toc-title"><div class="docs-group-title" id="doc-toc-title">On this page</div>
-<ul>{{range .Data.TOC}}<li class="toc-l{{.Level}}"><a href="#{{.ID}}">{{.Text}}</a></li>{{end}}</ul></nav>{{end}}
 </div>
 {{end}}{{end}}

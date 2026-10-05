@@ -2,7 +2,6 @@ package guide
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"html"
 	"io/fs"
@@ -18,82 +17,39 @@ import (
 )
 
 // Confluence storage format export of the guide (used by "tls-broker docs
-// publish"). It parses the guide with the reader's dialect and heading IDs
-// and renders XHTML in Confluence's storage format: fenced code as the code
-// macro, tables as plain tables, links between guide pages as Confluence page
-// links, every heading carrying an anchor macro named by its GitHub slug (so
-// "page.md#anchor" links keep working), links into the rest of the
-// repository as text naming the file, like the reader.
+// publish", which puts it on one page). It parses the guide with the
+// reader's dialect and heading IDs and renders XHTML in Confluence's storage
+// format: fenced code as the code macro, tables as plain tables, every
+// heading carrying an anchor macro named by its GitHub slug and every
+// #anchor link (the contents list among them) as a link to that anchor on
+// the same page, links into the rest of the repository as text naming the
+// file, like the reader. The title heading is left out: the page keeps its
+// own title.
 
 // ConfluenceOptions control the export.
 type ConfluenceOptions struct {
 	// ExternalURL replaces Placeholder (trailing "/" dropped); "" leaves it.
 	ExternalURL string
-	// IndexTitle is the title of the Confluence page that holds the index.
-	IndexTitle string
-	// TitlePrefix is put before a page's level-1 heading to make its
-	// Confluence title.
-	TitlePrefix string
-	// Note, when not empty, is shown in an info macro at the top of every
-	// page.
+	// Note, when not empty, is shown in an info macro at the top.
 	Note string
 }
 
-// StoragePage is one guide page in Confluence storage format.
-type StoragePage struct {
-	Name  string // "" for the index page
-	File  string // file name in the guide directory
-	Title string // Confluence page title
-	Body  string // storage-format XHTML
-}
-
-// ExportConfluence renders the index (first) and every page it lists, in
-// index order. A listed page that is missing or has no title is an error, as
-// are two pages with the same Confluence title.
-func ExportConfluence(fsys fs.FS, opts ConfluenceOptions) ([]StoragePage, error) {
+// ExportConfluence renders the guide (File in fsys) as one storage-format
+// body. A guide without a level-1 heading is an error.
+func ExportConfluence(fsys fs.FS, opts ConfluenceOptions) (string, error) {
 	if fsys == nil {
-		return nil, ErrUnavailable
+		return "", ErrUnavailable
 	}
-	isrc, err := fs.ReadFile(fsys, IndexFile)
+	src, err := fs.ReadFile(fsys, File)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return "", fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
-	idx, err := ParseIndex(isrc)
-	if err != nil {
-		return nil, err
+	if firstTitle(src) == "" {
+		return "", fmt.Errorf("guide: %s has no level-1 heading", File)
 	}
-	if opts.IndexTitle == "" {
-		return nil, errors.New("guide: the index page needs a Confluence title")
-	}
-	pages := []StoragePage{{Name: "", File: IndexFile, Title: opts.IndexTitle}}
-	srcs := [][]byte{isrc}
-	titles := map[string]string{"": opts.IndexTitle}
-	seen := map[string]string{opts.IndexTitle: IndexFile}
-	for _, name := range idx.Names() {
-		file := name + ".md"
-		src, err := fs.ReadFile(fsys, file)
-		if err != nil {
-			return nil, fmt.Errorf("guide: page %s listed in the index: %w", file, err)
-		}
-		h1 := firstTitle(src)
-		if h1 == "" {
-			return nil, fmt.Errorf("guide: page %s has no level-1 heading", file)
-		}
-		title := opts.TitlePrefix + h1
-		if other, dup := seen[title]; dup {
-			return nil, fmt.Errorf("guide: pages %s and %s would both be titled %q", other, file, title)
-		}
-		seen[title] = file
-		titles[name] = title
-		pages = append(pages, StoragePage{Name: name, File: file, Title: title})
-		srcs = append(srcs, src)
-	}
-	c := &storageConverter{opts: opts, titles: titles}
+	c := &storageConverter{opts: opts}
 	c.md = newStorageMarkdown(c.sub)
-	for i := range pages {
-		pages[i].Body = c.render(srcs[i])
-	}
-	return pages, nil
+	return c.render(src), nil
 }
 
 // firstTitle is the text of the first level-1 heading.
@@ -122,9 +78,8 @@ func newStorageMarkdown(sub func(string) string) goldmark.Markdown {
 }
 
 type storageConverter struct {
-	opts   ConfluenceOptions
-	titles map[string]string // page name ("" index) -> Confluence title
-	md     goldmark.Markdown
+	opts ConfluenceOptions
+	md   goldmark.Markdown
 }
 
 // sub replaces the placeholder in raw text (code, CDATA).
@@ -164,10 +119,8 @@ func (c *storageConverter) render(src []byte) string {
 		text := c.sub(plainText(n, src))
 		switch {
 		case lk.kind == linkAnchor:
-			n.Parent().ReplaceChild(n.Parent(), n, &pageLink{Anchor: lk.fragment, Label: text})
-		case lk.kind == linkGuide && c.titles[lk.name] != "":
-			n.Parent().ReplaceChild(n.Parent(), n, &pageLink{Page: c.titles[lk.name], Anchor: lk.fragment, Label: text})
-		case lk.kind == linkGuide, lk.kind == linkRepo:
+			n.Parent().ReplaceChild(n.Parent(), n, &anchorLink{Anchor: lk.fragment, Label: text})
+		case lk.kind == linkRepo:
 			replaceInline(n, &repoRef{Path: lk.repoPath})
 		}
 	}
@@ -189,19 +142,19 @@ func (c *storageConverter) render(src []byte) string {
 	return out
 }
 
-// pageLink is a link to a guide page (Page = its Confluence title) or, with
-// an empty Page, to an anchor on the same page.
-type pageLink struct {
+// anchorLink is a link to an anchor (a heading's anchor macro) on the same
+// page.
+type anchorLink struct {
 	ast.BaseInline
-	Page, Anchor, Label string
+	Anchor, Label string
 }
 
-var kindPageLink = ast.NewNodeKind("ConfluencePageLink")
+var kindAnchorLink = ast.NewNodeKind("ConfluenceAnchorLink")
 
-func (n *pageLink) Kind() ast.NodeKind { return kindPageLink }
+func (n *anchorLink) Kind() ast.NodeKind { return kindAnchorLink }
 
-func (n *pageLink) Dump(src []byte, level int) {
-	ast.DumpHelper(n, src, level, map[string]string{"Page": n.Page, "Anchor": n.Anchor}, nil)
+func (n *anchorLink) Dump(src []byte, level int) {
+	ast.DumpHelper(n, src, level, map[string]string{"Anchor": n.Anchor}, nil)
 }
 
 // cdata wraps s in a CDATA section; "]]>" inside s is split across two.
@@ -239,7 +192,7 @@ func (r storageRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) 
 	reg.Register(ast.KindHeading, renderHeading)
 	reg.Register(ast.KindFencedCodeBlock, r.renderCode)
 	reg.Register(ast.KindCodeBlock, r.renderCode)
-	reg.Register(kindPageLink, renderPageLink)
+	reg.Register(kindAnchorLink, renderAnchorLink)
 	reg.Register(kindRepoRef, renderStorageRepoRef)
 	reg.Register(east.KindTable, renderTable)
 	reg.Register(east.KindTableHeader, renderTableRow)
@@ -290,24 +243,17 @@ func (r storageRenderer) renderCode(w util.BufWriter, src []byte, n ast.Node, en
 	return ast.WalkSkipChildren, nil
 }
 
-func renderPageLink(w util.BufWriter, _ []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
+func renderAnchorLink(w util.BufWriter, _ []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
 	if !entering {
 		return ast.WalkContinue, nil
 	}
-	l := n.(*pageLink)
+	l := n.(*anchorLink)
 	text := l.Label
 	if text == "" {
-		text = l.Page
+		text = l.Anchor
 	}
-	_, _ = w.WriteString("<ac:link")
-	if l.Anchor != "" {
-		_, _ = w.WriteString(` ac:anchor="` + attr(l.Anchor) + `"`)
-	}
-	_, _ = w.WriteString(">")
-	if l.Page != "" {
-		_, _ = w.WriteString(`<ri:page ri:content-title="` + attr(l.Page) + `" />`)
-	}
-	_, _ = w.WriteString("<ac:plain-text-link-body>" + cdata(text) + "</ac:plain-text-link-body></ac:link>")
+	_, _ = w.WriteString(`<ac:link ac:anchor="` + attr(l.Anchor) + `"><ac:plain-text-link-body>` + cdata(text) +
+		"</ac:plain-text-link-body></ac:link>")
 	return ast.WalkSkipChildren, nil
 }
 

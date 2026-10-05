@@ -6,7 +6,7 @@ bin
 data
 deploy/data
 docs
-!docs/guide
+!docs/guide.md
 test/compat
 **/.env
 *.db

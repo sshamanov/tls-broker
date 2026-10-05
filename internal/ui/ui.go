@@ -108,10 +108,10 @@ type Deps struct {
 	// Banners are process-level warnings shown at the top of every page,
 	// logged in or not (for example "the DNS gate is mocked"). Optional.
 	Banners []string
-	// Docs is the user guide (docs/guide in the repository,
-	// guide.DefaultDir in the image) for the Documentation reader. Nil or
-	// a directory without an index: the page says the documentation is not
-	// available in this build.
+	// Docs is the directory holding the user guide (guide.File: docs in
+	// the repository, guide.DefaultDir in the image) for the Documentation
+	// reader. Nil or a directory without the guide: the page says the
+	// documentation is not available in this build.
 	Docs   fs.FS
 	Logger *slog.Logger
 }
@@ -267,8 +267,8 @@ func (h *Handler) routes() {
 
 	// Documentation: readable by every logged-in user, blocked ones too
 	// (it is reading only, and explains how to get access again).
-	h.route("GET /ui/docs", accessAny, h.docsIndex)
-	h.route("GET /ui/docs/{page}", accessAny, h.docsPage)
+	h.route("GET /ui/docs", accessAny, h.docs)
+	h.route("GET /ui/docs/{page}", accessAny, h.docsMoved)
 
 	h.route("GET /ui/admin/users", accessAdmin, h.usersPage)
 	h.route("POST /ui/admin/users/{id}/{action}", accessAdmin, h.userAction)

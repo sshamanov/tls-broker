@@ -21,7 +21,7 @@
 # (neilpang/acme.sh) as ACME-proxy clients; and as DNS-proxy clients talking
 # to Pebble directly, acme.sh with its stock dns_acmeproxy hook and current
 # certbot with the two curl one-liner manual hooks taken verbatim from
-# docs/guide/dns-proxy.md. Each obtains a certificate, checks the chain against
+# docs/guide.md. Each obtains a certificate, checks the chain against
 # Pebble's intermediate and root, and renews; the DNS-proxy clients must leave
 # no challenge and no TXT record behind. The summary table at the end lists every check; the exit status is
 # non-zero if any failed. Logs stay in .claude/tmp/compat/ for inspection.
@@ -322,16 +322,16 @@ dns_left() {
 }
 
 # The Certbot hooks exactly as the user guide shows them
-# (docs/guide/dns-proxy.md; a Go test keeps docs/dns-proxy.md identical),
+# (docs/guide.md; a Go test keeps docs/dns-proxy.md identical),
 # pointed at the compat broker.
 hook() { # option
-  sed -n "s/^ *$1 '\(.*\)' \\\\\$/\1/p" docs/guide/dns-proxy.md | head -1 | sed "s#https://broker.example.com#https://127.0.0.1:$caddy_port#"
+  sed -n "s/^ *$1 '\(.*\)' \\\\\$/\1/p" docs/guide.md | head -1 | sed "s#https://broker.example.com#https://127.0.0.1:$caddy_port#"
 }
 auth_hook=$(hook --manual-auth-hook)
 cleanup_hook=$(hook --manual-cleanup-hook)
 case $auth_hook$cleanup_hook in
 */dns/present*/dns/cleanup*) ;;
-*) die "could not extract the Certbot hooks from docs/guide/dns-proxy.md" ;;
+*) die "could not extract the Certbot hooks from docs/guide.md" ;;
 esac
 
 certbot_suite current "$certbot_image" "current.$zone" yes

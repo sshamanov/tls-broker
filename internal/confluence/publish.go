@@ -7,61 +7,62 @@ import (
 	"io"
 	"net/http"
 	"regexp"
-	"slices"
+	"strings"
 )
 
-// Doc is one page to publish.
+// Doc is what to publish to the root page.
 type Doc struct {
 	Source string // where it comes from, for messages (a file name)
-	Title  string // Confluence title; ignored for the root, which keeps its own
 	Body   string // storage format
 }
 
-// Action is what publishing does to one page.
+// Action is what publishing does to the root page.
 type Action string
 
 // Actions.
 const (
-	Create    Action = "create"
 	Update    Action = "update"
 	Unchanged Action = "unchanged"
 )
 
-// Step is the plan for one Doc.
-type Step struct {
-	Action  Action
-	Doc     Doc
-	Root    bool   // the root page
-	ID      string // existing page; "" for Create
-	Title   string // the title the page has or gets
-	Version int    // existing version (0 for Create)
-	// Taken, for Create: the title is used by another page of the space
-	// (its ID), so Confluence would refuse the page.
-	Taken string
+// Obsolete is a child page of the root whose title starts with the
+// publisher's ObsoletePrefix: a page an earlier publisher created.
+type Obsolete struct {
+	Page
+	// Children is how many child pages it has itself; such a page is never
+	// deleted.
+	Children int
 }
 
 // Plan is what a publish would do.
 type Plan struct {
-	Root  Page
-	Steps []Step // the root first, then the children in order
-	// Extra are child pages of the root that are not in the guide. They
-	// are reported and never changed or deleted.
+	Root   Page
+	Action Action
+	Doc    Doc
+	// Obsolete pages are deleted with Prune, otherwise only reported.
+	Obsolete []Obsolete
+	// Extra are the other child pages of the root. They are reported and
+	// never changed or deleted.
 	Extra []Page
-	// Reorder: the children are not (or will not be) in guide order.
-	Reorder bool
+	// Prune: Apply deletes the obsolete pages that have no children.
+	Prune bool
 }
 
-// Publisher publishes a root Doc to an existing page and the other Docs as
-// its child pages, matched by title. It never deletes anything and never
-// touches pages that are not the root or its children.
+// Publisher publishes a Doc to an existing root page. With Prune it also
+// deletes the root's child pages titled ObsoletePrefix + anything (and only
+// those) that have no child pages of their own. It never creates pages and
+// never touches pages that are not the root or its children.
 type Publisher struct {
 	API    API
 	RootID string
-	// Message is the version comment of every create and update.
+	// Message is the version comment of the update.
 	Message string
 	// Volatile, when set, matches text that does not count as a change
 	// (the generator note's version) when bodies are compared.
 	Volatile *regexp.Regexp
+	// ObsoletePrefix starts the titles of the child pages that are
+	// obsolete; "" means none are.
+	ObsoletePrefix string
 }
 
 // Root reads the root page; a 404 says plainly that the page is missing or
@@ -95,132 +96,88 @@ func (p *Publisher) Same(have, want string) bool {
 	return h == w
 }
 
-// Plan compares root (from Root) and its children with the docs: docs[0]
-// goes to the root, the others are children in that order. It only reads.
-func (p *Publisher) Plan(ctx context.Context, root *Page, docs []Doc) (*Plan, error) {
-	if len(docs) == 0 {
+// Plan compares root (from Root) with doc and sorts the root's child pages
+// into obsolete and extra ones. It only reads.
+func (p *Publisher) Plan(ctx context.Context, root *Page, doc Doc, prune bool) (*Plan, error) {
+	if doc.Body == "" {
 		return nil, errors.New("nothing to publish")
 	}
 	kids, err := p.API.Children(ctx, root.ID)
 	if err != nil {
 		return nil, fmt.Errorf("listing the child pages of %s: %w", root.ID, err)
 	}
-	byTitle := map[string]Page{}
+	plan := &Plan{Root: *root, Action: Unchanged, Doc: doc, Prune: prune}
+	if !p.Same(root.Body, doc.Body) {
+		plan.Action = Update
+	}
 	for _, k := range kids {
-		byTitle[k.Title] = k
-	}
-	plan := &Plan{Root: *root}
-	st := Step{Action: Unchanged, Doc: docs[0], Root: true, ID: root.ID, Title: root.Title, Version: root.Version}
-	if !p.Same(root.Body, docs[0].Body) {
-		st.Action = Update
-	}
-	plan.Steps = append(plan.Steps, st)
-	want := map[string]bool{}
-	for _, d := range docs[1:] {
-		want[d.Title] = true
-		k, ok := byTitle[d.Title]
-		if !ok {
-			st := Step{Action: Create, Doc: d, Title: d.Title}
-			others, err := p.API.FindTitle(ctx, root.SpaceKey, d.Title)
-			if err != nil {
-				return nil, fmt.Errorf("looking for %q in space %s: %w", d.Title, root.SpaceKey, err)
-			}
-			if len(others) > 0 {
-				st.Taken = others[0].ID
-			}
-			plan.Steps = append(plan.Steps, st)
-			plan.Reorder = true
+		if p.ObsoletePrefix == "" || !strings.HasPrefix(k.Title, p.ObsoletePrefix) {
+			plan.Extra = append(plan.Extra, k)
 			continue
 		}
-		st := Step{Action: Unchanged, Doc: d, ID: k.ID, Title: k.Title, Version: k.Version}
-		if !p.Same(k.Body, d.Body) {
-			st.Action = Update
+		grand, err := p.API.Children(ctx, k.ID)
+		if err != nil {
+			return nil, fmt.Errorf("listing the child pages of %q (id %s): %w", k.Title, k.ID, err)
 		}
-		plan.Steps = append(plan.Steps, st)
-	}
-	var order []string
-	for _, k := range kids {
-		if want[k.Title] {
-			order = append(order, k.Title)
-		} else {
-			plan.Extra = append(plan.Extra, Page{ID: k.ID, Title: k.Title, Version: k.Version})
-		}
-	}
-	var guideOrder []string
-	for _, d := range docs[1:] {
-		if _, ok := byTitle[d.Title]; ok {
-			guideOrder = append(guideOrder, d.Title)
-		}
-	}
-	if !slices.Equal(order, guideOrder) {
-		plan.Reorder = true
+		plan.Obsolete = append(plan.Obsolete, Obsolete{Page: k, Children: len(grand)})
 	}
 	return plan, nil
 }
 
 // Print writes the plan, one line per page.
 func (plan *Plan) Print(w io.Writer) {
-	for _, s := range plan.Steps {
-		where := s.Doc.Source
-		if s.Root {
-			where += ", root page"
-		}
+	r := plan.Root
+	if plan.Action == Update {
+		fmt.Fprintf(w, "%-9s  %q  id %s, version %d -> %d  (%s, root page)\n", plan.Action, r.Title, r.ID, r.Version, r.Version+1, plan.Doc.Source)
+	} else {
+		fmt.Fprintf(w, "%-9s  %q  id %s, version %d  (%s, root page)\n", plan.Action, r.Title, r.ID, r.Version, plan.Doc.Source)
+	}
+	for _, o := range plan.Obsolete {
 		switch {
-		case s.Action == Create && s.Taken != "":
-			fmt.Fprintf(w, "%-9s  %q  (%s) BLOCKED: page %s elsewhere in space %s has this title\n", s.Action, s.Title, where, s.Taken, plan.Root.SpaceKey)
-		case s.Action == Create:
-			fmt.Fprintf(w, "%-9s  %q  (%s)\n", s.Action, s.Title, where)
-		case s.Action == Update:
-			fmt.Fprintf(w, "%-9s  %q  id %s, version %d -> %d  (%s)\n", s.Action, s.Title, s.ID, s.Version, s.Version+1, where)
+		case o.Children > 0:
+			fmt.Fprintf(w, "obsolete   %q  id %s: has %d child pages, so it is kept; move them first\n", o.Title, o.ID, o.Children)
+		case plan.Prune:
+			fmt.Fprintf(w, "delete     %q  id %s  (obsolete page from an earlier publish)\n", o.Title, o.ID)
 		default:
-			fmt.Fprintf(w, "%-9s  %q  id %s, version %d  (%s)\n", s.Action, s.Title, s.ID, s.Version, where)
+			fmt.Fprintf(w, "obsolete   %q  id %s  (kept; pruning deletes it)\n", o.Title, o.ID)
 		}
 	}
 	for _, e := range plan.Extra {
-		fmt.Fprintf(w, "not in the guide, left alone: %q  id %s\n", e.Title, e.ID)
-	}
-	if plan.Reorder {
-		fmt.Fprintln(w, "order: child pages are put in guide order")
+		fmt.Fprintf(w, "not from the guide, left alone: %q  id %s\n", e.Title, e.ID)
 	}
 }
 
-// Apply carries the plan out: creates, then updates (an update that meets
-// a version conflict reads the page again and retries once), then the
-// child order. It stops at the first error; what was done stays done and a
-// second run continues from there.
+// Apply carries the plan out: the root update (an update that meets a
+// version conflict reads the page again and retries once), then, with
+// Prune, the deletions. It stops at the first error; what was done stays
+// done and a second run continues from there.
 func (p *Publisher) Apply(ctx context.Context, plan *Plan, w io.Writer) error {
-	for _, s := range plan.Steps {
-		if s.Action == Create && s.Taken != "" {
-			return fmt.Errorf("cannot create %q: page %s in space %s already has this title (titles are unique per space); rename or move it first",
-				s.Title, s.Taken, plan.Root.SpaceKey)
+	if plan.Action == Update {
+		v, err := p.update(ctx, plan)
+		if err != nil {
+			return fmt.Errorf("updating %q (id %s): %w", plan.Root.Title, plan.Root.ID, writeHint(err))
+		}
+		if v == 0 {
+			fmt.Fprintf(w, "unchanged  %q  id %s (changed meanwhile to the same content)\n", plan.Root.Title, plan.Root.ID)
+		} else {
+			fmt.Fprintf(w, "updated    %q  id %s, version %d\n", plan.Root.Title, plan.Root.ID, v)
 		}
 	}
-	created := 0
-	for _, s := range plan.Steps {
-		switch s.Action {
-		case Create:
-			pg, err := p.API.Create(ctx, plan.Root.SpaceKey, plan.Root.ID, s.Title, s.Doc.Body)
-			if err != nil {
-				return fmt.Errorf("creating %q: %w", s.Title, writeHint(err))
-			}
-			created++
-			fmt.Fprintf(w, "created    %q  id %s\n", s.Title, pg.ID)
-		case Update:
-			v, err := p.update(ctx, s)
-			if err != nil {
-				return fmt.Errorf("updating %q (id %s): %w", s.Title, s.ID, writeHint(err))
-			}
-			if v == 0 {
-				fmt.Fprintf(w, "unchanged  %q  id %s (changed meanwhile to the same content)\n", s.Title, s.ID)
-			} else {
-				fmt.Fprintf(w, "updated    %q  id %s, version %d\n", s.Title, s.ID, v)
-			}
-		}
+	if !plan.Prune {
+		return nil
 	}
-	if plan.Reorder {
-		if err := p.order(ctx, plan, w); err != nil {
-			return err
+	for _, o := range plan.Obsolete {
+		if o.Children > 0 {
+			continue
 		}
+		if err := p.API.Delete(ctx, o.ID); err != nil {
+			if StatusOf(err) == http.StatusNotFound {
+				fmt.Fprintf(w, "gone       %q  id %s (deleted meanwhile)\n", o.Title, o.ID)
+				continue
+			}
+			return fmt.Errorf("deleting %q (id %s): %w", o.Title, o.ID, writeHint(err))
+		}
+		fmt.Fprintf(w, "deleted    %q  id %s\n", o.Title, o.ID)
 	}
 	return nil
 }
@@ -232,70 +189,27 @@ func writeHint(err error) error {
 	return err
 }
 
-// update writes one page; it returns the new version, or 0 when a conflict
-// turned out to be someone writing the same content.
-func (p *Publisher) update(ctx context.Context, s Step) (int, error) {
-	title := s.Title
-	pg, err := p.API.Update(ctx, s.ID, title, s.Doc.Body, s.Version+1, p.Message)
+// update writes the root page; it returns the new version, or 0 when a
+// conflict turned out to be someone writing the same content.
+func (p *Publisher) update(ctx context.Context, plan *Plan) (int, error) {
+	r := plan.Root
+	pg, err := p.API.Update(ctx, r.ID, r.Title, plan.Doc.Body, r.Version+1, p.Message)
 	if StatusOf(err) != http.StatusConflict {
 		if err != nil {
 			return 0, err
 		}
 		return pg.Version, nil
 	}
-	cur, rerr := p.API.Page(ctx, s.ID)
+	cur, rerr := p.API.Page(ctx, r.ID)
 	if rerr != nil {
 		return 0, fmt.Errorf("%w; reading it again: %v", err, rerr)
 	}
-	if p.Same(cur.Body, s.Doc.Body) {
+	if p.Same(cur.Body, plan.Doc.Body) {
 		return 0, nil
 	}
-	pg, err = p.API.Update(ctx, s.ID, title, s.Doc.Body, cur.Version+1, p.Message)
+	pg, err = p.API.Update(ctx, r.ID, cur.Title, plan.Doc.Body, cur.Version+1, p.Message)
 	if err != nil {
 		return 0, fmt.Errorf("after one retry: %w", err)
 	}
 	return pg.Version, nil
-}
-
-// order moves the guide's child pages into guide order, each after the one
-// before it. Pages not in the guide stay where they are relative to the
-// first guide page.
-func (p *Publisher) order(ctx context.Context, plan *Plan, w io.Writer) error {
-	kids, err := p.API.Children(ctx, plan.Root.ID)
-	if err != nil {
-		return fmt.Errorf("listing the child pages again: %w", err)
-	}
-	ids := map[string]string{}
-	for _, k := range kids {
-		ids[k.Title] = k.ID
-	}
-	var want []string
-	for _, s := range plan.Steps[1:] {
-		want = append(want, ids[s.Title])
-	}
-	var have []string
-	for _, k := range kids {
-		for _, id := range want {
-			if k.ID == id {
-				have = append(have, id)
-			}
-		}
-	}
-	if slices.Equal(have, want) {
-		return nil
-	}
-	for i := 1; i < len(want); i++ {
-		if want[i] == "" || want[i-1] == "" {
-			continue
-		}
-		if err := p.API.MoveAfter(ctx, want[i], want[i-1]); err != nil {
-			if s := StatusOf(err); s == http.StatusNotFound || s == http.StatusMethodNotAllowed {
-				fmt.Fprintf(w, "warning: this Confluence cannot reorder pages through the REST API (%v); order the child pages by hand\n", err)
-				return nil
-			}
-			return fmt.Errorf("ordering the child pages: %w", writeHint(err))
-		}
-	}
-	fmt.Fprintln(w, "ordered    child pages in guide order")
-	return nil
 }

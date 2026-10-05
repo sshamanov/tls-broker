@@ -167,7 +167,7 @@ with your broker's name; the client host must be allowed by the gate (above) and
 must trust the broker's TLS certificate. Hooks for `*.N` pass the record of
 `N`, so a wildcard order is gated as `N` (see "Grant requirements").
 `make compat` runs the acme.sh and Certbot commands below (the Certbot hooks
-verbatim, taken from the user guide's `docs/guide/dns-proxy.md`, which a test
+verbatim, taken from the user guide, `docs/guide.md`, which a test
 keeps identical to this page) against Pebble, including renewal and cleanup.
 
 ### acme.sh

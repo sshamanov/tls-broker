@@ -225,30 +225,34 @@ resolver or upstream error text; their search does not match it either).
 Admins see every event type with the detail column. See
 `docs/observability.md`.
 
-**Documentation** (`/ui/docs`, `/ui/docs/{page}`). A reader for the user
-guide, `docs/guide` in the repository, shipped in the image at
-`/usr/share/tls-broker/docs` (there is no setting to move it). Every
-logged-in user may read it, blocked users included: it is reading only and
-explains how access works. Only the usage pages are served: the index
-(`docs/guide/README.md`, at `/ui/docs`) and the pages it lists, by file name
-without `.md`; any other name, `README`, a path with `..` or more segments
-is the 404 page, and there is no directory listing. The engineering and
-operator references in `docs/` are not served. The guide's navigation, in
-the index's order and groups, is on the left (a block of links above the
-page on narrow screens), the page in a readable column of at most 75
-characters, and "On this page" (its h2 and h3 headings) on the right on
-wide screens. Pages are rendered by `internal/guide` with goldmark (GFM,
+**Documentation** (`/ui/docs`). A reader for the user guide,
+`docs/guide.md` in the repository, shipped in the image as
+`/usr/share/tls-broker/docs/guide.md` (there is no setting to move it).
+Every logged-in user may read it, blocked users included: it is reading only
+and explains how access works. The guide is one document: its contents (the
+level-2 and level-3 headings, which the document's own "Contents" list
+mirrors) form the column on the left, sticky on wide screens and scrolling
+by itself, with the section being read marked (`ui.js`); the text is one
+continuous column of at most 75 characters. On narrow screens the contents
+become a block of section links (level 2 only) above the text. The
+document's "Contents" list itself is not repeated in the text. Links to a
+section are ordinary `#anchors` (`/ui/docs#getting-access`). The addresses
+of the pages the guide used to be split into, `/ui/docs/<page>`
+(`getting-started`, `web-ui`, `acme-proxy`, `dns-proxy`, `direct`,
+`troubleshooting`, `api`), answer `301` to `/ui/docs#<section>`
+(`guide.MovedPages`), so old links and bookmarks keep working; any other
+name is the 404 page. The engineering and operator references in `docs/` are
+not served. The guide is rendered by `internal/guide` with goldmark (GFM,
 GitHub-compatible heading IDs, raw HTML never passed through) on first
-request and cached per file by modification time and size. While
-rendering: `https://broker.example.com` becomes the active configuration's
-`server.external_url`; links to listed guide pages go to `/ui/docs/<name>`
-(anchors kept); links to other repository files show their text followed by
-"(in the repository: docs/...)" instead of a broken link; images show
-their alternative text. Code blocks scroll inside themselves and get a
+request and cached by modification time and size. While rendering:
+`https://broker.example.com` becomes the active configuration's
+`server.external_url`; links to other repository files show their text
+followed by "(in the repository: docs/...)" instead of a broken link; images
+show their alternative text. Code blocks scroll inside themselves and get a
 Copy button (clipboard API, or a selected textarea on plain-HTTP pages).
-Without the documentation directory the page says so (logged once). The
-Status page ("How to get a certificate") and Client access ("How access
-works") link into the guide.
+Without the guide the page says so (logged once). The Status page ("How to
+get a certificate", `#getting-started`) and Client access ("How access
+works", `#getting-access`) link into the guide.
 
 **Users and roles** (`/ui/admin/users`, admin). List with source (LDAP or local), role,
 state and last login. Set role, block, unblock. The local break-glass admin and

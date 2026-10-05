@@ -28,7 +28,6 @@ var allPages = []pageSpec{
 	{"/ui/grants", ""},
 	{"/ui/audit", ""},
 	{"/ui/docs", ""},
-	{"/ui/docs/acme-proxy", ""},
 	{"/ui/certificates", core.RoleNormal},
 	{"/ui/admin/users", core.RoleAdmin},
 	{"/ui/admin/config", core.RoleAdmin},

@@ -110,8 +110,8 @@ type Options struct {
 	// With a replacement the inventory does not pause between requests.
 	CTSource ctlog.Source
 	// Docs is the user guide for the UI's Documentation reader; nil reads
-	// guide.DefaultDir, where the image ships docs/guide. Tests and
-	// development pass os.DirFS("docs/guide").
+	// guide.DefaultDir, where the image ships docs/guide.md. Tests and
+	// development pass os.DirFS("docs").
 	Docs fs.FS
 }
 

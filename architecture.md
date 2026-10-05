@@ -1276,11 +1276,15 @@ Suggested paths:
 
 Prometheus metrics endpoint should be restricted by nginx/network policy.
 
-The user guide (`docs/guide`) ships in the image and the UI shows it. An
-operator can copy it to Confluence Server/Data Center with the manual
-maintenance command `tls-broker docs publish` (root page and token from the
-container environment; pages matched by title, created or updated, never
-deleted). Confluence holds a copy; the repository is the source. The broker
+The user guide (`docs/guide.md`) is one document everywhere: a contents
+list of its sections at the top, then continuous text. It ships in the
+image and the UI shows it. An operator can copy it to Confluence
+Server/Data Center with the manual maintenance command
+`tls-broker docs publish` (root page and token from the container
+environment): the whole document becomes the body of that one root page; no
+child pages are created. `--prune` deletes the root's child pages left from
+the earlier multi-page layout (titles starting `TLS Broker: `) and nothing
+else. Confluence holds a copy; the repository is the source. The broker
 process itself never talks to Confluence.
 
 ---

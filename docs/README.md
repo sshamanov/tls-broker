@@ -2,12 +2,12 @@
 
 ## Guides
 
-Task-oriented pages for people who need certificates. The broker's web
-interface shows exactly these pages under **Documentation**.
+Task-oriented help for people who need certificates. The broker's web
+interface shows exactly this document under **Documentation**.
 
-- [User guide](guide/README.md): getting started, the web interface, the
-  ACME proxy, the DNS proxy, direct download, troubleshooting and the API
-  reference.
+- [User guide](guide.md): one document covering getting started, the web
+  interface, the ACME proxy, the DNS proxy, direct download, troubleshooting
+  and the API reference.
 
 ## Reference
 

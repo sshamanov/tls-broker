@@ -17,15 +17,16 @@ const (
 	rootID = "123456"
 )
 
-func docs(version string) []confluence.Doc {
+func doc(version string) confluence.Doc {
 	note := `<ac:structured-macro ac:name="info"><ac:rich-text-body><p>Generated (version ` + version + `).</p></ac:rich-text-body></ac:structured-macro>`
-	return []confluence.Doc{
-		{Source: "README.md", Title: "ignored", Body: note + `<p>Index <ac:link><ri:page ri:content-title="TLS Broker: One" /><ac:plain-text-link-body><![CDATA[one]]></ac:plain-text-link-body></ac:link></p>`},
-		{Source: "one.md", Title: "TLS Broker: One", Body: note + "<h2>A</h2>\n<p>One.</p>"},
-		{Source: "two.md", Title: "TLS Broker: Two", Body: note + `<ac:structured-macro ac:name="code"><ac:parameter ac:name="language">bash</ac:parameter><ac:plain-text-body><![CDATA[  echo two]]></ac:plain-text-body></ac:structured-macro>`},
-		{Source: "three.md", Title: "TLS Broker: Three", Body: note + "<table><tbody><tr><th>a</th></tr><tr><td>1</td></tr></tbody></table>"},
-	}
+	return confluence.Doc{Source: "guide.md", Body: note +
+		`<ul><li><ac:link ac:anchor="one"><ac:plain-text-link-body><![CDATA[One]]></ac:plain-text-link-body></ac:link></li></ul>` +
+		`<h2><ac:structured-macro ac:name="anchor"><ac:parameter ac:name="">one</ac:parameter></ac:structured-macro>One</h2>` + "\n" +
+		`<ac:structured-macro ac:name="code"><ac:parameter ac:name="language">bash</ac:parameter><ac:plain-text-body><![CDATA[  echo two]]></ac:plain-text-body></ac:structured-macro>` +
+		"<table><tbody><tr><th>a</th></tr><tr><td>1</td></tr></tbody></table>"}
 }
+
+const prefix = "TLS Broker: "
 
 func setup(t *testing.T, tok string) (*confluencetest.Server, *confluence.Publisher) {
 	t.Helper()
@@ -36,11 +37,11 @@ func setup(t *testing.T, tok string) (*confluencetest.Server, *confluence.Publis
 		t.Fatal(err)
 	}
 	return srv, &confluence.Publisher{API: c, RootID: rootID, Message: "tls-broker v1",
-		Volatile: regexp.MustCompile(`\(version [^)]*\)`)}
+		Volatile: regexp.MustCompile(`\(version [^)]*\)`), ObsoletePrefix: prefix}
 }
 
 // publish plans and (unless dry) applies; it returns everything printed.
-func publish(t *testing.T, p *confluence.Publisher, d []confluence.Doc, dry bool) (*confluence.Plan, string) {
+func publish(t *testing.T, p *confluence.Publisher, d confluence.Doc, prune, dry bool) (*confluence.Plan, string) {
 	t.Helper()
 	ctx := context.Background()
 	var out bytes.Buffer
@@ -48,7 +49,7 @@ func publish(t *testing.T, p *confluence.Publisher, d []confluence.Doc, dry bool
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := p.Plan(ctx, root, d)
+	plan, err := p.Plan(ctx, root, d, prune)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,14 +60,6 @@ func publish(t *testing.T, p *confluence.Publisher, d []confluence.Doc, dry bool
 		}
 	}
 	return plan, out.String()
-}
-
-func actions(plan *confluence.Plan) string {
-	var s []string
-	for _, st := range plan.Steps {
-		s = append(s, string(st.Action))
-	}
-	return strings.Join(s, ",")
 }
 
 func titles(ps []confluencetest.Page) string {
@@ -85,135 +78,168 @@ func confluenceSave(b string) string {
 	return b
 }
 
-func TestPublishCreatesThenNoOps(t *testing.T) {
-	srv, p := setup(t, token)
-	srv.Store = confluenceSave
-
-	plan, out := publish(t, p, docs("v1"), true)
-	if actions(plan) != "update,create,create,create" || srv.Writes() != 0 {
-		t.Fatalf("dry run: %s, %d writes\n%s", actions(plan), srv.Writes(), out)
-	}
+func onlyReads(t *testing.T, srv *confluencetest.Server) {
+	t.Helper()
 	for _, r := range srv.Requests() {
 		if !strings.HasPrefix(r, "GET ") {
-			t.Errorf("dry run sent %s", r)
+			t.Errorf("sent %s", r)
 		}
-	}
-
-	plan, out = publish(t, p, docs("v1"), false)
-	if actions(plan) != "update,create,create,create" {
-		t.Fatalf("first publish: %s\n%s", actions(plan), out)
-	}
-	root, _ := srv.Get(rootID)
-	if root.Version != 2 || root.Title != "TLS Broker" || !strings.Contains(root.Body, "Index") || root.Messages[0] != "tls-broker v1" {
-		t.Errorf("root %+v", root)
-	}
-	if got := titles(srv.Children(rootID)); got != "TLS Broker: One,TLS Broker: Two,TLS Broker: Three" {
-		t.Errorf("children %s", got)
-	}
-
-	// Second run: nothing to do, although Confluence rewrote the bodies.
-	w := srv.Writes()
-	plan, out = publish(t, p, docs("v1"), false)
-	if actions(plan) != "unchanged,unchanged,unchanged,unchanged" || plan.Reorder || srv.Writes() != w {
-		t.Fatalf("second publish: %s reorder=%v writes %d->%d\n%s", actions(plan), plan.Reorder, w, srv.Writes(), out)
-	}
-	// A new version alone is no change either.
-	if plan, _ = publish(t, p, docs("v2"), true); actions(plan) != "unchanged,unchanged,unchanged,unchanged" {
-		t.Errorf("version-only change: %s", actions(plan))
 	}
 }
 
-func TestPublishUpdatesChangedPage(t *testing.T) {
+func TestPublishUpdatesTheRootOnlyThenNoOps(t *testing.T) {
 	srv, p := setup(t, token)
-	publish(t, p, docs("v1"), false)
-	d := docs("v1")
-	d[2].Body = strings.Replace(d[2].Body, "  echo two", "  echo  two", 1) // whitespace inside code counts
-	plan, out := publish(t, p, d, false)
-	if actions(plan) != "unchanged,unchanged,update,unchanged" {
-		t.Fatalf("%s\n%s", actions(plan), out)
+	srv.Store = confluenceSave
+
+	plan, out := publish(t, p, doc("v1"), false, true)
+	if plan.Action != confluence.Update || srv.Writes() != 0 {
+		t.Fatalf("dry run: %s, %d writes\n%s", plan.Action, srv.Writes(), out)
 	}
-	two := srv.Children(rootID)[1]
-	if two.Version != 2 || len(two.Messages) != 1 || two.Messages[0] != "tls-broker v1" || !strings.Contains(two.Body, "echo  two") {
-		t.Errorf("updated page %+v", two)
-	}
-	if !strings.Contains(out, `update     "TLS Broker: Two"  id `+two.ID+`, version 1 -> 2`) {
+	onlyReads(t, srv)
+	if !strings.Contains(out, `update     "TLS Broker"  id `+rootID+`, version 1 -> 2  (guide.md, root page)`) {
 		t.Errorf("output:\n%s", out)
+	}
+
+	plan, out = publish(t, p, doc("v1"), false, false)
+	if plan.Action != confluence.Update || !strings.Contains(out, `updated    "TLS Broker"  id `+rootID+`, version 2`) {
+		t.Fatalf("first publish: %s\n%s", plan.Action, out)
+	}
+	root, _ := srv.Get(rootID)
+	if root.Version != 2 || root.Title != "TLS Broker" || !strings.Contains(root.Body, `ac:anchor="one"`) || root.Messages[0] != "tls-broker v1" {
+		t.Errorf("root %+v", root)
+	}
+	if kids := srv.Children(rootID); len(kids) != 0 {
+		t.Errorf("child pages created: %s", titles(kids))
+	}
+
+	// Second run: nothing to do, although Confluence rewrote the body.
+	w := srv.Writes()
+	plan, out = publish(t, p, doc("v1"), false, false)
+	if plan.Action != confluence.Unchanged || srv.Writes() != w {
+		t.Fatalf("second publish: %s writes %d->%d\n%s", plan.Action, w, srv.Writes(), out)
+	}
+	if !strings.Contains(out, `unchanged  "TLS Broker"  id `+rootID+`, version 2  (guide.md, root page)`) {
+		t.Errorf("output:\n%s", out)
+	}
+	// A new version alone is no change either; whitespace inside code is.
+	if plan, _ = publish(t, p, doc("v2"), false, true); plan.Action != confluence.Unchanged {
+		t.Errorf("version-only change: %s", plan.Action)
+	}
+	d := doc("v1")
+	d.Body = strings.Replace(d.Body, "  echo two", "  echo  two", 1)
+	if plan, _ = publish(t, p, d, false, true); plan.Action != confluence.Update {
+		t.Errorf("code change: %s", plan.Action)
+	}
+}
+
+// oldLayout adds what the multi-page publisher left behind, and pages
+// others made.
+func oldLayout(srv *confluencetest.Server) {
+	srv.Add(confluencetest.Page{ID: "7", Space: "admin", ParentID: rootID, Title: "Notes by hand", Body: "<p>mine</p>"})
+	srv.Add(confluencetest.Page{ID: "8", Space: "admin", ParentID: rootID, Title: "TLS Broker: Getting started", Body: "<p>old</p>"})
+	srv.Add(confluencetest.Page{ID: "9", Space: "admin", ParentID: rootID, Title: "TLS Broker: API reference", Body: "<p>old</p>"})
+	srv.Add(confluencetest.Page{ID: "10", Space: "admin", ParentID: rootID, Title: "TLS Broker: Kept", Body: "<p>has a child</p>"})
+	srv.Add(confluencetest.Page{ID: "11", Space: "admin", ParentID: "10", Title: "TLS Broker: Grandchild"})
+	srv.Add(confluencetest.Page{ID: "12", Space: "admin", ParentID: rootID, Title: "TLS Broker review notes"})
+	srv.Add(confluencetest.Page{ID: "13", Space: "admin", ParentID: "", Title: "TLS Broker: Elsewhere"})
+}
+
+func TestPublishReportsObsoletePagesWithoutPrune(t *testing.T) {
+	srv, p := setup(t, token)
+	oldLayout(srv)
+	plan, out := publish(t, p, doc("v1"), false, false)
+	if len(plan.Obsolete) != 3 || len(plan.Extra) != 2 {
+		t.Fatalf("obsolete %v extra %v\n%s", plan.Obsolete, plan.Extra, out)
+	}
+	for _, want := range []string{
+		`obsolete   "TLS Broker: Getting started"  id 8  (kept; pruning deletes it)`,
+		`obsolete   "TLS Broker: API reference"  id 9  (kept; pruning deletes it)`,
+		`obsolete   "TLS Broker: Kept"  id 10: has 1 child pages, so it is kept; move them first`,
+		`not from the guide, left alone: "Notes by hand"  id 7`,
+		`not from the guide, left alone: "TLS Broker review notes"  id 12`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %s\n%s", want, out)
+		}
+	}
+	if srv.Writes() != 1 || titles(srv.Children(rootID)) != "Notes by hand,TLS Broker: Getting started,TLS Broker: API reference,TLS Broker: Kept,TLS Broker review notes" {
+		t.Errorf("%d writes, children %s", srv.Writes(), titles(srv.Children(rootID)))
+	}
+}
+
+func TestPublishPruneDeletesOnlyPrefixedChildren(t *testing.T) {
+	srv, p := setup(t, token)
+	oldLayout(srv)
+
+	// Dry run: says what it would delete, sends no write.
+	plan, out := publish(t, p, doc("v1"), true, true)
+	if !strings.Contains(out, `delete     "TLS Broker: Getting started"  id 8`) || !strings.Contains(out, `delete     "TLS Broker: API reference"  id 9`) ||
+		strings.Contains(out, `delete     "TLS Broker: Kept"`) || !plan.Prune || srv.Writes() != 0 {
+		t.Fatalf("dry run (%d writes):\n%s", srv.Writes(), out)
+	}
+	onlyReads(t, srv)
+
+	_, out = publish(t, p, doc("v1"), true, false)
+	if !strings.Contains(out, `deleted    "TLS Broker: Getting started"  id 8`) || !strings.Contains(out, `deleted    "TLS Broker: API reference"  id 9`) {
+		t.Errorf("output:\n%s", out)
+	}
+	if got := titles(srv.Children(rootID)); got != "Notes by hand,TLS Broker: Kept,TLS Broker review notes" {
+		t.Errorf("children left %s", got)
+	}
+	for _, id := range []string{"7", "10", "11", "12", "13"} {
+		if pg, ok := srv.Get(id); !ok || pg.Version != 1 {
+			t.Errorf("page %s touched: %+v", id, pg)
+		}
+	}
+	// Again: nothing left to delete, nothing to update.
+	w := srv.Writes()
+	plan, out = publish(t, p, doc("v1"), true, false)
+	if plan.Action != confluence.Unchanged || srv.Writes() != w || strings.Contains(out, "delete     ") || strings.Contains(out, "deleted") {
+		t.Errorf("second run: %s, writes %d->%d\n%s", plan.Action, w, srv.Writes(), out)
+	}
+}
+
+func TestPublishPruneToleratesDeletedMeanwhile(t *testing.T) {
+	srv, p := setup(t, token)
+	oldLayout(srv)
+	ctx := context.Background()
+	root, _ := p.Root(ctx)
+	plan, err := p.Plan(ctx, root, doc("v1"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.API.Delete(ctx, "8"); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := p.Apply(ctx, plan, &out); err != nil || !strings.Contains(out.String(), `gone       "TLS Broker: Getting started"  id 8`) {
+		t.Errorf("apply: %v\n%s", err, out.String())
 	}
 }
 
 func TestPublishRetriesOnceOnConflict(t *testing.T) {
 	srv, p := setup(t, token)
-	publish(t, p, docs("v1"), false)
-	d := docs("v1")
-	d[1].Body += "<p>more</p>"
+	publish(t, p, doc("v1"), false, false)
+	d := doc("v1")
+	d.Body += "<p>more</p>"
 
 	srv.Conflicts(1)
-	if _, out := publish(t, p, d, false); !strings.Contains(out, "updated") {
+	if _, out := publish(t, p, d, false, false); !strings.Contains(out, "updated") {
 		t.Fatalf("no update after a conflict:\n%s", out)
 	}
-	one := srv.Children(rootID)[0]
-	if one.Version != 3 || !strings.HasSuffix(one.Body, "<p>more</p>") {
-		t.Errorf("page %+v", one)
+	root, _ := srv.Get(rootID)
+	if root.Version != 4 || !strings.HasSuffix(root.Body, "<p>more</p>") {
+		t.Errorf("root %+v", root)
 	}
 
-	d[1].Body += "<p>again</p>"
+	d.Body += "<p>again</p>"
 	srv.Conflicts(2)
 	ctx := context.Background()
-	root, _ := p.Root(ctx)
-	plan, _ := p.Plan(ctx, root, d)
+	r, _ := p.Root(ctx)
+	plan, _ := p.Plan(ctx, r, d, false)
 	err := p.Apply(ctx, plan, &bytes.Buffer{})
 	if confluence.StatusOf(err) != http.StatusConflict || !strings.Contains(err.Error(), "after one retry") {
 		t.Errorf("second conflict: %v", err)
-	}
-}
-
-func TestPublishReportsExtraPagesAndOrders(t *testing.T) {
-	srv, p := setup(t, token)
-	srv.Add(confluencetest.Page{ID: "7", Space: "admin", ParentID: rootID, Title: "Notes by hand", Body: "<p>mine</p>"})
-	srv.Add(confluencetest.Page{ID: "8", Space: "admin", ParentID: rootID, Title: "TLS Broker: Three", Body: "<p>old</p>"})
-	plan, out := publish(t, p, docs("v1"), false)
-	if actions(plan) != "update,create,create,update" || !plan.Reorder {
-		t.Fatalf("%s reorder=%v\n%s", actions(plan), plan.Reorder, out)
-	}
-	if !strings.Contains(out, `not in the guide, left alone: "Notes by hand"  id 7`) || !strings.Contains(out, "ordered") {
-		t.Errorf("output:\n%s", out)
-	}
-	if n, ok := srv.Get("7"); !ok || n.Version != 1 || n.Body != "<p>mine</p>" {
-		t.Errorf("extra page touched: %+v", n)
-	}
-	if got := titles(srv.Children(rootID)); got != "Notes by hand,TLS Broker: One,TLS Broker: Two,TLS Broker: Three" {
-		t.Errorf("order %s", got)
-	}
-	if plan, _ := publish(t, p, docs("v1"), true); plan.Reorder || len(plan.Extra) != 1 {
-		t.Errorf("second plan: reorder=%v extra=%v", plan.Reorder, plan.Extra)
-	}
-}
-
-func TestPublishWithoutMoveAPIWarns(t *testing.T) {
-	srv, p := setup(t, token)
-	srv.NoMove()
-	srv.Add(confluencetest.Page{ID: "8", Space: "admin", ParentID: rootID, Title: "TLS Broker: Three"})
-	if _, out := publish(t, p, docs("v1"), false); !strings.Contains(out, "order the child pages by hand") {
-		t.Errorf("output:\n%s", out)
-	}
-}
-
-func TestPublishRefusesTakenTitle(t *testing.T) {
-	srv, p := setup(t, token)
-	srv.Add(confluencetest.Page{ID: "9", Space: "admin", ParentID: "", Title: "TLS Broker: Two"})
-	ctx := context.Background()
-	root, _ := p.Root(ctx)
-	plan, err := p.Plan(ctx, root, docs("v1"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out bytes.Buffer
-	plan.Print(&out)
-	if !strings.Contains(out.String(), "BLOCKED: page 9") {
-		t.Errorf("plan:\n%s", out.String())
-	}
-	if err := p.Apply(ctx, plan, &out); err == nil || !strings.Contains(err.Error(), "already has this title") || srv.Writes() != 0 {
-		t.Errorf("apply: %v, %d writes", err, srv.Writes())
 	}
 }
 
@@ -241,7 +267,7 @@ func TestPublishErrors(t *testing.T) {
 	srv, p := setup(t, token)
 	srv.SetReadOnly(true)
 	root, _ := p.Root(ctx)
-	plan, _ := p.Plan(ctx, root, docs("v1"))
+	plan, _ := p.Plan(ctx, root, doc("v1"), false)
 	err = p.Apply(ctx, plan, &bytes.Buffer{})
 	if confluence.StatusOf(err) != http.StatusForbidden || !strings.Contains(err.Error(), "may read but not change") || strings.Contains(err.Error(), token) {
 		t.Errorf("403: %v", err)
@@ -256,6 +282,21 @@ func TestPublishErrors(t *testing.T) {
 	c, _ := confluence.NewClient("https://x", token, nil)
 	if _, err := c.Page(ctx, "../admin"); err == nil {
 		t.Error("non-numeric ID accepted")
+	}
+	if err := c.Delete(ctx, "1/../2"); err == nil {
+		t.Error("non-numeric ID accepted for delete")
+	}
+
+	// A read-only token cannot prune either.
+	srv, p = setup(t, token)
+	oldLayout(srv)
+	srv.SetReadOnly(true)
+	root, _ = p.Root(ctx)
+	plan, _ = p.Plan(ctx, root, doc("v1"), true)
+	plan.Action = confluence.Unchanged
+	err = p.Apply(ctx, plan, &bytes.Buffer{})
+	if confluence.StatusOf(err) != http.StatusForbidden || !strings.Contains(err.Error(), "deleting") {
+		t.Errorf("403 on delete: %v", err)
 	}
 }
 
