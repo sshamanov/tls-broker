@@ -28,23 +28,20 @@ func TestDocsReader(t *testing.T) {
 	see(t, r, `<a href="/ui/docs" aria-current="page">Documentation</a>`, "<h1>TLS broker user guide</h1>",
 		// The contents column lists the sections and their subsections.
 		`<nav class="docs-nav" aria-labelledby="docs-nav-title"><div class="docs-group-title" id="docs-nav-title">Contents</div>`,
-		`<li class="toc-l2"><a href="#getting-started">Getting started</a></li>`,
-		`<li class="toc-l3"><a href="#getting-access">Getting access</a></li>`,
-		`<li class="toc-l2"><a href="#acme-proxy-certbot-and-acmesh">ACME proxy: certbot and acme.sh</a></li>`,
-		`<li class="toc-l3"><a href="#certbot-hooks">certbot hooks</a></li>`,
-		`<li class="toc-l2"><a href="#api-reference">API reference</a></li>`,
+		`<li class="toc-l2"><a href="#getting-access">Getting access</a></li>`,
+		`<li class="toc-l2"><a href="#acme-proxy-recommended">ACME proxy (recommended)</a></li>`,
+		`<li class="toc-l3"><a href="#certbot">certbot</a></li>`,
+		`<li class="toc-l2"><a href="#api">API</a></li>`,
 		// One continuous text with every section.
-		`<h2 id="getting-started">Getting started</h2>`, `<h3 id="certbot">certbot</h3>`,
-		`<h2 id="troubleshooting">Troubleshooting</h2>`, `<h3 id="health-and-metrics">Health and metrics</h3>`,
+		`<h2 id="getting-access">Getting access</h2>`, `<h3 id="certbot">certbot</h3>`,
+		`<h2 id="troubleshooting">Troubleshooting</h2>`, `<h3 id="switch-an-existing-certificate">Switch an existing certificate</h3>`,
 		"--server http://10.9.8.7:8081/acme/directory",
-		`<a href="#getting-access">Getting access</a>`,
-		// A link to a reference page outside the guide is text with its path.
-		`<span class="doc-repo">ACME proxy reference<span class="doc-repo-path"> (in the repository: <code>docs/acme-proxy.md</code>)</span></span>`)
+		`<a href="#reload-the-service">ACME proxy</a>`)
 	// The document's own contents list is the navigation, not repeated in
 	// the text.
 	lacks(t, r, "broker.example.com", `.md"`, "<script>", `id="contents"`, `href="/ui/docs/`)
-	if strings.Count(r.body, `href="#getting-access"`) < 2 {
-		t.Error("the contents and the text should both link to #getting-access")
+	if strings.Count(r.body, `href="#direct-download"`) < 2 {
+		t.Error("the contents and the text should both link to #direct-download")
 	}
 	if r.hdr.Get("Cache-Control") != "no-store" || !strings.Contains(r.hdr.Get("Content-Security-Policy"), "script-src 'self'") {
 		t.Errorf("headers %v", r.hdr)
@@ -52,9 +49,9 @@ func TestDocsReader(t *testing.T) {
 
 	// The pages the guide used to be split into redirect to their section.
 	for page, id := range map[string]string{
-		"getting-started": "getting-started", "web-ui": "using-the-web-interface",
-		"acme-proxy": "acme-proxy-certbot-and-acmesh", "dns-proxy": "dns-proxy-your-own-acme-account",
-		"direct": "direct-download-curl-and-tar", "troubleshooting": "troubleshooting", "api": "api-reference",
+		"getting-started": "getting-access", "web-ui": "web-interface",
+		"acme-proxy": "acme-proxy-recommended", "dns-proxy": "dns-proxy",
+		"direct": "direct-download", "troubleshooting": "troubleshooting", "api": "api",
 	} {
 		r := bob.get("/ui/docs/" + page)
 		code(t, r, 301)
@@ -76,7 +73,7 @@ func TestDocsReader(t *testing.T) {
 	dave := e.login("dave")
 	e.store.Users().SetBlocked(bg, e.userID("dave"), true)
 	code(t, dave.get("/ui/docs/direct"), 301)
-	see(t, dave.get("/ui/docs"), "Your account is blocked", `href="/ui/docs"`, `<h2 id="direct-download-curl-and-tar">`)
+	see(t, dave.get("/ui/docs"), "Your account is blocked", `href="/ui/docs"`, `<h2 id="direct-download">`)
 	// Anonymous: login first, for the old addresses too.
 	for _, p := range []string{"/ui/docs", "/ui/docs/direct"} {
 		r = e.client().get(p)
@@ -113,7 +110,7 @@ func TestContextualDocsLinks(t *testing.T) {
 	e := newEnv(t)
 	bob := e.login("bob")
 	see(t, bob.get("/ui/grants"), `<a href="/ui/docs#getting-access">How access works</a>`)
-	see(t, bob.get("/ui/"), `<a href="/ui/docs#getting-started">How to get a certificate</a>`)
-	// Both anchors are headings of the guide.
-	see(t, bob.get("/ui/docs"), `<h3 id="getting-access">`, `<h2 id="getting-started">`)
+	see(t, bob.get("/ui/"), `<a href="/ui/docs#getting-access">How to get a certificate</a>`)
+	// The anchor is a heading of the guide.
+	see(t, bob.get("/ui/docs"), `<h2 id="getting-access">`)
 }

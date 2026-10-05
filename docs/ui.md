@@ -252,8 +252,8 @@ followed by "(in the repository: docs/...)" instead of a broken link; images
 show their alternative text. Code blocks scroll inside themselves and get a
 Copy button (clipboard API, or a selected textarea on plain-HTTP pages).
 Without the guide the page says so (logged once). The Status page ("How to
-get a certificate", `#getting-started`) and Client access ("How access
-works", `#getting-access`) link into the guide.
+get a certificate") and Client access ("How access works") link to its
+`#getting-access` section.
 
 **Users and roles** (`/ui/admin/users`, admin). List with source (LDAP or local), role,
 state and last login. Set role, block, unblock. The local break-glass admin and

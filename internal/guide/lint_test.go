@@ -259,39 +259,79 @@ func (g *lintGuide) section(t *testing.T, title string) string {
 	return strings.Join(lines[start:end], "\n")
 }
 
-// TestAPIReferenceCoversRoutes checks that every public route registered in
-// the source appears in the guide's API reference section. The routes are read from the mux
-// registrations (internal/app, internal/dnsproxy) and from the path
-// constants the ACME server and the direct API switch on.
-func TestAPIReferenceCoversRoutes(t *testing.T) {
-	api := loadGuide(t).section(t, "API reference")
+// TestAPICoversClientRoutes checks that the guide's API section documents
+// every route a user's machine calls: each route the app mounts except the
+// operator ones (notInGuide), every DNS proxy route, the ACME directory and
+// the direct download path. Routes left out of the guide must be documented
+// in their reference instead: the ACME resources (clients find them through
+// the directory) in docs/acme-proxy.md, the direct wildcard path in
+// docs/direct-api.md, health and metrics in docs/observability.md. The
+// routes are read from the mux registrations (internal/app,
+// internal/dnsproxy) and from the path constants the ACME server and the
+// direct API switch on.
+func TestAPICoversClientRoutes(t *testing.T) {
+	api := loadGuide(t).section(t, "API")
 	health := stringConsts(t, "internal/httpx/health.go")
-	var routes []string
-	for _, f := range []string{"internal/app/http.go", "internal/dnsproxy/handler.go"} {
-		routes = append(routes, handlePatterns(t, f, health)...)
-	}
 	acme := stringConsts(t, "internal/acmesrv/server.go")
-	for k, v := range acme {
-		if strings.HasPrefix(k, "path") && strings.HasPrefix(v, "/") {
-			routes = append(routes, acme["PathPrefix"]+v) // "/acme" + "/new-order"
-		}
-	}
 	direct := stringConsts(t, "internal/direct/handler.go")
-	routes = append(routes, direct["PathPrefix"]+direct["wildcardPathPrefix"])
-	if len(routes) < 20 {
-		t.Fatalf("found only %d routes; did the registrations move? %v", len(routes), routes)
+	// Operator and web interface routes: not for users' machines.
+	notInGuide := map[string]string{
+		"/ui/": "", "/ui": "", "/": "", // the web interface; "/" redirects to it
+		"/metrics":           "docs/observability.md",
+		health["HealthPath"]: "docs/observability.md",
 	}
-	for _, r := range routes {
+	var guide []string
+	for _, r := range handlePatterns(t, "internal/app/http.go", health) {
+		if ref, ok := notInGuide[r]; ok {
+			if ref != "" {
+				mustMention(t, ref, r)
+			}
+			continue
+		}
+		guide = append(guide, r)
+	}
+	guide = append(guide, handlePatterns(t, "internal/dnsproxy/handler.go", nil)...)
+	guide = append(guide, acme["PathPrefix"]+acme["pathDirectory"], direct["PathPrefix"]+"{name}")
+	if len(guide) < 9 {
+		t.Fatalf("found only %d client routes; did the registrations move? %v", len(guide), guide)
+	}
+	for _, r := range guide {
 		if _, p, ok := strings.Cut(r, " "); ok {
 			r = p // "POST /dns/present"
 		}
-		r = strings.TrimSuffix(r, "/")
-		if r == "" {
-			continue // "/" only redirects to the UI
+		if !strings.Contains(api, strings.TrimSuffix(r, "/")) {
+			t.Errorf("route %s is not documented in the API section of %s/%s", r, guideDir, File)
 		}
-		if !strings.Contains(api, r) {
-			t.Errorf("route %s is not documented in the API reference of %s/%s", r, guideDir, File)
+	}
+	// Every ACME resource is in the ACME proxy reference's endpoint table.
+	n := 0
+	for k, v := range acme {
+		if strings.HasPrefix(k, "path") && strings.HasPrefix(v, "/") {
+			mustMention(t, "docs/acme-proxy.md", strings.TrimSuffix(acme["PathPrefix"]+v, "/"))
+			n++
 		}
+	}
+	if n < 10 {
+		t.Fatalf("found only %d ACME paths; did the constants move?", n)
+	}
+	// The wildcard path is for admins and the wildcard role only, so the
+	// user guide leaves it out on purpose; its reference documents it.
+	wild := direct["PathPrefix"] + direct["wildcardPathPrefix"]
+	mustMention(t, "docs/direct-api.md", wild)
+	if strings.Contains(string(loadGuide(t).src), wild) {
+		t.Errorf("the user guide documents %s; it is for admins and the wildcard role only", wild)
+	}
+}
+
+// mustMention fails unless the repository file mentions s.
+func mustMention(t *testing.T, file, s string) {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(repoRoot, file))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), s) {
+		t.Errorf("%s is not documented in %s", s, file)
 	}
 }
 

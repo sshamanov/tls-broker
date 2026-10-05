@@ -29,17 +29,17 @@ const Base = "/ui/docs"
 var ErrUnavailable = errors.New("guide: documentation not available")
 
 // MovedPages maps the names of the pages the guide used to be split into
-// (served at Base + "/" + name) to the ID of the level-2 heading that holds
-// their text now. The reader redirects the old URLs there; the docs lint
+// (served at Base + "/" + name) to the ID of the level-2 heading that covers
+// their topic now. The reader redirects the old URLs there; the docs lint
 // checks every ID exists.
 var MovedPages = map[string]string{
-	"getting-started": "getting-started",
-	"web-ui":          "using-the-web-interface",
-	"acme-proxy":      "acme-proxy-certbot-and-acmesh",
-	"dns-proxy":       "dns-proxy-your-own-acme-account",
-	"direct":          "direct-download-curl-and-tar",
+	"getting-started": "getting-access",
+	"web-ui":          "web-interface",
+	"acme-proxy":      "acme-proxy-recommended",
+	"dns-proxy":       "dns-proxy",
+	"direct":          "direct-download",
 	"troubleshooting": "troubleshooting",
-	"api":             "api-reference",
+	"api":             "api",
 }
 
 // Page is the rendered guide.

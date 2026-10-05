@@ -89,7 +89,7 @@ func TestDocsPublish(t *testing.T) {
 	}
 	root, _ := srv.Get("123456")
 	if root.Title != "TLS Broker" || root.Messages[0] != "tls-broker dev" || !strings.Contains(root.Body, ext) ||
-		!strings.Contains(root.Body, "API reference") {
+		!strings.Contains(root.Body, "DELETE /dns/challenges/{id}") {
 		t.Errorf("root %+v", root)
 	}
 

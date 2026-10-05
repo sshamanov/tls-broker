@@ -281,12 +281,15 @@ complete example (restart on the same data directory, TLS front, clients).
 ## Documentation
 
 `docs/README.md` indexes everything. `docs/guide.md` is the user guide for
-people who need certificates: one document everywhere (repository, the UI
-reader, Confluence), with a "Contents" list at the top and then one `##`
-section per topic (getting started, web interface, ACME proxy, DNS proxy,
-direct download, troubleshooting, API reference) with `###` subsections.
-The reference pages in `docs/` stay the deep, complete description; the
-guide links to them by relative path (`acme-proxy.md`).
+ordinary users who need certificates: one short document everywhere
+(repository, the UI reader, Confluence), with a "Contents" list at the top
+and then one `##` section per topic (getting access, ACME proxy, DNS proxy,
+direct download, web interface, troubleshooting, API) with `###`
+subsections. It shows only what an ordinary user can do: no wildcards
+(except the line that the DNS proxy offers none), no address ranges, roles,
+admin pages, CAA or internals. Those stay in the reference pages in
+`docs/`, the deep, complete description for admins; links from the guide to
+them are relative (`acme-proxy.md`).
 
 The guide has to read the same on GitHub, for agents and in Confluence
 (`tls-broker docs publish`), so `internal/guide`'s docs lint (part of `make check`)
@@ -309,10 +312,15 @@ holds it to portable Markdown:
   `/ui/docs/<page>` there) points at an existing `##` heading.
 - Example hosts are `https://broker.example.com` (the broker) and
   `example.com` names.
-- Every public route (read from the mux registrations of `internal/app` and
-  `internal/dnsproxy` and the path constants of `internal/acmesrv` and
-  `internal/direct`) appears in the guide's "API reference" section. A new
-  route fails the test until it is documented there.
+- Every route a user's machine calls appears in the guide's "API" section:
+  each route `internal/app` mounts except the web interface, `/metrics` and
+  `/healthz`, every `internal/dnsproxy` route, the ACME directory and
+  `/cert/{name}`. A new client route fails the test until it is documented
+  there. The routes left out must be in their reference instead: every
+  `internal/acmesrv` path in `docs/acme-proxy.md`, `/metrics` and
+  `/healthz` in `docs/observability.md`, and the direct wildcard path in
+  `docs/direct-api.md`; that path (admins and the wildcard role only) must
+  not appear in the guide.
 - The Certbot DNS-proxy hooks in `docs/guide.md` and `docs/dns-proxy.md`
   are identical (`make compat` runs the guide's).
 

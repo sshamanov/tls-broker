@@ -171,7 +171,7 @@ func TestRealGuideRenders(t *testing.T) {
 			t.Errorf("moved page %s points at #%s, which is not a heading of the guide", page, id)
 		}
 	}
-	if len(p.TOC) < 30 {
+	if len(p.TOC) < 10 {
 		t.Errorf("only %d headings in the navigation", len(p.TOC))
 	}
 }

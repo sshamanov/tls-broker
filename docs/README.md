@@ -5,9 +5,9 @@
 Task-oriented help for people who need certificates. The broker's web
 interface shows exactly this document under **Documentation**.
 
-- [User guide](guide.md): one document covering getting started, the web
-  interface, the ACME proxy, the DNS proxy, direct download, troubleshooting
-  and the API reference.
+- [User guide](guide.md): one short document for ordinary users covering
+  getting access, the ACME proxy, the DNS proxy, direct download, the web
+  interface, troubleshooting and the API endpoints clients call.
 
 ## Reference
 
