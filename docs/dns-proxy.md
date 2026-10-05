@@ -85,10 +85,10 @@ credentials. Request bodies are read as JSON whatever their `Content-Type`
 ### `POST /dns/present`
 
 ```sh
-curl -sS https://broker.lan/dns/present \
+curl -sS https://broker.example.com/dns/present \
   -d '{"fqdn":"_acme-challenge.foo.example.com.","value":"gfj9Xq-Wz7jbo5ZFFYAj7RRsbFqS5ywCRcPb4Phv0kE"}'
 # or
-curl -sS https://broker.lan/dns/present \
+curl -sS https://broker.example.com/dns/present \
   -d '{"identifier":"foo.example.com","value":"gfj9Xq-Wz7jbo5ZFFYAj7RRsbFqS5ywCRcPb4Phv0kE"}'
 ```
 
@@ -116,7 +116,7 @@ Your client may then ask its CA to validate. Rules:
 By record and value:
 
 ```sh
-curl -sS https://broker.lan/dns/cleanup \
+curl -sS https://broker.example.com/dns/cleanup \
   -d '{"fqdn":"_acme-challenge.foo.example.com.","value":"gfj9Xq-Wz7jbo5ZFFYAj7RRsbFqS5ywCRcPb4Phv0kE"}'
 ```
 
@@ -134,7 +134,7 @@ a value.
 By challenge ID:
 
 ```sh
-curl -sS https://broker.lan/dns/cleanup \
+curl -sS https://broker.example.com/dns/cleanup \
   -d '{"challenge_id":"3fa85f64c5f84a8f9d3e0a4e2e1b7c11"}'
 # 204 No Content
 ```
@@ -150,7 +150,7 @@ both `challenge_id` and `fqdn`/`value` is rejected (`400`).
 Lists the caller's active (not yet cleaned up) challenges:
 
 ```sh
-curl -sS https://broker.lan/dns/challenges
+curl -sS https://broker.example.com/dns/challenges
 ```
 
 ```json
@@ -162,12 +162,13 @@ Use it to find the ID after a crashed hook.
 ## Clients
 
 No hook script is needed: acme.sh and lego ship a hook that speaks the fqdn
-form, and Certbot needs two one-line `curl` hooks. Replace `broker.lan` with
-your broker's name; the client host must be allowed by the gate (above) and
+form, and Certbot needs two one-line `curl` hooks. Replace `broker.example.com`
+with your broker's name; the client host must be allowed by the gate (above) and
 must trust the broker's TLS certificate. Hooks for `*.N` pass the record of
 `N`, so a wildcard order is gated as `N` (see "Grant requirements").
 `make compat` runs the acme.sh and Certbot commands below (the Certbot hooks
-verbatim) against Pebble, including renewal and cleanup.
+verbatim, taken from the user guide's `docs/guide/dns-proxy.md`, which a test
+keeps identical to this page) against Pebble, including renewal and cleanup.
 
 ### acme.sh
 
@@ -175,7 +176,7 @@ The built-in `dns_acmeproxy` hook. Leave `ACMEPROXY_USERNAME` and
 `ACMEPROXY_PASSWORD` unset: the broker trusts the source address.
 
 ```sh
-export ACMEPROXY_ENDPOINT=https://broker.lan/dns
+export ACMEPROXY_ENDPOINT=https://broker.example.com/dns
 acme.sh --issue --dns dns_acmeproxy --dnssleep 0 -d foo.example.com
 ```
 
@@ -187,8 +188,8 @@ acme.sh stores the endpoint with the account, so renewals need nothing more.
 
 ```sh
 certbot certonly --manual --preferred-challenges dns \
-  --manual-auth-hook 'curl -sSf https://broker.lan/dns/present -d "{\"fqdn\":\"_acme-challenge.$CERTBOT_DOMAIN.\",\"value\":\"$CERTBOT_VALIDATION\"}"' \
-  --manual-cleanup-hook 'curl -sSf https://broker.lan/dns/cleanup -d "{\"fqdn\":\"_acme-challenge.$CERTBOT_DOMAIN.\",\"value\":\"$CERTBOT_VALIDATION\"}"' \
+  --manual-auth-hook 'curl -sSf https://broker.example.com/dns/present -d "{\"fqdn\":\"_acme-challenge.$CERTBOT_DOMAIN.\",\"value\":\"$CERTBOT_VALIDATION\"}"' \
+  --manual-cleanup-hook 'curl -sSf https://broker.example.com/dns/cleanup -d "{\"fqdn\":\"_acme-challenge.$CERTBOT_DOMAIN.\",\"value\":\"$CERTBOT_VALIDATION\"}"' \
   -d foo.example.com
 ```
 
@@ -204,7 +205,7 @@ coexist.
 The built-in `httpreq` provider in its default (JSON) mode:
 
 ```sh
-HTTPREQ_ENDPOINT=https://broker.lan/dns \
+HTTPREQ_ENDPOINT=https://broker.example.com/dns \
   lego --email ops@example.com --dns httpreq -d foo.example.com run
 ```
 

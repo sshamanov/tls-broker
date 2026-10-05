@@ -17,7 +17,8 @@ resource; protecting them is a design requirement.
 |---|---|
 | System shape, trust model, invariants | `architecture.md` |
 | Package layout, contracts between packages, build order | `docs/plan.md` |
-| Operator and API documentation | `docs/*.md` |
+| User-facing usage guide, shown in the app's Documentation reader | `docs/guide/` (index `docs/guide/README.md`) |
+| Operator and API reference documentation | `docs/*.md` (index `docs/README.md`) |
 | How to build, run and test | `docs/development.md`, `Makefile` |
 
 ## Rules for agents

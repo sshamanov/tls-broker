@@ -12,6 +12,7 @@ require (
 	github.com/go-ldap/ldap/v3 v3.4.14
 	github.com/miekg/dns v1.1.73
 	github.com/prometheus/client_golang v1.24.1
+	github.com/yuin/goldmark v1.8.6
 	golang.org/x/crypto v0.57.0
 	golang.org/x/net v0.59.0
 	gopkg.in/yaml.v3 v3.0.1

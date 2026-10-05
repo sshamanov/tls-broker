@@ -17,6 +17,8 @@ same commit.
 - Route53: `aws-sdk-go-v2`. LDAP: `go-ldap/ldap/v3`. DNS wire format:
   `miekg/dns`. Metrics: `prometheus/client_golang`. Config: `gopkg.in/yaml.v3`.
 - UI: server-rendered `html/template`, embedded assets, no JS build step.
+- Markdown (user guide): `yuin/goldmark` with its GFM extension, raw HTML
+  disabled.
 - Everything builds and tests in docker (`scripts/dev`, `Makefile`).
 
 ## Package layout
@@ -44,6 +46,8 @@ internal/direct/       direct certificate cache and API
 internal/dnsproxy/     /dns/present and /dns/cleanup
 internal/auth/         LDAP login, local admin, sessions, CSRF
 internal/ui/           web UI
+internal/guide/        user guide (docs/guide): index parsing, GitHub-compatible
+                       heading IDs, docs lint
 internal/httpx/        real source IP, middleware, problem responses
 internal/metrics/      Prometheus collectors
 internal/app/          wiring, lifecycle, config reload, startup reconciliation
@@ -52,10 +56,11 @@ test/e2e/              in-process end-to-end tests on fakes; Pebble-backed tests
 test/compat/           scripts running real certbot / acme.sh against the broker
 deploy/                Dockerfile, compose.yaml, .env.example, nginx example
 docs/                  operator, API and development documentation
+docs/guide/            user guide (also shown in the UI)
 ```
 
-Dependency rule: packages depend on `core` and `names`, not on each other,
-except `issuance` (uses the ports), the three front ends and `ui` (use
+Dependency rule: packages depend on `core` and `names`, not on each other
+(`guide` depends on neither), except `issuance` (uses the ports), the three front ends and `ui` (use
 `issuance`/`gate` through interfaces declared in `core`), and `app` (wires
 concrete types). No package imports `app`.
 

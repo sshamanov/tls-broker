@@ -184,7 +184,10 @@ through the ACME proxy; and as DNS-proxy clients ordering from Pebble
 directly, acme.sh with its stock `--dns dns_acmeproxy` hook
 (`ACMEPROXY_ENDPOINT` = the broker's `/dns`) and current certbot (plus `curl`,
 `test/compat/certbot-curl.Dockerfile`) with the two manual hooks extracted
-verbatim from `docs/dns-proxy.md`. Each issues, the chain is compared with
+verbatim from the user guide, `docs/guide/dns-proxy.md` (a Go test keeps
+`docs/dns-proxy.md` identical). The guide's other command lines are not
+extracted; they use the same options the suite runs (`--webroot -w /tmp`,
+`-w /tmp`, `--dns dns_acmeproxy`). Each issues, the chain is compared with
 Pebble's intermediate and verified against its root, and each renews; the
 script also checks that current certbot fetched `renewalInfo`, that renewals
 went upstream with `replaces`, that the DNS-proxy clients left no challenge
@@ -273,6 +276,35 @@ is picked up when `Run` starts. `internal/app/app_test.go` boots the whole
 broker this way, issues one direct-mode certificate end to end and checks
 that shutdown leaves no goroutines behind; `test/e2e/harness_test.go` is the
 complete example (restart on the same data directory, TLS front, clients).
+
+## Documentation
+
+`docs/README.md` indexes everything. `docs/guide/` is the user guide: short,
+task-oriented pages for people who need certificates, listed (and ordered,
+optionally under group headings) by `docs/guide/README.md`. The reference
+pages in `docs/` stay the deep, complete description; a guide links to them
+by relative path.
+
+The guide has to read the same on GitHub, for agents and in a later
+Confluence export, so `internal/guide`'s docs lint (part of `make check`)
+holds it to portable Markdown:
+
+- CommonMark with GFM tables and fenced code only: no raw HTML (comments
+  included), no front matter, no images; the first line is the `# Title`,
+  the only level-1 heading.
+- Links between pages are relative `.md` links, optionally with an
+  `#anchor`; every link and anchor must resolve. Anchors are computed with
+  GitHub's slug rules (the same code the reader uses), also for links into
+  `docs/*.md`.
+- Every page is listed in the index and every index entry exists.
+- Example hosts are `https://broker.example.com` (the broker) and
+  `example.com` names.
+- Every public route (read from the mux registrations of `internal/app` and
+  `internal/dnsproxy` and the path constants of `internal/acmesrv` and
+  `internal/direct`) appears in `docs/guide/api.md`. A new route fails the
+  test until it is documented there.
+- The Certbot DNS-proxy hooks in `docs/guide/dns-proxy.md` and
+  `docs/dns-proxy.md` are identical (`make compat` runs the guide's).
 
 ## Dependencies
 

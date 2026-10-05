@@ -43,6 +43,11 @@ maintenance commands (backup, config validate/apply, user roles and blocks).
 
 ## Documentation
 
+[`docs/README.md`](docs/README.md) is the full index.
+
+- [`docs/guide/`](docs/guide/README.md) — the user guide: getting access, the
+  three modes with certbot, acme.sh and curl, troubleshooting, API summary.
+  The web UI shows the same pages under Documentation.
 - [`architecture.md`](architecture.md) — what the system does and why.
 - [`docs/deployment.md`](docs/deployment.md) — compose, environment, reverse proxy, upgrades.
 - [`docs/operations.md`](docs/operations.md) — backup, restore, recovery, runbooks.
