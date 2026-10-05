@@ -229,7 +229,13 @@ func TestGrantRules(t *testing.T) {
 	if ag, _ := e.store.Grants().List(bg, e.userID("alice")); len(ag) != 1 || ag[0].Prefix.String() != "10.8.0.0/16" {
 		t.Fatalf("alice: %+v", ag)
 	}
-	see(t, carol.get("/ui/grants"), `name="wildcard"`)
+	see(t, carol.get("/ui/grants"), `name="wildcard"`, "<th>Wildcards</th>", "<td>allowed</td>")
+	see(t, admin.get("/ui/grants"), `name="wildcard"`, "<th>Wildcards</th>")
+	// Without the wildcard role the page does not mention wildcards at all,
+	// not even for other users' wildcard addresses.
+	page = bob.get("/ui/grants")
+	see(t, page, "<code>10.9.9.9/32</code>")
+	lacks(t, page, "ildcard")
 
 	// Disable / enable / delete own grant.
 	id := gs[0].ID

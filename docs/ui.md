@@ -175,8 +175,9 @@ the same prefix is skipped, not an error, and the flash names it ("Already
 yours, skipped: …"); another user's grant for the same prefix does not
 count. The note and the wildcard choice apply to every new grant, and each
 is audited as its own `grant_change`. The flash lists what was added
-("Added 3 addresses: …", the first ten named). The wildcard checkbox appears only for
-`wildcard_allowed` and `admin`; the server enforces it too. Enable, disable and
+("Added 3 addresses: …", the first ten named). The wildcard checkbox and the "Wildcards"
+column appear only for `wildcard_allowed` and `admin`; for other users the
+page does not mention wildcards at all. The server enforces the role too. Enable, disable and
 delete appear on your own grants, and on all grants for an admin; posting an
 action on someone else's grant answers 403. A non-admin's own disabled grant
 wider than /32 (from before ranges became admin-only) offers delete but not
