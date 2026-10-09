@@ -31,7 +31,7 @@ How the container is run: plain `docker run --rm --network host`, the
 repository mounted at `/src`, the process running as your uid:gid so files it
 creates belong to you. The Go build and module caches are in `.cache/`
 (gitignored), so the first run downloads modules and later runs are fast.
-`GO_IMAGE` overrides the image (default `golang:1.27`). Compose is only used
+`GO_IMAGE` overrides the image (default `mirror.gcr.io/library/golang:1.27`, the official Go image through Google's Docker Hub mirror; the Dockerfile and CI's BuildKit use the same mirror, so no build depends on a Docker Hub login). Compose is only used
 for shipping (`deploy/compose.yaml`).
 
 ## Layout
@@ -351,7 +351,7 @@ variables exported in your shell (never in a file in the repository):
 make build
 docker run --rm --network host --user "$(id -u):$(id -g)" -v "$PWD:/src" -w /src \
   -e TLS_BROKER_CONFLUENCE_URL -e TLS_BROKER_CONFLUENCE_TOKEN -e TLS_BROKER_CONFLUENCE_PAGE_ID \
-  golang:1.27 /src/bin/tls-broker docs publish --dry-run --prune --docs docs \
+  mirror.gcr.io/library/golang:1.27 /src/bin/tls-broker docs publish --dry-run --prune --docs docs \
   --broker-url https://broker.example.com --out .claude/tmp/xhtml
 ```
 

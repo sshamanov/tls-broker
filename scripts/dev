@@ -9,11 +9,13 @@
 # the Go build and module caches live in .cache/ inside the repository.
 #
 # Environment:
-#   GO_IMAGE   container image to use (default golang:1.27)
+#   GO_IMAGE   container image to use (default: the official golang:1.27
+#              image through Google's Docker Hub mirror, so builds do not
+#              depend on Docker Hub logins)
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-image="${GO_IMAGE:-golang:1.27}"
+image="${GO_IMAGE:-mirror.gcr.io/library/golang:1.27}"
 
 mkdir -p "$root/.cache/go-build" "$root/.cache/go-mod" "$root/.cache/home"
 

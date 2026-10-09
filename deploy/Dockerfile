@@ -5,7 +5,7 @@
 # The image holds two static binaries: tls-broker (the service, entrypoint)
 # and mockdoh (a development-only DoH mock, see docs/development.md), and
 # the user guide (docs/guide.md) that the web UI's Documentation reader serves.
-FROM golang:1.27 AS build
+FROM mirror.gcr.io/library/golang:1.27 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
