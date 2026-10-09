@@ -250,7 +250,7 @@ Once, add to the service's `environment` in the compose file (production:
 |---|---|
 | `TLS_BROKER_CONFLUENCE_URL` | base URL, for example `https://confluence.example.com` |
 | `TLS_BROKER_CONFLUENCE_TOKEN` | personal access token of a user who may edit the root page (and, for `--prune`, delete its child pages); sent as `Authorization: Bearer` |
-| `TLS_BROKER_CONFLUENCE_PAGE_ID` | numeric ID of the root page (production: `123456`, "TLS Broker" in space `admin`) |
+| `TLS_BROKER_CONFLUENCE_PAGE_ID` | numeric ID of the root page (for example `123456`, a "TLS Broker" page in your space) |
 
 Then, from the compose directory:
 

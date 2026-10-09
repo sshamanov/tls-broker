@@ -733,8 +733,8 @@ func TestParseIssueValue(t *testing.T) {
 	}
 }
 
-// The records the operator publishes (example.com, dev.example.com with its own
-// CAA node, example.org; example names and URLs here): open issue for both
+// A typical operator setup (example.com, dev.example.com with its own CAA
+// node, example.org): open issue for both
 // CAs, issuewild pinned to the broker and to the operator's certbot
 // accounts. All are protected without any configuration; the broker's
 // account is among the pinned ones everywhere. A node that pins only the
